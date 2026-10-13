@@ -132,7 +132,7 @@ node scripts/harness-stage.mjs <target> --stage 1 --require
 
 ## 下一步
 
-阶段 1 完成后**先跑一周 L1**，每天读 `STATE.md` 判断 triage 准不准。准确率 > 70% 再进阶段 2。
+阶段 1 完成后**先跑一周 L1**，每天读 `STATE.md` 判断 triage 准不准。准确率 > 70% 再进阶段 2（阶段 2 有三项人工判据，见 `harness-strengthen`）。
 
 ```bash
 node scripts/harness-stage.mjs <target> --upgrade --stage 2

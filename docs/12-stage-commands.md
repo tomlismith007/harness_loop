@@ -131,7 +131,7 @@ node scripts/harness-stage.mjs /path/to/repo   # 阶段 1 应为 [COMPLETE] 10/1
 
 | 技能 | 什么时候用 | 它做什么 |
 |---|---|---|
-| `harness-strengthen` | **主技能** | 走完 9 项机械判据 + 提醒你做人工确认 |
+| `harness-strengthen` | **主技能** | 走完 6 项机械判据 + 提醒你做 3 项人工确认 |
 | `loop-constraints` | 每轮开始 | 加载约束，输出 `Constraints loaded: N rules active.` |
 | `loop-verifier` | 每次修复后 | 独立验证：跑测试、回退测试、NOT RUN 声明 |
 | `minimal-fix` | 修复目标明确时 | 产出最小 diff，不得自标完成 |
@@ -153,7 +153,7 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 2
 node scripts/harness-stage.mjs /path/to/repo
 ```
 
-阶段 2 有 10 项：9 项机械 + 1 项人工。
+阶段 2 有 9 项：6 项机械 + 3 项人工（回退测试执行过、NOT RUN 用过、triage 准确率）。
 
 **第 3 步：跑一次完整的修复流程（演练）**
 
@@ -185,7 +185,11 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 # 退出码 0 = 继续；2 = 停止并升级给人
 ```
 
-**第 5 步：人工确认 triage 准确率**（判据 10，脚本不判定）
+**第 5 步：三项人工确认**（脚本不判定）
+
+1. **回退测试被实际执行过** —— 至少一次：新测试在修复前的代码上真的挂掉，且失败信息指出了错误的行为
+2. **NOT RUN 声明被实际使用过** —— 至少一份验证报告把没跑的检查列为 NOT RUN（而不是省略）
+3. **triage 准确率 > 70%** —— 见下
 
 跑满一周 L1 后：
 
@@ -200,7 +204,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 
 ```bash
 node scripts/harness-stage.mjs /path/to/repo --stage 2 --require
-# 退出码 0 = 9 项机械判据全过
+# 退出码 0 = 6 项机械判据全过
 ```
 
 ### 也可以全程用对话
@@ -398,4 +402,4 @@ node scripts/harness-stage.mjs <repo> --stage 3 --require
 
 **2. 阶段 1 只看文件存在，不看内容。** `init.sh` 留着占位符、拒绝列表留着模板——文件都在但 harness 不起作用。判据 8 专门抓这个，`--require` 会失败。
 
-**3. 跳过 triage 校准直接进阶段 3。** 阶段 2 的判据 10（准确率 > 70%）是人工确认项，脚本不判定，容易被跳过。但误报率高时，自动修复会在错误目标上烧钱，并消耗人对系统的信任——信任一旦消耗，团队会静音机器人，那是所有升级机制失效的终点。
+**3. 跳过阶段 2 的三项人工确认直接进阶段 3。** 回退测试执行、NOT RUN 使用、triage 准确率都是人工确认项，脚本不判定，容易被跳过。但误报率高时，自动修复会在错误目标上烧钱，并消耗人对系统的信任——信任一旦消耗，团队会静音机器人，那是所有升级机制失效的终点。

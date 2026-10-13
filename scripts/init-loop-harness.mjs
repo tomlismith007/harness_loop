@@ -15,10 +15,18 @@ import {
   initScriptFromCommands, PACK_ROOT, fail,
 } from './lib/common.mjs';
 
+/**
+ * 技能安装目录。
+ *
+ * 必须写进 agent 实际会扫描的路径——`.agents/skills/`（跨 agent 的共享约定）。
+ * 写进 `<repo>/skills/` 是个陷阱：文件看起来到位了，但没有任何 agent 会发现它。
+ */
+const SKILL_DEST_DIR = path.join('.agents', 'skills');
+
 function copySkill(skillName, targetRoot, level, results) {
   const src = path.join(PACK_ROOT, 'skills', skillName, 'SKILL.md');
   if (!exists(src)) return;
-  const dest = path.join(targetRoot, 'skills', skillName, 'SKILL.md');
+  const dest = path.join(targetRoot, SKILL_DEST_DIR, skillName, 'SKILL.md');
   if (exists(dest)) {
     results.push({ status: 'skipped', path: dest });
     return;

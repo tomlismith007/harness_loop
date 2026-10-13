@@ -575,14 +575,21 @@ section('15. 端到端装配');
     'AGENTS.md', 'feature_list.json', 'progress.md', 'session-handoff.md',
     'init.sh', 'loop-constraints.md', 'loop-budget.md', 'loop-run-log.md',
     'LOOP.md', 'STATE.md', 'LESSONS.md', 'loop-ledger.json',
-    'skills/harness-loop/SKILL.md', 'skills/loop-constraints/SKILL.md',
-    'skills/minimal-fix/SKILL.md', 'skills/loop-verifier/SKILL.md',
-    'skills/issue-triage/SKILL.md', 'skills/ci-triage/SKILL.md',
-    'skills/lesson-harvest/SKILL.md', 'skills/signal-gatekeeper/SKILL.md',
+    // 技能必须落在 agent 会扫描的路径下，不是裸 skills/
+    '.agents/skills/harness-loop/SKILL.md',
+    '.agents/skills/loop-constraints/SKILL.md',
+    '.agents/skills/minimal-fix/SKILL.md',
+    '.agents/skills/loop-verifier/SKILL.md',
+    '.agents/skills/issue-triage/SKILL.md',
+    '.agents/skills/ci-triage/SKILL.md',
+    '.agents/skills/lesson-harvest/SKILL.md',
+    '.agents/skills/signal-gatekeeper/SKILL.md',
   ];
   for (const f of expectCreated) {
     ok(`装配生成: ${f}`, fs.existsSync(path.join(tmp, f)));
   }
+  // 不得写进没有任何 agent 会扫描的裸 skills/
+  ok('不写裸 <repo>/skills/（无人扫描的路径）', !fs.existsSync(path.join(tmp, 'skills')));
 
   // AGENTS.md 占位符已替换
   const agents = fs.readFileSync(path.join(tmp, 'AGENTS.md'), 'utf8');
@@ -738,12 +745,14 @@ section('19. 技能安装（ZCode 发现路径）');
     .map((e) => e.name);
   ok(`报告安装数量（${packSkills.length}）`, new RegExp(`installed:\\s*${packSkills.length}`).test(r1.out), r1.out.slice(0, 200));
 
-  const dest = path.join(tmp, '.zcode', 'skills');
-  ok('默认布局为 <repo>/.zcode/skills', fs.existsSync(dest));
+  const dest = path.join(tmp, '.agents', 'skills');
+  ok('默认布局为 <repo>/.agents/skills（跨 agent 共享约定）', fs.existsSync(dest));
   ok('技能文件已写入', fs.existsSync(path.join(dest, 'harness-loop', 'SKILL.md')));
   ok('manifest 已写入', fs.existsSync(path.join(dest, '.loop-harness-install.json')));
+  ok('默认不写 .zcode（那是 ZCode 专属覆盖路径）',
+    !fs.existsSync(path.join(tmp, '.zcode')));
 
-  // 装到 ZCode 实际会扫描的路径才算有效
+  // 装到 agent 实际会扫描的路径才算有效
   const installed = fs.readdirSync(dest, { withFileTypes: true })
     .filter((e) => e.isDirectory() && fs.existsSync(path.join(dest, e.name, 'SKILL.md')))
     .map((e) => e.name);
@@ -769,7 +778,7 @@ section('19. 技能安装（ZCode 发现路径）');
 
   fs.rmSync(tmp, { recursive: true, force: true });
 
-  // ---- 布局选择：.agents 是跨 agent 的共享路径 ----
+  // ---- 布局选择：.agents 是默认的跨 agent 共享路径 ----
   // 回归保护：修好之前 `--layout` 不被识别，参数被静默忽略，
   // 技能全部落到 .zcode，退出码仍是 0（静默失败）。
   const tmpAgents = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-install-agents-'));
@@ -788,6 +797,15 @@ section('19. 技能安装（ZCode 发现路径）');
     ? JSON.parse(readText(agentsManifestPath)) : {};
   eq('manifest 记录 layout', agentsManifest.layout, 'agents');
   eq('manifest 记录 dotDir', agentsManifest.dotDir, '.agents');
+
+  // 显式 --layout zcode 仍然可用（覆盖同名技能的场景）
+  const tmpZ = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-install-z-'));
+  const z1 = run(['--target', tmpZ, '--layout', 'zcode']);
+  eq('--layout zcode 退出码 0', z1.code, 0);
+  ok('--layout zcode 写入 <repo>/.zcode/skills',
+    fs.existsSync(path.join(tmpZ, '.zcode', 'skills', 'harness-loop', 'SKILL.md')));
+  ok('--layout zcode 不写 .agents', !fs.existsSync(path.join(tmpZ, '.agents')));
+  fs.rmSync(tmpZ, { recursive: true, force: true });
 
   const a2 = run(['--target', tmpAgents, '--layout', 'agents', '--list']);
   ok('--layout agents --list 能找到已安装技能',
@@ -855,16 +873,16 @@ section('20. 三阶段驱动器');
 
   // 升级到阶段 2 应补上 verifier
   runStage(empty, ['--upgrade', '--stage', '2']);
-  ok('阶段 2 补上 loop-verifier', fs.existsSync(path.join(empty, 'skills', 'loop-verifier', 'SKILL.md')));
-  ok('阶段 2 补上 minimal-fix', fs.existsSync(path.join(empty, 'skills', 'minimal-fix', 'SKILL.md')));
-  ok('阶段 2 补上 loop-guard', fs.existsSync(path.join(empty, 'skills', 'loop-guard', 'SKILL.md')));
+  ok('阶段 2 补上 loop-verifier', fs.existsSync(path.join(empty, '.agents', 'skills', 'loop-verifier', 'SKILL.md')));
+  ok('阶段 2 补上 minimal-fix', fs.existsSync(path.join(empty, '.agents', 'skills', 'minimal-fix', 'SKILL.md')));
+  ok('阶段 2 补上 loop-guard', fs.existsSync(path.join(empty, '.agents', 'skills', 'loop-guard', 'SKILL.md')));
 
   // 升级到阶段 3 应补上事件接线
   runStage(empty, ['--upgrade', '--stage', '3']);
   const wfDir = path.join(empty, '.github', 'workflows');
   ok('阶段 3 补上事件接线目录', fs.existsSync(wfDir));
   ok('阶段 3 补上 lesson-harvest workflow', fs.existsSync(path.join(wfDir, 'lesson-harvest.yml')));
-  ok('阶段 3 补上 signal-gatekeeper', fs.existsSync(path.join(empty, 'skills', 'signal-gatekeeper', 'SKILL.md')));
+  ok('阶段 3 补上 signal-gatekeeper', fs.existsSync(path.join(empty, '.agents', 'skills', 'signal-gatekeeper', 'SKILL.md')));
 
   // 三阶段都定义且各有判据
   ok('三个阶段都有判据', j1.stages.length === 3 && j1.stages.every((s) => s.checks.length > 0));
@@ -940,6 +958,83 @@ section('20. 三阶段驱动器');
   const promotedCheck2 = rpr2.stages[2].checks.find((c) => /转正/.test(c.label));
   ok('真实转正记录被识别', promotedCheck2 && promotedCheck2.ok === true);
   fs.rmSync(pr, { recursive: true, force: true });
+
+  // ---- 核心回归：阶段 1 的产出不得满足阶段 2 ----
+  // 这是用户实际遇到的 bug：只跑 /harness-init，阶段 2 却报 COMPLETE。
+  // 根因是阶段 2 判据在 grep 声明文本，而阶段 1 的模板本身就带那些文字。
+  const gate = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-gate-'));
+  fs.writeFileSync(path.join(gate, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+  runStage(gate, ['--upgrade', '--stage', '1']);
+
+  const g1 = JSON.parse(runStage(gate, ['--json']).out);
+  eq('只做阶段1 后，阶段1 达成', g1.stages[0].complete, true);
+  ok('只做阶段1 后，阶段2 不达成', g1.stages[1].complete === false,
+    `stage2 complete=${g1.stages[1].complete} —— 阶段闸门没有拦住`);
+  eq('只做阶段1 后，current_stage 仍为 1', g1.current_stage, 1);
+  eq('阶段2 --require 退出 2', runStage(gate, ['--stage', '2', '--require']).code, 2);
+
+  // 阶段 1 的模板不能自动满足阶段 2 的**核心**判据。
+  // 少数几项确实是阶段 1 的合理前提（装技能、真实 init.sh、评分），
+  // 但「机制就位/被执行」的那些必须仍为红。
+  const s2mech = g1.stages[1].checks.filter((c) => !c.human);
+  const mustStillFail = [
+    /verifier/,          // 独立检查者：阶段 2 的核心
+    /熔断器/,            // 熔断器就位
+    /拒绝列表/,          // 拒绝列表本地化
+  ];
+  for (const re of mustStillFail) {
+    const chk = s2mech.find((c) => re.test(c.label));
+    ok(`阶段1 后「${chk ? chk.label : re}」仍为红`, chk && chk.ok === false);
+  }
+
+  // 阶段 2 的人工判据（机制被执行过）必须存在且不可机械通过
+  const humanChecks = g1.stages[1].checks.filter((c) => c.human);
+  ok('阶段2 含人工判据（回退测试/NOT RUN/triage 准确率）', humanChecks.length >= 3,
+    `当前 ${humanChecks.length} 项`);
+  ok('回退测试是人工判据（grep 无法冒充行为）',
+    humanChecks.some((c) => /回退测试/.test(c.label)));
+  ok('NOT RUN 是人工判据',
+    humanChecks.some((c) => /NOT RUN/.test(c.label)));
+
+  // 机械判据中不得有「仅 grep 声明文本」的项
+  ok('阶段2 机械判据不含纯声明项（回退测试/NOT RUN 已转为人工确认）',
+    !s2mech.some((c) => /已声明/.test(c.label)));
+
+  // 技能必须装在可发现路径，否则阶段 2 的 verifier 判据不得通过
+  const verifierCheck = s2mech.find((c) => /verifier/.test(c.label));
+  ok('阶段1 后 verifier 判据不通过（技能未装到可发现路径）',
+    verifierCheck && verifierCheck.ok === false);
+  ok('阶段1 后技能确实没落在裸 skills/',
+    !fs.existsSync(path.join(gate, 'skills')));
+
+  // 拒绝列表未本地化时不得通过
+  const dlCheck = s2mech.find((c) => /拒绝列表/.test(c.label));
+  ok('模板拒绝列表被判为未本地化', dlCheck && dlCheck.ok === false);
+
+  // 本地化拒绝列表后该项才通过
+  const cPath = path.join(gate, 'loop-constraints.md');
+  let cText = fs.readFileSync(cPath, 'utf8');
+  cText = cText.replace(
+    '```\n.env\n',
+    '```\ninternal/admin/**\ndb/prod-dumps/**\n.env\n'
+  );
+  fs.writeFileSync(cPath, cText, 'utf8');
+  const g2 = JSON.parse(runStage(gate, ['--json']).out);
+  const dlCheck2 = g2.stages[1].checks.filter((c) => !c.human).find((c) => /拒绝列表/.test(c.label));
+  ok('本地化拒绝列表后被识别', dlCheck2 && dlCheck2.ok === true);
+
+  fs.rmSync(gate, { recursive: true, force: true });
+
+  // ---- 核心回归：模板里的注释示例不得算作真实条目 ----
+  const tpl = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-tpl-'));
+  fs.writeFileSync(path.join(tpl, 'package.json'), JSON.stringify({ name: 'x' }));
+  runStage(tpl, ['--upgrade', '--stage', '3']);
+  const tplJson = JSON.parse(runStage(tpl, ['--json']).out);
+  const lessonCheck = tplJson.stages[2].checks.filter((c) => !c.human)
+    .find((c) => /LESSONS/.test(c.label));
+  ok('模板注释里的示例不算真实教训条目', lessonCheck && lessonCheck.ok === false,
+    'LESSONS.md 模板自带 <!-- 示例：Seen 1× --> 被误判为真实条目');
+  fs.rmSync(tpl, { recursive: true, force: true });
 }
 section('17. registry 与路由一致性');
 {

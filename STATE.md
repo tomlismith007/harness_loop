@@ -31,11 +31,11 @@ Last run: never
 
 ## Post-Run Critique (from last run)
 
-- **High-noise items**：本轮发现 `install-skills.mjs` 只写 `.zcode`，而 `SKILL_DIRS` 不含 `.zcode`/`.agents` —— 安装与审计对"技能装在哪"的认知不一致，导致装成功也报 `0 found`，且 L2 永远不可达。
-- **False positives**：—
-- **Should deprioritize**：—
-- **Friction in human review**：—
-- **One adjustment next cycle**：凡涉及"路径/落盘位置"的脚本，测试必须断言实际写入的目录，而不只是退出码——本次静默失败正是因为退出码一直是 0。
+- **High-noise items**：本轮确认两处路径缺陷 —— ① `install-skills.mjs` 默认写 `.zcode`（ZCode 专属），标准应是跨 agent 的 `.agents`；② `harness-stage.mjs` / `init-loop-harness.mjs` 把技能写进 `<repo>/skills/`，而没有任何 agent 扫描该路径（文件到位但从未被加载）。两者都已修。
+- **False positives**：阶段 2 判据曾用 grep 检查 `loop-constraints.md` 里有没有"回退测试""NOT RUN"字样。阶段 1 的模板出厂就带这些文字 → 阶段 2 永远自动变绿，闸门形同虚设。已改为检查"技能在可发现路径"+"拒绝列表已本地化"，无法机械判定的三项降级为人工确认。
+- **Should deprioritize**：无。
+- **Friction in human review**：本仓库是技能**源仓库**而非消费者，阶段判据（尤其"拒绝列表已本地化"）对它天然不适用——它的 `loop-constraints.md` 就是模板来源。自报阶段 1 是正确结果，不是缺陷。
+- **One adjustment next cycle**：阶段判据在源仓库上运行时，应识别"这是源仓库"并跳过消费者专属判据，而不是逐条报 FAIL。
 
 ---
 

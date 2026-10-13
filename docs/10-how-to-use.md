@@ -81,7 +81,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require
 | 阶段 | 目标 | 判据 | 等级 |
 |---|---|---|---|
 | 1 初始化 | 创建必要的 md 文件 | 10 项（全机械） | L1 |
-| 2 强化 | 让验证真的有效、约束真的被强制执行 | 9 机械 + 1 人工 | L2 |
+| 2 强化 | 让验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 |
 | 3 巩固 | 事件接上、经验积累、规则转正 | 7 机械 + 2 人工 | L3 |
 
 **对应的技能**：`harness-init`、`harness-strengthen`、`harness-consolidate`。

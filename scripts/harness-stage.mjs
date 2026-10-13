@@ -95,13 +95,23 @@ function initScriptHasPlaceholder(root) {
   return { placeholder: false, reason: null };
 }
 
-/** LESSONS.md 是否有真实条目（不是空模板） */
+/**
+ * LESSONS.md 是否有真实条目（不是空模板）。
+ *
+ * 必须排除 HTML 注释里的示例——模板自带 `<!-- 示例：... Seen 1× (2026-10-05) -->`，
+ * 直接 grep 会被自己的示例骗过。
+ */
 function lessonsHasEntries(root) {
   const p = path.join(root, 'LESSONS.md');
   if (!exists(p)) return false;
-  const text = readText(p);
+  const stripped = stripHtmlComments(readText(p));
   // 真实条目含 "Seen N× (日期)"
-  return /Seen\s+\d+\s*[×x]\s*\([^)]*\d{4}-\d{2}-\d{2}/.test(text);
+  return /Seen\s+\d+\s*[×x]\s*\([^)]*\d{4}-\d{2}-\d{2}/.test(stripped);
+}
+
+/** 去掉 HTML 注释，避免把模板里的示例当成真实内容 */
+function stripHtmlComments(text) {
+  return text.replace(/<!--[\s\S]*?-->/g, '');
 }
 
 /**
@@ -325,7 +335,7 @@ function checkStage3(root, audit) {
     '在 LOOP.md 加优先级表，在 STATE.md 的 Active 表加 acting_on 列');
 
   const promoted = (() => {
-    const text = readText(path.join(root, 'LESSONS.md'));
+    const text = stripHtmlComments(readText(path.join(root, 'LESSONS.md')));
     if (!/## Promoted to hard rules/.test(text)) return false;
     // 只看 Promoted 表的数据行，忽略表头与分隔行，也忽略占位符 —
     const section = (text.split('## Promoted to hard rules')[1] || '').split(/^##\s/m)[0];
