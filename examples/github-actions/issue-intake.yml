@@ -1,0 +1,61 @@
+name: Loop — Issue Intake
+
+# 把 issue 事件路由到 intake 阶段，产出 work item。
+# 不执行 agent 逻辑——只路由并落盘。
+
+on:
+  issues:
+    types: [opened, reopened, labeled]
+
+# 最小权限：只读仓库，写 issue（comment/label）
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: loop-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Route the event
+        id: route
+        run: |
+          EVENT="issues.${{ github.event.action }}"
+          ITEM="issue-${{ github.event.issue.number }}"
+          node scripts/event-router.mjs --event "$EVENT" --item "$ITEM" > route.json
+          cat route.json
+
+      - name: Record work item
+        run: |
+          mkdir -p .loop/queue
+          ITEM="issue-${{ github.event.issue.number }}"
+          cat > ".loop/queue/${ITEM}.json" <<EOF
+          {
+            "id": "${ITEM}",
+            "event": "issues.${{ github.event.action }}",
+            "phase": "intake",
+            "skills": ["issue-triage"],
+            "level": "L1",
+            "title": $(jq -Rs . <<'TITLE'
+          ${{ github.event.issue.title }}
+          TITLE
+          ),
+            "url": "${{ github.event.issue.html_url }}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          cat ".loop/queue/${ITEM}.json"
+
+      - name: Note L1 report-only
+        run: |
+          echo "L1: propose labels only. Do not apply labels, comment, or close."
+          echo "See skills/issue-triage/SKILL.md"

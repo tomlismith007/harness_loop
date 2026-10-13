@@ -1,0 +1,106 @@
+name: Loop — Daily Triage (fallback)
+
+# 定时兜底：事件丢失时的每日概览。
+# 工作日 08:00 运行。高节奏循环的经济性依赖提前退出——本 workflow 每天只跑一次。
+
+on:
+  schedule:
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: loop-daily-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Kill switch check
+        id: pause
+        run: |
+          if grep -q 'loop-pause-all' STATE.md 2>/dev/null; then
+            echo "paused=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::loop-pause-all is active — exiting without doing anything"
+          else
+            echo "paused=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Budget check
+        if: steps.pause.outputs.paused == 'false'
+        id: budget
+        run: |
+          PCT=$(node -e '
+            const fs = require("fs");
+            let pct = 0;
+            try {
+              const log = fs.readFileSync("loop-run-log.md", "utf8");
+              const today = new Date().toISOString().slice(0, 10);
+              const entries = [...log.matchAll(/\{.*\}/g)]
+                .map((m) => { try { return JSON.parse(m[0]); } catch { return null; } })
+                .filter(Boolean)
+                .filter((e) => String(e.run_id || "").startsWith(today));
+              const used = entries.reduce((s, e) => s + (Number(e.tokens_estimate) || 0), 0);
+              const budgetText = fs.readFileSync("loop-budget.md", "utf8");
+              const caps = [...budgetText.matchAll(/\|\s*(\d+)k\s*\|/g)].map((m) => Number(m[1]) * 1000);
+              const cap = caps.length ? Math.max(...caps) : 500000;
+              pct = Math.min(999, Math.round((used / cap) * 100));
+            } catch {}
+            process.stdout.write(String(pct));
+          ')
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          if [ "$PCT" -ge 100 ]; then
+            echo "::error::Budget at ${PCT}% — exiting"
+          fi
+          if [ "$PCT" -ge 80 ]; then
+            echo "::warning::Budget at ${PCT}% — report-only mode"
+          fi
+
+      - name: Gather signals
+        if: steps.pause.outputs.paused == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p .loop/daily
+          gh issue list --state open --limit 50 --json number,title,labels,createdAt > .loop/daily/issues.json || echo '[]' > .loop/daily/issues.json
+          gh pr list --state open --limit 50 --json number,title,isDraft,reviewDecision,createdAt > .loop/daily/prs.json || echo '[]' > .loop/daily/prs.json
+          echo "Open issues: $(jq 'length' .loop/daily/issues.json)"
+          echo "Open PRs:    $(jq 'length' .loop/daily/prs.json)"
+
+      - name: Emit triage skeleton
+        if: steps.pause.outputs.paused == 'false'
+        run: |
+          cat > .loop/daily/TRIAGE.md <<EOF
+          Last run: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          Mode: $([ "${{ steps.budget.outputs.pct }}" -ge 80 ] && echo "report-only" || echo "normal")
+
+          ## High-Priority Items (act on these)
+          -
+
+          ## Watch Items (monitor, do not act yet)
+          -
+
+          ## Noise / Ignore
+          -
+
+          ## State Updates
+          -
+          EOF
+          cat .loop/daily/TRIAGE.md
+
+      - name: Append run log
+        if: steps.pause.outputs.paused == 'false'
+        run: |
+          cat >> loop-run-log.md <<EOF
+          {"run_id":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","pattern":"daily-triage","event":"schedule","item":"daily","level":"L1","duration_s":0,"items_found":0,"actions_taken":0,"escalations":0,"tokens_estimate":5000,"outcome":"report-only"}
+          EOF

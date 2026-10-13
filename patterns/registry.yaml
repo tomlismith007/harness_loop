@@ -1,0 +1,264 @@
+# Machine-readable pattern registry for loop-harness.
+# Consumed by scripts/loop-audit.mjs, docs, and tooling.
+#
+# 每个 pattern 对应一条事件脊上的循环。新增循环时必须在此登记，
+# 并在 LOOP.md 的路由表中声明对应事件。
+
+version: 1
+
+patterns:
+  - id: issue-intake
+    name: Issue Intake
+    goal: Discover, deduplicate, prioritize and label incoming issues so the queue stays actionable
+    events: [issues.opened, issues.reopened, issues.labeled]
+    cadence: 2h-1d
+    risk: low
+    level_default: L1
+    phases: [intake]
+    skills: [issue-triage]
+    state: STATE.md
+    human_gates: [security, auth, payments, public-api, p0-p1, ambiguous-duplicates, stale-closures]
+    week_one_mode: L1
+    token_cost: low
+    early_exit_required: false
+    cost:
+      tokens_noop: 3000
+      tokens_report: 30000
+      tokens_action: 60000
+      suggested_daily_cap: 80000
+
+  - id: pr-review-triage
+    name: PR Review Triage
+    goal: Shepherd open PRs by summarizing CI, reviews and blockers, and proposing the next action
+    events: [pull_request.opened, pull_request.synchronize, pull_request_review.changes_requested]
+    cadence: 10m-15m
+    risk: medium
+    level_default: L1
+    phases: [review, fix, verify]
+    skills: [pr-review-triage, minimal-fix, loop-verifier]
+    state: STATE.md
+    human_gates: [security, payments, auth, max-fix-attempts, high-risk-labels]
+    week_one_mode: L1
+    token_cost: high
+    early_exit_required: true
+    cost:
+      tokens_noop: 3000
+      tokens_report: 80000
+      tokens_action: 250000
+      suggested_daily_cap: 300000
+
+  - id: ci-sweeper
+    name: CI Sweeper
+    goal: React to failing CI with classified, minimal fixes and escalation when uncertain
+    events: [check_suite.completed:failure, workflow_run.completed:failure]
+    cadence: 15m-1h
+    risk: medium
+    level_default: L2
+    phases: [detect, classify, fix, verify, escalate]
+    skills: [ci-triage, minimal-fix, loop-verifier, loop-guard]
+    state: STATE.md
+    human_gates: [infra-failures, env-failures, max-attempts, security-tests]
+    week_one_mode: L2
+    token_cost: very-high
+    early_exit_required: true
+    cost:
+      tokens_noop: 5000
+      tokens_report: 50000
+      tokens_action: 200000
+      suggested_daily_cap: 500000
+
+  - id: merge-gate
+    name: Merge Gate
+    goal: Evaluate merge readiness against all gates and report it; never merge
+    events: [pull_request.ready_for_review, pull_request_review.approved]
+    cadence: event-driven
+    risk: low
+    level_default: L2
+    phases: [gate]
+    skills: [gate-check]
+    state: STATE.md
+    human_gates: [merge-always-human, denylist, scope, large-diffs]
+    week_one_mode: L2
+    token_cost: low
+    early_exit_required: false
+    cost:
+      tokens_noop: 2000
+      tokens_report: 20000
+      tokens_action: 40000
+      suggested_daily_cap: 100000
+
+  - id: post-merge-cleanup
+    name: Post-Merge Cleanup
+    goal: Scan merged work for follow-up debt, documentation gaps and dead code; propose small fixes
+    events: [pull_request.closed:merged, issues.closed]
+    cadence: 1d
+    risk: low
+    level_default: L1
+    phases: [post-merge]
+    skills: [post-merge-cleanup, minimal-fix, loop-verifier]
+    state: STATE.md
+    human_gates: [architectural-debt, feature-flags, large-diffs, external-api-impact]
+    week_one_mode: L1
+    token_cost: low
+    early_exit_required: false
+    cost:
+      tokens_noop: 5000
+      tokens_report: 40000
+      tokens_action: 150000
+      suggested_daily_cap: 200000
+
+  - id: release-drafter
+    name: Release Drafter
+    goal: Draft categorized release notes from merged PRs and commits for human review
+    events: [push:tags, release.published]
+    cadence: 1d
+    risk: low
+    level_default: L1
+    phases: [release]
+    skills: [release-drafter, loop-verifier]
+    state: STATE.md
+    human_gates: [breaking-changes, security, major-features, marketing-sensitive, publish-always-human]
+    week_one_mode: L1
+    token_cost: low
+    early_exit_required: false
+    cost:
+      tokens_noop: 5000
+      tokens_report: 35000
+      tokens_action: 80000
+      suggested_daily_cap: 100000
+
+  # ---- 非事件驱动循环 ----
+
+  - id: lesson-harvest
+    name: Lesson Harvest
+    goal: >-
+      Nightly review of the day's commits. Harvest lessons into LESSONS.md (what was
+      reworked, what should never have merged, what verification was too thin). Promote
+      lessons seen on 3 different days into hard rules.
+    events: []                      # 定时驱动，不在事件脊上——它需要完整的一天
+    cadence: 1d
+    schedule: "0 3 * * *"
+    risk: low
+    level_default: L1
+    phases: [review-day, harvest, promote, log]
+    skills: [lesson-harvest]
+    state: LESSONS.md
+    artifacts: [LESSONS.md, loop-constraints.md, loop-run-log.md]
+    human_gates: [promotion-to-hard-rules]   # 转正需要人工确认
+    week_one_mode: L1
+    token_cost: medium
+    early_exit_required: false
+    cost:
+      tokens_noop: 5000
+      tokens_report: 40000
+      tokens_action: 60000
+      suggested_daily_cap: 60000
+
+  - id: signal-gatekeeper
+    name: Signal Gatekeeper
+    goal: >-
+      Cheap pre-filter in front of high-noise sources. Drops irrelevant signals without
+      forwarding them, so the expensive loop only sees what is relevant and valuable.
+    events: []
+    cadence: continuous
+    risk: low
+    level_default: L1
+    phases: [judge]
+    skills: [signal-gatekeeper]
+    state: null
+    human_gates: []
+    week_one_mode: L1
+    token_cost: very-low
+    early_exit_required: true
+    notes: Must run on a cheap model. Forwarding raw content defeats the purpose.
+    cost:
+      tokens_noop: 500
+      tokens_report: 1000
+      tokens_action: 2000
+      suggested_daily_cap: 30000
+
+# ---- 三阶段建设模型 ----
+#
+# 阶段不是"做得更好"，而是"这几项检查全过才算完成"。
+# 由 scripts/harness-stage.mjs 机械判定。
+
+stages:
+  - id: 1
+    name: 初始化
+    en: Init
+    goal: 创建必要的 md 文件，让 harness 结构完整、下一会话可重启
+    level: L1
+    skill: harness-init
+    mechanical_checks: 10
+    human_checks: 0
+    exit: 10 项判据全过，且 init.sh 是真实命令（非占位符）
+    grounding:
+      - LHE 五子系统最小工件
+      - LHE 给地图不给手册（AGENTS.md 约 100 行）
+      - LEC 脚手架产物（STATE/LOOP/budget/run-log）
+      - LEC 第一周只报告
+
+  - id: 2
+    name: 强化
+    en: Strengthen
+    goal: 梳理并强化 harness 文件与机制，让验证真的有效、约束真的被强制执行
+    level: L2
+    skill: harness-strengthen
+    mechanical_checks: 9
+    human_checks: 1
+    exit: 9 项机械判据全过 + triage 准确率 > 70%（人工）
+    grounding:
+      - LHE 受控消融测试
+      - LHE 三层终止校验（语法→运行时→系统级）
+      - LHE 架构规则可执行化 + what/why/fix 错误信息
+      - LEC maker/checker 分离 + denylist + 熔断 3/5/10
+      - magpie 回退测试 / NOT RUN / 真机验证
+
+  - id: 3
+    name: 巩固
+    en: Consolidate
+    goal: loop + harness 强化-巩固：事件接上、循环跑起来、经验自己积累并转正为规则
+    level: L3
+    skill: harness-consolidate
+    mechanical_checks: 7
+    human_checks: 2
+    exit: 7 项机械判据全过 + 跑过完整周期 + 指标健康（人工）
+    grounding:
+      - LHE 六原语 + 图工程多循环协调
+      - LEC 事件驱动 + 多循环优先级 + 成本可观测
+      - magpie 夜审 + LESSONS.md 棘轮 + 成本分层门卫
+
+# ---- 全局约束 ----
+
+defaults:
+  max_attempts: 3
+  max_files_per_fix: 5
+  max_files_per_cleanup: 10
+  budget_report_only_pct: 80
+  budget_exit_pct: 100
+  breaker:
+    stagnation: 3
+    no_progress: 5
+    max_iterations: 10
+  auto_merge: false
+  # 合并必须绑定审查过的 commit，防止审查后被 push 绕过
+  merge_binding: match-head-commit
+  # 新增测试必须能在修复前代码上失败（回退测试）
+  red_check_required: true
+  # 未跑的检查必须显式列为 NOT RUN，不允许省略
+  not_run_must_be_listed: true
+  # 教训在 3 个不同日期出现后转正为硬规则
+  lesson_promotion_threshold: 3
+  # 阶段 2 进入阶段 3 前的人工闸门
+  stage2_requires_triage_accuracy: 70
+  # 阶段完成后每季度做一次消融测试，确认组件仍有价值
+  ablation_interval: quarterly
+
+# ---- 冲突优先级（数值越小越优先） ----
+
+priority:
+  - { rank: 1, id: ci-sweeper, reason: "main red blocks all other work" }
+  - { rank: 2, id: merge-gate, reason: "merge gates are time-sensitive" }
+  - { rank: 3, id: pr-review-triage, reason: "active PRs need timely feedback" }
+  - { rank: 4, id: post-merge-cleanup, reason: "off-peak, lowest urgency" }
+  - { rank: 5, id: release-drafter, reason: "read-mostly, safe to run concurrently" }

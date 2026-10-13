@@ -1,0 +1,8 @@
+# mimosa hook runtime state (session-keyed, machine-local)
+.mimosa/
+
+# secrets / env
+.env
+.env.*
+*.pem
+*.key

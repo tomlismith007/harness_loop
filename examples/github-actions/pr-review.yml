@@ -1,0 +1,92 @@
+name: Loop — PR Review Triage
+
+# PR 事件 → review 阶段（triage）或 fix 阶段（要求修改）。
+# 不自动合并。fix 阶段只提出修复，由独立 verifier 验证。
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, closed]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+concurrency:
+  # 同一分支每小时最多一个循环修改
+  group: loop-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    # 跳过机器人自己的 PR，避免循环触发自己
+    if: github.actor != 'loop-bot'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Determine event
+        id: ev
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          if [ "${{ github.event_name }}" = "pull_request_review" ]; then
+            STATE="${{ github.event.review.state }}"
+            if [ "$STATE" = "changes_requested" ]; then
+              EVENT="pull_request_review.changes_requested"
+            elif [ "$STATE" = "approved" ]; then
+              EVENT="pull_request_review.approved"
+            else
+              EVENT="pull_request.opened"
+            fi
+          elif [ "${{ github.event.action }}" = "closed" ]; then
+            if [ "${{ github.event.pull_request.merged }}" = "true" ]; then
+              EVENT="pull_request.closed:merged"
+            else
+              EVENT="pull_request.closed:unmerged"
+            fi
+          elif [ "${{ github.event.action }}" = "ready_for_review" ]; then
+            EVENT="pull_request.ready_for_review"
+          elif [ "${{ github.event.action }}" = "synchronize" ]; then
+            EVENT="pull_request.synchronize"
+          else
+            EVENT="pull_request.opened"
+          fi
+          echo "event=$EVENT" >> "$GITHUB_OUTPUT"
+          echo "item=pr-$PR" >> "$GITHUB_OUTPUT"
+
+      - name: Route
+        run: |
+          node scripts/event-router.mjs \
+            --event "${{ steps.ev.outputs.event }}" \
+            --item "${{ steps.ev.outputs.item }}" \
+            --state STATE.md > route.json
+          cat route.json
+
+      - name: Record work item
+        run: |
+          mkdir -p .loop/queue
+          ITEM="${{ steps.ev.outputs.item }}"
+          PHASE=$(jq -r '.phase' route.json)
+          cat > ".loop/queue/${ITEM}.json" <<EOF
+          {
+            "id": "${ITEM}",
+            "event": "${{ steps.ev.outputs.event }}",
+            "phase": "${PHASE}",
+            "url": "${{ github.event.pull_request.html_url }}",
+            "branch": "${{ github.event.pull_request.head.ref }}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+      - name: Flag fix phase
+        if: steps.ev.outputs.event == 'pull_request_review.changes_requested'
+        run: |
+          echo "FIX PHASE — implementer and verifier must be separate agent instances."
+          echo "Isolation: git worktree add loop/${{ steps.ev.outputs.item }}-attempt1"
+          echo "Attempt limit: 3. Append each attempt to loop-ledger.json."
+          echo "Denylist paths escalate without editing. See loop-constraints.md"

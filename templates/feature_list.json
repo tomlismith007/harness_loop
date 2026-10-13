@@ -1,0 +1,62 @@
+{
+  "project": "{{PROJECT_NAME}}",
+  "last_updated": "{{DATE}}",
+  "rules": {
+    "single_active_feature": true,
+    "passing_requires_evidence": true,
+    "do_not_skip_verification": true
+  },
+  "status_legend": {
+    "not_started": "工作未开始",
+    "in_progress": "当前唯一活动任务",
+    "blocked": "有记录的阻塞未解决",
+    "passing": "要求的验证已通过且证据已记录"
+  },
+  "features": [
+    {
+      "id": "setup-001",
+      "priority": 1,
+      "area": "setup",
+      "title": "项目初始化",
+      "user_visible_behavior": "开发者克隆仓库后能运行 ./init.sh 并看到验证通过",
+      "status": "not_started",
+      "verification": [
+        "克隆仓库到干净目录",
+        "运行 ./init.sh",
+        "确认安装、类型检查、测试、构建全部通过"
+      ],
+      "evidence": [],
+      "notes": "替换为你的真实 feature。此条目是占位符。"
+    },
+    {
+      "id": "core-001",
+      "priority": 2,
+      "area": "core",
+      "title": "第一个用户可见功能",
+      "user_visible_behavior": "描述用户能观察到什么行为",
+      "status": "not_started",
+      "verification": [
+        "启动应用",
+        "执行操作 X",
+        "确认结果 Y 出现"
+      ],
+      "evidence": [],
+      "notes": "dependencies: setup-001"
+    },
+    {
+      "id": "verify-001",
+      "priority": 3,
+      "area": "verify",
+      "title": "验证覆盖",
+      "user_visible_behavior": "核心路径有端到端测试，且测试能捕获回归",
+      "status": "not_started",
+      "verification": [
+        "运行完整测试套件",
+        "确认核心路径被覆盖",
+        "故意引入一个回归，确认测试失败"
+      ],
+      "evidence": [],
+      "notes": "dependencies: core-001"
+    }
+  ]
+}

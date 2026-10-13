@@ -1,0 +1,247 @@
+# 03 · 闸门与等级：什么条件下允许做什么
+
+本文档定义 L0–L3 就绪度等级、五类闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 与 `scripts/loop-audit.mjs` 的规格说明。
+
+---
+
+## 就绪度等级
+
+等级决定**循环被允许做什么**，不是"配置复杂度"。
+
+| 等级 | 名称 | 允许 | 覆盖的检查清单章节 |
+|---|---|---|---|
+| **L0** | 草案 | 仅记录意图，不运行 | 目标与范围 |
+| **L1** | 报告 | 分析、报告、更新状态。**不改代码，不合并** | 目标与范围 + 调度 + 技能 + 状态 |
+| **L2** | 辅助 | 在 worktree 中提出修复，由 verifier 验证。**合并仍需人工** | L1 + 执行者/检查者 + 人工交接 + 连接器 |
+| **L3** | 无人值守 | 在明确边界内无人工监看运行 | 全部章节 |
+
+### 为什么必须从 L1 开始
+
+L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是误报，L2 的自动修复会在错误的目标上浪费 token，而且会消耗人对系统的信任。第一周只看报告，人工判断哪些是真的、哪些是噪声，然后调整技能规则。
+
+**在生产仓库中绝不跳过 L1。**
+
+---
+
+## 五类闸门
+
+闸门是"允许继续"的条件。任一不通过，work item 进入 `escalated`。
+
+### 1. 拒绝列表闸门（Denylist Gate）
+
+**判定**：diff 中是否有文件命中 `loop-constraints.md` 的拒绝列表。
+
+```
+.env, .env.*, **/secrets/**, **/credentials/**, **/*_key*, **/*_secret*,
+.terraform/**, k8s/production/**, **/migrations/**, auth/**, payments/**, billing/**
+```
+
+**动作**：命中即 `escalated`，**且不执行任何编辑**。不做"顺便的小改动"。
+
+**为什么**：这些路径的改动代价不对称。改错一个测试文件，回滚即可；改错一个支付逻辑或生产配置，代价可能是资金或数据。循环不值得在这类路径上冒险。
+
+### 2. 范围闸门（Scope Gate）
+
+**判定**：改动的文件数量与相关性。
+
+| 条件 | 动作 |
+|---|---|
+| 单个修复改动 > 5 个文件 | `escalated`（可能需要设计变更） |
+| 改动包含与 work item 无关的文件 | `escalated`（范围蔓延） |
+| 清理类 PR 改动 > 10 个文件 | 人工审批（不自动合并） |
+
+**为什么**：范围蔓延是 agent 的典型失败模式。表现为改了 12 个文件、800 行代码，却没有一条端到端可用的路径。小 diff 是可靠性的前提。
+
+### 3. 尝试上限闸门（Max Attempts Gate）
+
+**判定**：`attempts >= 3`。
+
+**动作**：强制 `escalated`，**覆盖其他所有规则**。
+
+**为什么**：三次尝试不成功说明问题不在实现细节，而在理解层面——可能是根因判断错了、需求不清楚、或者是环境问题。继续重试只会烧 token 并污染状态。
+
+熔断器的三个阈值（见 `docs/06-cost-and-observability.md`）：
+
+| 类型 | 默认阈值 |
+|---|---|
+| 同一错误重复 | 3 次 |
+| 连续失败 | 5 次 |
+| 总迭代 | 10 次 |
+
+### 4. 验证闸门（Verification Gate）
+
+**判定**：`loop-verifier` 是否实际运行了测试并给出 `APPROVE`。
+
+| 条件 | 动作 |
+|---|---|
+| verifier 未实际运行测试 | 不通过（不得只凭 diff 判断） |
+| verifier 无法运行测试（环境问题） | `ESCALATE_HUMAN`，不放行 |
+| verifier 与执行者是同一会话 | 不通过（结构性无效） |
+| 发现测试被禁用/跳过/注释 | `REJECT` + 记录为作弊 |
+
+**为什么**：写代码的模型给自己打分系统性偏高。这不是诚实问题，是生成模型的性质——它在生成过程中说服了自己。
+
+### 5. 预算闸门（Budget Gate）
+
+**判定**：今日 token 花费占日上限的比例。
+
+| 花费 | 动作 |
+|---|---|
+| < 80% | 正常运行 |
+| ≥ 80% | `report-only`：不派发执行子智能体 |
+| ≥ 100% | 立即退出 |
+| `loop-pause-all` | 立即退出 |
+
+### 6. 合并闸门（Merge Gate）—— 默认关闭
+
+**默认：不自动合并。** 只有以下情况例外：
+
+| 允许自动合并 | 不允许 |
+|---|---|
+| 修正注释/文档中的拼写错误 | 行为变更 |
+| 仅自动修复测试文件中的 lint 问题 | 依赖版本升级 |
+| 调整导入顺序 | 锁文件变更 |
+| 允许列表内 `docs/` 路径的配置 | 任何拒绝列表路径 |
+
+允许列表必须写入 `loop-auto-merge-allowlist.md`，且**必须逐条列出路径**，不接受模式化的宽松规则。
+
+---
+
+## 判定优先级
+
+闸门按以下顺序检查，**先命中者决定结果**：
+
+```
+1. loop-pause-all 生效？          → exit（不检查其他）
+2. 预算 >= 100%？                 → exit
+3. 触及拒绝列表？                  → escalated（不执行编辑）
+4. attempts >= 3？                → escalated
+5. 预算 >= 80%？                  → report-only
+6. 改动 > 5 文件或范围蔓延？        → escalated
+7. verifier 未 APPROVE？          → 回 fix 或 escalated
+8. 合并闸门（默认关闭）            → 人工
+```
+
+顺序有讲究：**退出类判定在最前**（避免在应该停的时候还在分析），**拒绝列表在尝试上限之前**（安全优先于效率）。
+
+---
+
+## `scripts/gate-check.mjs` 用法
+
+```bash
+node scripts/gate-check.mjs \
+  --item pr-123 \
+  --phase gate \
+  --attempts 1 \
+  --diff-files changed.txt \
+  --verdict approve \
+  --budget-pct 45 \
+  --pause false
+```
+
+输出：
+
+```json
+{
+  "item": "pr-123",
+  "decision": "escalate",
+  "gate": "denylist",
+  "reason": "changed file 'auth/session.ts' matches denylist pattern 'auth/**'",
+  "allowed_actions": [],
+  "next": "write escalation entry to STATE.md, notify human, do not edit"
+}
+```
+
+`decision` 枚举：`proceed` | `report-only` | `escalate` | `exit`
+
+**退出码**：`0` = `proceed` 或 `report-only`；`2` = `escalate`；`3` = `exit`。
+
+---
+
+## `scripts/loop-audit.mjs` 评分维度
+
+审计工具检查仓库的就绪度。**满分 100，等级阈值 L1: 38 / L2: 58 / L3: 78。**
+
+### 评分维度
+
+| 维度 | 分值 | 检查方式 |
+|---|---|---|
+| 基线 | 10 | 起始分 |
+| 状态文件 | 18 | `STATE.md` 或模式专属状态文件存在 |
+| triage 技能 | 14 | 至少一个 triage 类技能存在 |
+| verifier 技能 | 14 | `loop-verifier` 存在（maker/checker 分离） |
+| 循环配置 | 9 | `LOOP.md` 存在 |
+| 指令文件 | 9 | `AGENTS.md` 或 `CLAUDE.md` 存在 |
+| 多技能 | 14 | ≥2 个循环技能 |
+| 单技能 | 7 | 恰好 1 个 |
+| 约束文件 | 4 | `loop-constraints.md` 存在 |
+| 约束技能 | 2 | `loop-constraints` 技能存在 |
+| 安全文档 | 8 | `LOOP.md` 含闸门/拒绝列表关键词 + `docs/04-safety.md` 存在 |
+| 预算文档 | 3 | `loop-budget.md` |
+| 预算技能 | 2 | `loop-budget` 技能 |
+| 运行日志 | 3 | `loop-run-log.md` |
+| 熔断检测 | 3 | 账本文件或熔断关键词 |
+| 升级机制 | 3 | 升级/人工介入关键词 |
+| 工具范围 | 3 | 最小权限声明 |
+| GitHub 集成 | 10 | `.github/` 与 workflows |
+| MCP | 3 | 连接器配置 |
+| Worktree | 3 | worktree 隔离证据 |
+| 循环活动 | 6 | 动态证据（见下） |
+
+### 等级判定（顺序短路）
+
+```
+L3: score >= 78 且 verifier 存在 且 状态文件存在 且 l3Ready
+L2: score >= 58 且 triage 技能存在 且 verifier 存在
+L1: score >= 38 且 状态文件存在
+否则 L0
+```
+
+**L2 也要求 verifier 存在。** 这一条不是可选优化：L2 的定义是"由独立 verifier 验证的辅助修复"。没有 verifier 却授予 L2，等于批准自我验证——与"写代码的人不能验证自己的代码"直接冲突。缺 verifier 时封顶在 L1，并在报告中说明原因。
+
+其中：
+- `costReady` = 预算文档 且 运行日志 且 `LOOP.md` 含预算章节
+- `hasRealActivity` = 循环活动动态证据存在
+- `l3Ready` = `costReady` 且 `hasRealActivity`
+
+**L3 封顶告警**：分数 ≥78 且 verifier + 状态齐备，但缺成本可观测性 → 封顶 L2。分数 ≥78 且前三项齐备但无实证运行记录 → 封顶 L2。**结构性齐备不等于跑过。**
+
+### 循环活动动态证据（只认真实运行痕迹）
+
+审计刻意**不**把"文件存在"当作活动证据——那是结构性就绪，已由其他检查项计分。这里的目的是回答"它真的跑过吗"。以下四条任一成立才算：
+
+1. 状态文件里有**真实的 `Last run` 时间戳**（`never`、`—`、`TBD` 等占位符不算）
+2. `loop-run-log.md` 的 `## Log` 章节里有**真实的运行记录**（含 `run_id` 的 JSON；格式说明里的示例 JSON 不算）
+3. 状态文件的 Active 表里有**真实 work item 行**（占位行 `—` 不算）
+4. git 历史里有引用循环产物的提交
+
+**为什么这么严**：一个刚装配完、从未运行过的仓库，结构性分数可以很高。如果审计因此授予 L3，就等于鼓励"配置齐全但从未验证"的无人值守运行——这正是 `docs/05` 里最危险的失效模式之一。
+
+### CLI
+
+```bash
+node scripts/loop-audit.mjs .                    # 文本报告
+node scripts/loop-audit.mjs . --json             # JSON
+node scripts/loop-audit.mjs . --suggest          # 附改进建议与复制命令
+```
+
+**退出码**：`0` = 分数 ≥ 40；`2` = 分数 < 40（可用于 CI 关卡）。
+
+---
+
+## 危险信号（出现即停止修复后再继续）
+
+- 同一 PR 已自动尝试修复超过 3 次却没有进展
+- verifier 与执行者使用同一个智能体会话
+- 没有状态文件——循环每轮都失去记忆
+- 无论是否有新发现，每轮都发送通知
+- 未设置路径允许列表，却启用了自动合并
+- 升级只写进状态文件，但没人会读那个文件
+
+---
+
+## 下一步
+
+- 安全护栏的完整规则 → [04-safety.md](04-safety.md)
+- 循环出错时的诊断 → [05-failure-modes.md](05-failure-modes.md)
+- 从哪一级开始 → [07-adoption-ladder.md](07-adoption-ladder.md)

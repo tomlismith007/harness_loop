@@ -1,0 +1,108 @@
+name: Loop — Merge Gate
+
+# PR 转正 → gate 阶段。检查闸门并报告就绪度。
+# 绝不合并。合并始终由人工执行。
+
+on:
+  pull_request:
+    types: [ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: loop-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Collect changed files
+        id: files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} --name-only > changed.txt
+          echo "count=$(wc -l < changed.txt)" >> "$GITHUB_OUTPUT"
+          cat changed.txt
+
+      - name: Check budget
+        id: budget
+        run: |
+          # 从运行日志估算今日花费占上限的比例
+          PCT=$(node -e '
+            const fs = require("fs");
+            let pct = 0;
+            try {
+              const log = fs.readFileSync("loop-run-log.md", "utf8");
+              const today = new Date().toISOString().slice(0, 10);
+              const entries = [...log.matchAll(/\{.*\}/g)]
+                .map((m) => { try { return JSON.parse(m[0]); } catch { return null; } })
+                .filter(Boolean)
+                .filter((e) => String(e.run_id || "").startsWith(today));
+              const used = entries.reduce((s, e) => s + (Number(e.tokens_estimate) || 0), 0);
+              const budgetText = fs.readFileSync("loop-budget.md", "utf8");
+              const caps = [...budgetText.matchAll(/\|\s*(\d+)k\s*\|/g)].map((m) => Number(m[1]) * 1000);
+              const cap = caps.length ? Math.max(...caps) : 500000;
+              pct = Math.min(999, Math.round((used / cap) * 100));
+            } catch {}
+            process.stdout.write(String(pct));
+          ')
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          echo "Today's spend: ${PCT}% of daily cap"
+
+      - name: Run gate check
+        id: gate
+        run: |
+          node scripts/gate-check.mjs \
+            --item pr-${{ github.event.pull_request.number }} \
+            --phase gate \
+            --diff-files @changed.txt \
+            --verdict none \
+            --budget-pct "${{ steps.budget.outputs.pct }}" > gate.json || true
+          cat gate.json
+
+      - name: Report readiness
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DECISION=$(jq -r '.decision' gate.json)
+          REASON=$(jq -r '.reason' gate.json)
+          GATE=$(jq -r '.gate // "none"' gate.json)
+          FILES="${{ steps.files.outputs.count }}"
+
+          BODY=$(cat <<EOF
+          ## 🤖 Loop Harness — Merge Gate
+
+          | Check | Result |
+          |---|---|
+          | Decision | \`${DECISION}\` |
+          | Gate | \`${GATE}\` |
+          | Files changed | ${FILES} |
+          | Budget today | ${{ steps.budget.outputs.pct }}% |
+
+          **Reason:** ${REASON}
+
+          > Merge is a human decision. This bot does not merge.
+          EOF
+          )
+          gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+
+      - name: Fail if escalated
+        run: |
+          DECISION=$(jq -r '.decision' gate.json)
+          if [ "$DECISION" = "escalate" ]; then
+            echo "::warning::Gate escalated — human decision required"
+          fi
+          if [ "$DECISION" = "exit" ]; then
+            echo "::error::Loop exited — kill switch or budget cap"
+            exit 1
+          fi

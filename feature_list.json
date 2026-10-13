@@ -1,0 +1,151 @@
+{
+  "project": "harness_loop",
+  "last_updated": "2026-10-13",
+  "rules": {
+    "single_active_feature": true,
+    "passing_requires_evidence": true,
+    "do_not_skip_verification": true
+  },
+  "status_legend": {
+    "not_started": "工作未开始",
+    "in_progress": "当前唯一活动任务",
+    "blocked": "有记录的阻塞未解决",
+    "passing": "要求的验证已通过且证据已记录"
+  },
+  "note": "本仓库的「功能」是框架能力项。验证方式为脚本断言，不是用户可见行为。真实使用验证（阶段 2 判据 10、阶段 3 完整周期）必须在接入本框架的软件项目上做。",
+  "features": [
+    {
+      "id": "setup-001",
+      "priority": 1,
+      "area": "setup",
+      "title": "标准启动与验证路径可用",
+      "user_visible_behavior": "开发者克隆仓库后运行 ./init.sh，看到测试套件、自审计、CLI 入口检查全部通过",
+      "status": "passing",
+      "verification": [
+        "克隆仓库到干净目录",
+        "运行 bash init.sh",
+        "确认测试套件输出 Passed 且 Failed: 0",
+        "确认自审计输出分数与等级",
+        "确认五个 CLI 入口都报告 OK"
+      ],
+      "evidence": [
+        "bash init.sh → Test suite: Passed 454 / Failed: 0；Self audit: 94/100 L2；CLI entry points: 5 个全 OK"
+      ],
+      "notes": "init.sh 是真实命令，非占位符——这是阶段 1 判据 8 的要求"
+    },
+    {
+      "id": "stage-001",
+      "priority": 2,
+      "area": "stage",
+      "title": "三阶段检测与升级可用",
+      "user_visible_behavior": "对一个目标仓库运行 harness-stage.mjs，能看到当前阶段、每个阶段的判据通过情况、以及缺失项的具体补齐动作",
+      "status": "passing",
+      "verification": [
+        "对空目录运行 node scripts/harness-stage.mjs <dir>，确认报告阶段 0",
+        "运行 --upgrade --stage 1，确认生成 10 个必需文件",
+        "再运行检测，确认阶段 1 达成 10/10",
+        "运行 --stage 1 --require，确认退出码 0",
+        "对阶段 2 运行 --require，确认退出码 2"
+      ],
+      "evidence": [
+        "node scripts/test.mjs 第 20 节：空目录阶段 0、装配后阶段 1、--require 退出码 0/2 全部通过",
+        "占位符 init.sh 使阶段 1 不达成的假阳性防护已测试"
+      ],
+      "notes": "判据 10（triage 准确率）与阶段 3 的完整周期需人工确认，脚本不判定"
+    },
+    {
+      "id": "loop-001",
+      "priority": 3,
+      "area": "loop",
+      "title": "事件脊路由与闸门判定可用",
+      "user_visible_behavior": "给定一个仓库事件名，路由输出阶段、技能、闸门与下一步；给定一组改动文件与验证结论，闸门输出 proceed / escalate / exit",
+      "status": "passing",
+      "verification": [
+        "运行 event-router.mjs --list，确认 16 个事件已注册",
+        "对 pull_request_review.changes_requested 路由，确认阶段为 fix 且含 loop-verifier",
+        "对未注册事件路由，确认 registered=false 且不自创流程",
+        "运行 gate-check.mjs 传入拒绝列表路径，确认 decision=escalate",
+        "传入 reviewed-sha 与 head-sha 不一致，确认命中 head-commit 闸门",
+        "传入 red-check fail，确认命中 red-check 闸门"
+      ],
+      "evidence": [
+        "node scripts/test.mjs 第 5、6 节：路由与闸门共 40+ 断言全部通过"
+      ],
+      "notes": "闸门优先级：pause > budget100 > denylist > attempts > budget80 > scope > head-commit > red-check > verification"
+    },
+    {
+      "id": "learn-001",
+      "priority": 4,
+      "area": "learn",
+      "title": "经验→规则棘轮机制就位",
+      "user_visible_behavior": "LESSONS.md 有固定的记录格式与 Seen N× 计数；同一条教训出现 3 次后转正进硬约束，并在 Promoted 表留出处",
+      "status": "passing",
+      "verification": [
+        "确认 templates/LESSONS.md 含 Seen N× 格式说明与 3 次转正规则",
+        "确认 loop-constraints.md 有 Lessons 章节",
+        "确认 registry.yaml 声明 lesson_promotion_threshold: 3",
+        "确认 lesson-harvest 技能含三个扫描目标与 Done right 区"
+      ],
+      "evidence": [
+        "node scripts/test.mjs 第 11、12、17 节相关断言通过",
+        "harness-stage.mjs 的转正判据对空 Promoted 表返回 false（假阳性防护已测试）"
+      ],
+      "notes": "机制就位 ≠ 跑过。真实转正需要至少 3 天的夜审运行，见 learn-002"
+    },
+    {
+      "id": "learn-002",
+      "priority": 5,
+      "area": "learn",
+      "title": "夜审跑过并产生真实转正记录",
+      "user_visible_behavior": "LESSONS.md 有带日期的真实教训条目；Promoted 表有至少一条来自 3 次出现的转正记录",
+      "status": "not_started",
+      "verification": [
+        "在接入本框架的真实项目上运行 lesson-harvest（至少连续 3 天）",
+        "确认 LESSONS.md 出现 Seen N× (日期) 形式的条目",
+        "确认有教训达到 Seen 3× 并转正进 loop-constraints.md",
+        "确认 loop-verifier 的检查项包含转正后的规则"
+      ],
+      "evidence": [],
+      "notes": "阻塞：本仓库不是真实软件项目，缺少真实 commit 流与 issue/PR 事件源。需在真实项目上验证。"
+    },
+    {
+      "id": "loop-002",
+      "priority": 6,
+      "area": "loop",
+      "title": "跑过一个完整循环周期",
+      "user_visible_behavior": "运行日志有完整周期的真实记录：事件触发 → 路由 → 派发 → 验证 → 闸门 → 状态写入",
+      "status": "not_started",
+      "verification": [
+        "在接入本框架的真实项目上接线事件（.github/workflows/ 或平台调度）",
+        "触发一个真实事件并完成全链路",
+        "确认 loop-run-log.md 的 ## Log 章节出现含 run_id 的 JSON",
+        "确认 STATE.md 的 Active 表有 acting_on 记录"
+      ],
+      "evidence": [],
+      "notes": "阻塞：本仓库无真实事件源。这是阶段 3 的判据 8（人工确认）。"
+    },
+    {
+      "id": "setup-002",
+      "priority": 7,
+      "area": "setup",
+      "title": "技能可装到跨 agent 的共享路径",
+      "user_visible_behavior": "运行 install-skills.mjs --layout agents，技能装到 .agents/skills/，非 ZCode 的 agent 也能读到；--layout both 两边都装；非法 layout 报错而非静默回落",
+      "status": "passing",
+      "verification": [
+        "运行 install-skills.mjs --target <tmp> --layout agents，确认写入 <tmp>/.agents/skills/ 且不写 .zcode",
+        "确认 manifest 记录 layout 与 dotDir 字段",
+        "运行 --layout both，确认两边都有技能",
+        "运行 --layout nonsense，确认退出码 1 且不写任何目录",
+        "运行 --layout agents --list 与 --uninstall，确认可用",
+        "对目标仓库运行 loop-audit.mjs，确认技能被计入（不再报 0 found）"
+      ],
+      "evidence": [
+        "node scripts/test.mjs 第 19 节：477 断言全通过（新增 16 项布局断言）",
+        "回退测试：把 --layout 改回硬编码 .zcode 后，10 项断言失败（含「非法 --layout 退出码 1」与「manifest 记录 layout」），确认测试真的在测行为",
+        "对 personal-agent 运行 loop-audit.mjs：7/100 → 43/100，Loop skills present (13 found) PASS，Independent verifier PASS",
+        "18 个技能文件与 skills/ 源逐字节一致（cmp 比对）"
+      ],
+      "notes": "修前 SKILL_DIRS 不含 .zcode/.agents，导致安装成功也报 0 found，且 L2 永远不可达（level=L2 要求 verifierPresent）"
+    }
+  ]
+}

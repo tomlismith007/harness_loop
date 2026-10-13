@@ -1,0 +1,85 @@
+name: Loop — CI Sweeper
+
+# CI 失败 → fix 阶段。先分类（flake/regression/env/config），只有 regression 可操作。
+# 环境失败必须升级，绝不用代码"修复"。
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  check_suite:
+    types: [completed]
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: write
+
+concurrency:
+  group: loop-ci-${{ github.event.workflow_run.head_branch || github.event.check_suite.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    # 只在失败时处理
+    if: |
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') ||
+      (github.event_name == 'check_suite' && github.event.check_suite.conclusion == 'failure')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Resolve item
+        id: item
+        run: |
+          BRANCH="${{ github.event.workflow_run.head_branch || github.event.check_suite.head_branch }}"
+          SHA="${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}"
+          SHORT=$(echo "$SHA" | cut -c1-7)
+          echo "item=ci-${SHORT}-${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Route
+        run: |
+          node scripts/event-router.mjs \
+            --event check_suite.completed:failure \
+            --item "${{ steps.item.outputs.item }}" \
+            --state STATE.md > route.json
+          cat route.json
+
+      - name: Classify guidance
+        run: |
+          cat <<'EOF'
+          Classify before acting:
+            flake      → intermittent, passed on retry without code change → Watch, DO NOT fix
+            regression → new failure correlated with a recent commit        → actionable
+            env        → runner, registry, secrets, quota                   → ESCALATE, never fix with code
+            config     → workflow, dependency install, cache                → human judgment
+
+          Before each retry:
+            node scripts/ledger-check.mjs --ledger loop-ledger.json
+            exit code 2 → STOP, escalate to human
+          EOF
+
+      - name: Record work item
+        run: |
+          mkdir -p .loop/queue
+          ITEM="${{ steps.item.outputs.item }}"
+          cat > ".loop/queue/${ITEM}.json" <<EOF
+          {
+            "id": "${ITEM}",
+            "event": "check_suite.completed:failure",
+            "phase": "fix",
+            "branch": "${{ steps.item.outputs.branch }}",
+            "sha": "${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+      - name: Escalate on environment failure signal
+        run: |
+          # 环境类失败的典型信号——命中即标记人工处理
+          echo "If the failure mentions: runner, registry, secret, quota, network, timeout-of-infra"
+          echo "→ label the work item needs-human and do not attempt a code fix."

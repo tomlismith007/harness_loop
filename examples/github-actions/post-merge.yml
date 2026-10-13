@@ -1,0 +1,82 @@
+name: Loop — Post-Merge Cleanup
+
+# 合并到 main → post-merge 阶段。扫描跟进项，不阻塞合并本身。
+# 非高峰运行，限制每日自动 PR 数。
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: loop-post-merge
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Route
+        run: |
+          node scripts/event-router.mjs \
+            --event pull_request.closed:merged \
+            --item pr-${{ github.event.pull_request.number }} > route.json
+          cat route.json
+
+      - name: Scan merged diff for follow-up work
+        id: scan
+        run: |
+          # 用 API 的合并列表而不是仅本地 git log，避免遗漏
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.merge_commit_sha }}"
+          git diff --name-only "$BASE" "$HEAD" > merged-files.txt || true
+          echo "files=$(wc -l < merged-files.txt)" >> "$GITHUB_OUTPUT"
+
+          # 扫描新增的 TODO/FIXME/HACK
+          git diff "$BASE" "$HEAD" | grep -E '^\+.*(TODO|FIXME|HACK|XXX)' > new-markers.txt || true
+          echo "markers=$(wc -l < new-markers.txt)" >> "$GITHUB_OUTPUT"
+
+          echo "New debt markers introduced by this merge:"
+          cat new-markers.txt
+
+      - name: Classify and propose
+        run: |
+          cat <<'EOF'
+          Classify each finding:
+            small + low risk   → propose fix in an isolated worktree
+            large / design     → file a ticket, do not attempt
+            external API impact → escalate to human
+            already failed twice → escalate to human
+
+          Cleanup must not change behavior. Verifier runs the full test suite.
+          Cleanup PR touching > 10 files requires human approval before merge.
+          Run off-peak. Limit to <= 2 automatic PRs per day.
+          EOF
+
+      - name: Record work item
+        run: |
+          mkdir -p .loop/queue
+          ITEM="post-merge-pr-${{ github.event.pull_request.number }}"
+          cat > ".loop/queue/${ITEM}.json" <<EOF
+          {
+            "id": "${ITEM}",
+            "event": "pull_request.closed:merged",
+            "phase": "post-merge",
+            "skills": ["post-merge-cleanup"],
+            "merged_sha": "${{ github.event.pull_request.merge_commit_sha }}",
+            "new_markers": ${{ steps.scan.outputs.markers }},
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF

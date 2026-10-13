@@ -1,0 +1,64 @@
+name: Self-check
+
+# loop-harness 自身的验证关卡。
+# 每次 push / PR 运行测试套件与自审计。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run test suite
+        run: node scripts/test.mjs
+
+      - name: Audit the pack itself
+        run: |
+          node scripts/loop-audit.mjs . --suggest
+          # 退出码 0 = score >= 40
+        continue-on-error: false
+
+      - name: Verify scripts are executable entry points
+        run: |
+          set -e
+          node scripts/event-router.mjs --list > /dev/null
+          node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null
+          node scripts/gate-check.mjs --item pr-1 --diff-files a.ts --verdict approve > /dev/null
+          echo "All CLI entry points respond."
+
+      - name: Verify no auto-merge in event wiring
+        run: |
+          # 事件接线绝不能包含自动合并
+          if grep -rn "gh pr merge\|git push origin main" examples/github-actions/; then
+            echo "::error::Event wiring must never auto-merge"
+            exit 1
+          fi
+          echo "No auto-merge found in examples/github-actions/"
+
+      - name: Check for credential literals
+        run: |
+          # 源码与示例中不得出现可用的凭据字面量
+          if grep -rEn "(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})" \
+              --include="*.mjs" --include="*.yml" --include="*.md" --include="*.json" \
+              scripts/ examples/ templates/ skills/ docs/ 2>/dev/null; then
+            echo "::error::Possible credential literal found"
+            exit 1
+          fi
+          echo "No credential literals found."

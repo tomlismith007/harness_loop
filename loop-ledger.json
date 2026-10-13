@@ -1,0 +1,24 @@
+{
+  "goal": "Example loop ledger — one entry per fix attempt. Read by scripts/ledger-check.mjs.",
+  "pattern": "ci-sweeper",
+  "level": "L2",
+  "attempts": [
+    {
+      "iteration": 1,
+      "item": "pr-123",
+      "action": "minimal-fix: null guard on user.email in profile handler",
+      "outcome": "failure",
+      "error": "TypeError: Cannot read properties of undefined (reading 'email') at profile.ts:42",
+      "tokensUsed": 1800,
+      "at": "2026-10-13T08:16:00Z"
+    },
+    {
+      "iteration": 2,
+      "item": "pr-123",
+      "action": "minimal-fix: default empty user object at call site",
+      "outcome": "success",
+      "tokensUsed": 1600,
+      "at": "2026-10-13T08:22:00Z"
+    }
+  ]
+}

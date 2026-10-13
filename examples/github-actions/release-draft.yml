@@ -1,0 +1,107 @@
+name: Loop — Release Draft
+
+# 标签 / 发布事件 → release 阶段。只起草，不发布、不打标签。
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: loop-release
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Route
+        run: |
+          node scripts/event-router.mjs --event push:tags > route.json
+          cat route.json
+
+      - name: Determine window
+        id: window
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV" ]; then
+            echo "range=HEAD~30..HEAD" >> "$GITHUB_OUTPUT"
+            echo "prev=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=${PREV}..HEAD" >> "$GITHUB_OUTPUT"
+            echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect merged PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 同时扫 PR 和 main 上的直接提交——只扫 PR 会遗漏
+          git log ${{ steps.window.outputs.range }} --oneline > direct-commits.txt || true
+          echo "Direct commits in window:"
+          cat direct-commits.txt
+
+          gh pr list --state merged --limit 100 \
+            --json number,title,labels,mergedAt > merged-prs.json || echo '[]' > merged-prs.json
+          echo "Merged PRs: $(jq 'length' merged-prs.json)"
+
+      - name: Emit draft skeleton
+        run: |
+          cat > RELEASE_NOTES_DRAFT.md <<'EOF'
+          # Release Notes Draft
+
+          <!-- Fill from merged PRs. Sections are fixed — do not invent new ones. -->
+
+          ## Features
+          -
+
+          ## Bug Fixes
+          -
+
+          ## Performance
+          -
+
+          ## Breaking Changes
+          -
+
+          ## Security
+          -
+
+          ## Documentation
+          -
+
+          ## Internal / Chores
+          -
+
+          ---
+          Review required before publishing.
+          EOF
+          echo "Draft written to RELEASE_NOTES_DRAFT.md"
+
+      - name: Escalate if sensitive
+        run: |
+          cat <<'EOF'
+          Escalate to human (always) when the window contains:
+            - a major version bump
+            - breaking changes
+            - security-related entries
+            - marketing-sensitive content
+            - more than ~50 entries
+
+          This workflow never publishes, never tags, never writes CHANGELOG.
+          EOF
