@@ -21,7 +21,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
-  PACK_ROOT, SKILLS_DIR, parseDenylistFrom, fail,
+  PACK_ROOT, SKILLS_DIR, SKILL_DIRS, parseDenylistFrom, detectProject, verificationCommands,
+  initScriptFromCommands, textHas, structuredText, fail,
 } from './lib/common.mjs';
 import { scoreHarness } from './loop-audit.mjs';
 
@@ -120,9 +121,24 @@ function stripHtmlComments(text) {
  * 只看 `.agents/skills/` 与 `.zcode/skills/` —— `<repo>/skills/` 虽然常被
  * 写成安装目标，但没有任何 agent 会扫描它，装在那里等于没装。
  */
-function skillInDiscoverablePath(root, skillName) {
-  return ['.agents/skills', '.zcode/skills'].some((d) =>
-    exists(path.join(root, d, skillName, 'SKILL.md')));
+/**
+ * 技能是否装在 agent 真的会扫描的路径，且内容不是空壳。
+ *
+ * 曾经只判断文件存在，于是 verifier 的 SKILL.md 全文写 `lorem ipsum` 也能让
+ * `--stage 2 --require` 退出 0。"结构齐备"不等于"跑过"——这里要求正文里
+ * 真的写了该技能的核心行为。
+ */
+function skillInDiscoverablePath(root, skillName, requiredText) {
+  // 与 loop-audit 用同一份路径列表（SKILL_DIRS），否则装在 .claude/skills 的技能
+  // 在审计里计分、在阶段判据里却报"不在可发现路径"。裸 skills/ 是明知不可发现的。
+  const dirs = SKILL_DIRS.filter((d) => d !== 'skills');
+  const file = dirs
+    .map((d) => path.join(root, d, skillName, 'SKILL.md'))
+    .find((p) => exists(p));
+  if (!file) return false;
+  if (!requiredText) return true;
+  // 结构化匹配：模板示例块里的字样不算数
+  return textHas(structuredText(readText(file)), requiredText);
 }
 
 /** 模板里预置的拒绝列表路径（用于判断用户是否本地化过） */
@@ -244,12 +260,13 @@ function checkStage2(root, audit) {
   // ---- 机制就位（机械可判定）----
 
   const verifier = audit.checks.find((x) => x.key === 'verifier');
-  const verifierDiscoverable = skillInDiscoverablePath(root, 'loop-verifier');
-  add('独立 verifier 已装到可发现路径', verifier?.ok && verifierDiscoverable,
+  // 要求正文真的写了回退测试与 NOT RUN 三态，否则一个 lorem ipsum 空壳也能算数。
+  const verifierDiscoverable = skillInDiscoverablePath(root, 'loop-verifier', ['NOT RUN', '回退测试']);
+  add('独立 verifier 已装到可发现路径且写明回退测试', verifier?.ok && verifierDiscoverable,
     verifierDiscoverable ? null
       : exists(path.join(root, 'skills', 'loop-verifier', 'SKILL.md'))
         ? '技能在 <repo>/skills/ —— 没有任何 agent 会扫描这个路径'
-        : '未找到 verifier 技能',
+        : '未找到 verifier 技能，或其正文没有回退测试 / NOT RUN 的实操描述',
     '运行 node scripts/install-skills.mjs --target . （默认装到 .agents/skills/）');
 
   const constraintsSkillDiscoverable = skillInDiscoverablePath(root, 'loop-constraints');
@@ -257,14 +274,17 @@ function checkStage2(root, audit) {
     constraintsSkillDiscoverable ? null : '约束技能不在 agent 会扫描的目录里，约束只是文档',
     '运行 node scripts/install-skills.mjs --target .');
 
-  const guardDiscoverable = skillInDiscoverablePath(root, 'loop-guard');
+  const guardDiscoverable = skillInDiscoverablePath(root, 'loop-guard', ['stagnation', 'attempts']);
   const ledger = readJson(path.join(root, 'loop-ledger.json'));
-  const hasLedger = Boolean(ledger && Array.isArray(ledger.attempts));
-  add('熔断器就位（loop-guard 技能 + 账本）', guardDiscoverable && hasLedger,
+  // 空 attempts 数组 = 从没记过任何一次尝试，正是"熔断器就位"的反面。
+  const hasLedger = Boolean(ledger && Array.isArray(ledger.attempts) && ledger.attempts.length > 0);
+  add('熔断器就位（loop-guard 技能 + 账本有记录）', guardDiscoverable && hasLedger,
     guardDiscoverable && hasLedger ? null
-      : !guardDiscoverable ? 'loop-guard 技能不在可发现路径'
-        : '缺少 loop-ledger.json（熔断器没有账本可读）',
-    '运行 node scripts/install-skills.mjs --target . 并创建 loop-ledger.json');
+      : !guardDiscoverable ? 'loop-guard 技能不在可发现路径，或正文没有熔断阈值说明'
+        : ledger && Array.isArray(ledger.attempts) && !ledger.attempts.length
+          ? 'loop-ledger.json 的 attempts 是空的——熔断器没有任何记录可读'
+          : '缺少 loop-ledger.json（熔断器没有账本可读）',
+    '运行 node scripts/install-skills.mjs --target . 并在 loop-ledger.json 记录尝试');
 
   const ph = initScriptHasPlaceholder(root);
   add('验证命令是真实的（无占位符）', !ph.placeholder, ph.reason,
@@ -441,22 +461,9 @@ function upgrade(root, targetStage, force, results) {
     // init.sh 由脚本生成
     const initPath = path.join(root, 'init.sh');
     if (force || !exists(initPath)) {
-      const script = [
-        '#!/usr/bin/env bash',
-        '# 标准启动与验证路径。替换下方命令为项目实际命令。',
-        'set -euo pipefail',
-        'ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-        'cd "$ROOT_DIR"',
-        'echo "==> Working directory: $PWD"',
-        '',
-        '# ---- 替换为项目实际命令 ----',
-        'npm install',
-        'npm test',
-        'npm run build',
-        '# ----------------------------',
-        '',
-        'echo "=== Verification Complete ==="',
-      ].join('\n') + '\n';
+      // 复用 verificationCommands()：硬编码 npm 会给纯 Python 仓库生成一条
+      // 根本跑不起来的启动路径，而阶段 1 判据还给它发了 PASS。
+      const script = initScriptFromCommands(verificationCommands(detectProject(root)));
       fs.writeFileSync(initPath, script, 'utf8');
       try { fs.chmodSync(initPath, 0o755); } catch { /* Windows */ }
       results.push({ status: 'written', path: initPath });

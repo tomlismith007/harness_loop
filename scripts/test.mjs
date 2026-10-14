@@ -1028,6 +1028,48 @@ section('20. 三阶段驱动器');
   ok('阶段 3 补上 lesson-harvest workflow', fs.existsSync(path.join(wfDir, 'lesson-harvest.yml')));
   ok('阶段 3 补上 signal-gatekeeper', fs.existsSync(path.join(empty, '.agents', 'skills', 'signal-gatekeeper', 'SKILL.md')));
 
+  // ---- 空壳技能不得满足阶段 2 ----
+  // 曾经 verifier / breaker 只判文件存在，于是全文 lorem ipsum + 空 attempts
+  // 也能让 `--stage 2 --require` 退出 0。
+  const shell = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-shell-'));
+  runStage(shell, ['--upgrade', '--stage', '1']);
+  execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', shell], { encoding: 'utf8' });
+  for (const s of ['loop-verifier', 'loop-guard']) {
+    fs.writeFileSync(path.join(shell, '.agents', 'skills', s, 'SKILL.md'), 'lorem ipsum\n');
+  }
+  fs.writeFileSync(path.join(shell, 'loop-ledger.json'), JSON.stringify({ attempts: [] }));
+  const sh = runStage(shell, ['--json']);
+  const shj = JSON.parse(sh.out);
+  const stage2 = shj.stages[1];
+  ok('空壳 verifier 不满足阶段 2', stage2.checks.some((c) => !c.ok && /verifier/.test(c.label)));
+  ok('空壳 breaker 不满足阶段 2', stage2.checks.some((c) => !c.ok && /熔断器/.test(c.label)));
+  ok('熔断器判据的证据提到账本无记录', stage2.checks.some((c) => !c.ok && /attempts|账本|熔断/.test(c.evidence || '')));
+  ok('阶段 2 未达成', stage2.complete === false);
+  eq('空壳技能的仓库 --stage 2 --require 退出 2', runStage(shell, ['--stage', '2', '--require']).code, 2);
+  fs.rmSync(shell, { recursive: true, force: true });
+
+  // 只把账本清空（技能是真实内容）→ 熔断器判据仍必须不通过。
+  // 上面那个用例里技能也是空壳，判据被两处同时拦下，单测其中一处没有意义。
+  const emptyLedger = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-ledger-'));
+  runStage(emptyLedger, ['--upgrade', '--stage', '1']);
+  execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', emptyLedger], { encoding: 'utf8' });
+  fs.writeFileSync(path.join(emptyLedger, 'loop-ledger.json'), JSON.stringify({ attempts: [] }));
+  const el = JSON.parse(runStage(emptyLedger, ['--json']).out);
+  ok('attempts 为空的账本不满足熔断器判据',
+    el.stages[1].checks.some((c) => !c.ok && /熔断器/.test(c.label)));
+  fs.rmSync(emptyLedger, { recursive: true, force: true });
+
+  // ---- --upgrade 生成的 init.sh 必须匹配检测到的项目栈 ----
+  // 曾经硬编码 npm install/test/build，给纯 Python 仓库发了一条跑不起来的启动路径，
+  // 阶段 1 判据还给了 PASS。
+  const py = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-py-'));
+  fs.writeFileSync(path.join(py, 'pyproject.toml'), '[project]\nname = "x"\n');
+  runStage(py, ['--upgrade', '--stage', '1']);
+  const pyInit = fs.readFileSync(path.join(py, 'init.sh'), 'utf8');
+  ok('Python 仓库的 init.sh 不含 npm 命令', !/\bnpm\b/.test(pyInit), pyInit.slice(0, 200));
+  ok('Python 仓库的 init.sh 使用 pytest', /pytest/.test(pyInit), pyInit.slice(0, 200));
+  fs.rmSync(py, { recursive: true, force: true });
+
   // 三阶段都定义且各有判据
   ok('三个阶段都有判据', j1.stages.length === 3 && j1.stages.every((s) => s.checks.length > 0));
   ok('每个阶段都有依据', j1.stages.every((s) => s.goal && s.level));

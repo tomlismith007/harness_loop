@@ -338,10 +338,9 @@ export function structuredText(src) {
       continue;
     }
     if (!line) continue;
-    if (inFence) {
-      out.push(line);
-      continue;
-    }
+    // 围栏内的行跳过不收集。围栏里通常是"格式示例"——把示例块算成结构化证据，
+    // 等于让模板自带的话满足判据，而这个函数本来就是文档里的反作弊工具。
+    if (inFence) continue;
     if (/^#{1,6}\s/.test(line)) { out.push(line); continue; }
     if (/^([-*+]|\d+\.)\s/.test(line)) { out.push(line); continue; }
     if (line.startsWith('|')) { out.push(line); continue; }
