@@ -385,6 +385,40 @@ export function loadDenylist(root = '.') {
   return DENYLIST_PATTERNS;
 }
 
+/**
+ * 从 patterns/registry.yaml 读 `defaults` 里的标量。
+ *
+ * 这个文件的头写着 "Consumed by scripts/loop-audit.mjs"，但过去没有任何脚本读它的
+ * 值——所有阈值都在代码里重复硬编码，改配置不改变任何行为。仓库承诺零依赖，
+ * 所以不引入 YAML 依赖：这几个键都是顶层标量，正则足够。
+ * 文件缺失或解析不到时返回 null，调用方回落到内置默认值。
+ */
+export function readRegistryDefaults(registryPath) {
+  const p = registryPath || path.join(PACK_ROOT, 'patterns', 'registry.yaml');
+  if (!exists(p)) return null;
+  const text = readText(p);
+  const block = text.split(/^defaults:/m)[1]?.split(/^\S/m)[0] || '';
+  const num = (key) => {
+    const m = block.match(new RegExp(`^\\s*${key}:\\s*(\\d+(?:\\.\\d+)?)`, 'm'));
+    return m ? Number(m[1]) : undefined;
+  };
+  const breaker = block.split(/breaker:/)[1] || '';
+  const breakerNum = (key) => {
+    const m = breaker.match(new RegExp(`^\\s*${key}:\\s*(\\d+)`, 'm'));
+    return m ? Number(m[1]) : undefined;
+  };
+  return {
+    maxAttempts: num('max_attempts'),
+    maxFilesPerFix: num('max_files_per_fix'),
+    maxFilesPerCleanup: num('max_files_per_cleanup'),
+    budgetReportOnly: num('budget_report_only_pct'),
+    budgetExit: num('budget_exit_pct'),
+    stagnation: breakerNum('stagnation'),
+    noProgress: breakerNum('no_progress'),
+    maxIterations: breakerNum('max_iterations'),
+  };
+}
+
 /** 判断路径是否命中拒绝列表 */
 export function matchesDenylist(filePath, patterns = DENYLIST_PATTERNS) {
   const p = filePath.split(path.sep).join('/').replace(/^\.\//, '');

@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, DENYLIST_PATTERNS, fail } from './lib/common.mjs';
+import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, readRegistryDefaults, DENYLIST_PATTERNS, fail } from './lib/common.mjs';
 
 export const DEFAULTS = {
   maxFilesPerFix: 5,
@@ -24,6 +24,18 @@ export const DEFAULTS = {
   budgetReportOnly: 80,
   budgetExit: 100,
 };
+
+// patterns/registry.yaml 的 defaults 覆盖内置值。配置文件存在却没人读，
+// 等于"看起来被强制、实际是装饰"——改它就得真的改变行为。
+function registryDefaults(registryPath) {
+  const fromFile = readRegistryDefaults(registryPath);
+  if (!fromFile) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(fromFile)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
+}
 
 // 白名单。未识别的值一律参数错误退出，绝不放行——
 // 拼错的 --verdict 等价于"批准"是这个闸门曾经最大的漏洞。
@@ -340,7 +352,7 @@ Exit codes:
     return n;
   };
 
-  const result = checkGates({
+  const input = {
     item: typeof args.item === 'string' ? args.item : null,
     phase: enumArg(args.phase, PHASES, '--phase') ?? null,
     attempts: numArg(args.attempts, '--attempts', 0),
@@ -358,7 +370,10 @@ Exit codes:
     notRun: typeof args.notRun === 'string'
       ? args.notRun.split(',').map((s) => s.trim()).filter(Boolean)
       : [],
-  });
+  };
+
+  // registry.yaml 的 defaults 作为阈值来源；--registry 指定别的文件，CLI 参数仍可覆盖单项。
+  const result = checkGates(input, registryDefaults(typeof args.registry === 'string' ? args.registry : undefined));
 
   printJson(result);
   process.exit(result.exit_code);

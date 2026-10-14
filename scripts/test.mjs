@@ -15,7 +15,7 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs, matchesDenylist, loadDenylist, parseDenylistFrom, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText } from './lib/common.mjs';
+import { parseArgs, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { route, ROUTES, readLocks } from './event-router.mjs';
 import { checkGates } from './gate-check.mjs';
@@ -1236,15 +1236,48 @@ section('17. registry 与路由一致性');
   ok('registry 有 defaults 段', /^defaults:/m.test(registryText));
   ok('registry auto_merge 为 false', /auto_merge:\s*false/.test(registryText));
   ok('registry 有优先级表', /^priority:/m.test(registryText));
-  ok('registry 熔断阈值 3/5/10', /stagnation:\s*3/.test(registryText) && /no_progress:\s*5/.test(registryText) && /max_iterations:\s*10/.test(registryText));
-  // magpie 引入的四条默认值
-  ok('registry 声明 merge_binding', /merge_binding:\s*match-head-commit/.test(registryText));
-  ok('registry 声明 red_check_required', /red_check_required:\s*true/.test(registryText));
-  ok('registry 声明 not_run_must_be_listed', /not_run_must_be_listed:\s*true/.test(registryText));
-  ok('registry 声明 lesson_promotion_threshold=3', /lesson_promotion_threshold:\s*3/.test(registryText));
   // 非事件驱动循环已登记
   ok('registry 登记 lesson-harvest', /id:\s*lesson-harvest/.test(registryText));
   ok('registry 登记 signal-gatekeeper', /id:\s*signal-gatekeeper/.test(registryText));
+
+  // ---- registry 的值必须真的改变行为 ----
+  // 过去只断言 YAML 里写着某个数字，不管有没有代码读它——那证明"文字被抄下来了"，
+  // 不证明"机制生效了"。这里改成行为断言。
+  const parsed = readRegistryDefaults(path.join(PACK_ROOT, 'patterns', 'registry.yaml'));
+  ok('能从 registry 解析出阈值', parsed && parsed.stagnation === 3 && parsed.maxAttempts === 3);
+
+  const rtmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-registry-'));
+  const regFile = path.join(rtmp, 'reg.yaml');
+  const ledFile = path.join(rtmp, 'loop-ledger.json');
+  fs.writeFileSync(ledFile, JSON.stringify({ attempts: [
+    { n: 1, outcome: 'failure', error: 'TypeError: boom' },
+    { n: 2, outcome: 'failure', error: 'TypeError: boom' },
+  ] }));
+  const runLed = (extra) => {
+    try {
+      execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'ledger-check.mjs'), '--ledger', ledFile, '--json', ...extra],
+        { encoding: 'utf8' });
+      return 'ok';
+    } catch (e) { return JSON.parse(e.stdout || '{}').verdict || 'unknown'; }
+  };
+
+  eq('默认阈值下 2 次相同失败不熔断', runLed([]), 'ok');
+  fs.writeFileSync(regFile, registryText.replace(/stagnation:\s*\d+/, 'stagnation: 1'));
+  eq('registry 把 stagnation 改成 1 后同样输入熔断', runLed(['--registry', regFile]), 'stagnation');
+
+  // gate-check 同理
+  const runGate = (extra) => {
+    try {
+      const o = execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'),
+        '--item', 'p', '--phase', 'fix', '--attempts', '1', '--diff-files', 'a.ts', '--verdict', 'approve', ...extra],
+        { encoding: 'utf8' });
+      return JSON.parse(o).decision;
+    } catch (e) { return JSON.parse(e.stdout || '{}').decision || 'unknown'; }
+  };
+  eq('默认 max_attempts=3 时 attempts=1 可通过', runGate([]), 'proceed');
+  fs.writeFileSync(regFile, registryText.replace(/max_attempts:\s*\d+/, 'max_attempts: 1'));
+  eq('registry 把 max_attempts 改成 1 后同一输入被拦', runGate(['--registry', regFile]), 'escalate');
+  fs.rmSync(rtmp, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------- 汇总

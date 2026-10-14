@@ -14,13 +14,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readJson, printJson, fail } from './lib/common.mjs';
+import { parseArgs, readJson, printJson, readRegistryDefaults, fail } from './lib/common.mjs';
 
 export const DEFAULT_BREAKER = {
   maxIterations: 10,
   stagnationThreshold: 3,
   noProgressThreshold: 5,
 };
+
+/**
+ * registry.yaml 的 breaker 阈值覆盖内置默认值。
+ * 配置文件写着某个值却没有任何代码读它，等于"看起来被强制、实际是装饰"。
+ */
+export function breakerDefaults(registryPath) {
+  const r = readRegistryDefaults(registryPath);
+  if (!r) return {};
+  const out = {};
+  if (Number.isFinite(r.stagnation)) out.stagnationThreshold = r.stagnation;
+  if (Number.isFinite(r.noProgress)) out.noProgressThreshold = r.noProgress;
+  if (Number.isFinite(r.maxIterations)) out.maxIterations = r.maxIterations;
+  return out;
+}
 
 /**
  * 错误签名归一化：抹掉时间戳、十六进制、路径、行列号、其余数字。
@@ -228,7 +242,9 @@ Exit codes:
     return n;
   };
 
-  const opts = {};
+  // registry.yaml 作为阈值来源，CLI 参数覆盖单项。
+  const fromRegistry = breakerDefaults(typeof args.registry === 'string' ? args.registry : undefined);
+  const opts = { ...fromRegistry };
   if (args.stagnation !== undefined) opts.stagnationThreshold = numArg(args.stagnation, '--stagnation');
   if (args.noProgress !== undefined) opts.noProgressThreshold = numArg(args.noProgress, '--no-progress');
   if (args.maxIterations !== undefined) opts.maxIterations = numArg(args.maxIterations, '--max-iterations');
