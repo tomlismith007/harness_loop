@@ -13,7 +13,7 @@
 | 文档 | 13 篇 |
 | 模板 | 13 个 |
 | 事件接线 | 8 个 GitHub Actions workflow |
-| 测试 | 603 项断言全通过 |
+| 测试 | 721 项断言全通过 |
 | 自审计 | 94/100，L2 |
 | 技能已安装 | ✅ `~/.zcode/skills/` + `~/.agents/skills/` |
 
@@ -84,7 +84,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require
 | 2 强化 | 让验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 |
 | 3 巩固 | 事件接上、经验积累、规则转正 | 7 机械 + 1 人工 | L3 |
 
-**对应的技能**：`harness-init`、`harness-strengthen`、`harness-consolidate`。
+**对应的技能**：`harness-init`、`harness-loop-init`、`harness-consolidate`。
 
 完整判据与依据映射见 [docs/11-three-stages.md](11-three-stages.md)。
 
@@ -104,23 +104,32 @@ node scripts/loop-audit.mjs /path/to/repo --suggest
 
 ### 用法 ② 装配新项目
 
-**做什么**：在目标仓库生成完整的 harness + loop 脚手架。
+**做什么**：在目标仓库生成阶段 1 地基，或一次装配到指定等级。
 
 ```bash
-node scripts/init-loop-harness.mjs --target /path/to/repo --level L1
+# 阶段 1（推荐）：生成 7 个文件，有闸门可用
+node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
+node scripts/harness-stage.mjs /path/to/repo --stage 1 --require   # 退出码 0 = 达成
+
+# 一次装配到 L2/L3（无闸门，只报告写了什么）
+node scripts/init-loop-harness.mjs --target /path/to/repo --level L2
 ```
 
-**生成**：`AGENTS.md`、`feature_list.json`、`progress.md`、`init.sh`、`LOOP.md`、`STATE.md`、`LESSONS.md`、`loop-constraints.md`、`loop-budget.md`、`loop-run-log.md`、`loop-ledger.json`，以及按等级装配的技能目录。
+**阶段 1 生成**：`AGENTS.md`、`feature_list.json`、`progress.md`、`init.sh`、`STATE.md`、`LESSONS.md`、`loop-constraints.md`。
+
+**不生成**：`LOOP.md`、`loop-budget.md`、`loop-run-log.md`、`session-handoff.md`、`loop-ledger.json` —— 这 5 个是 loop 机制文档，属于阶段 2。阶段 1 的 agent 已经在写文件，所以它需要 `loop-constraints.md`（拒绝列表 = 行为底线），但不需要循环机制。
 
 **`--level` 的差别**：
 
 | 等级 | 生成什么 | 允许做什么 |
 |---|---|---|
-| L1 | 控制面 + 感知面 + 学习面技能 | 只报告，不改代码 |
-| L2 | 追加 `minimal-fix`、`loop-verifier`、`post-merge-cleanup`、`release-drafter` | 在 worktree 中提出修复，独立验证；合并仍需人工 |
-| L3 | 全部 | 明确边界内无人值守 |
+| L1 | 阶段 1 的 7 个文件 + `harness-loop`、`loop-constraints`、`loop-budget`、`event-router`、三个 triage | 只报告，不改代码 |
+| L2 | 追加 5 个 loop 机制文档 + `harness-loop-init`、`loop-guard`、`minimal-fix`、`loop-verifier` | 在 worktree 中提出修复，独立验证；合并仍需人工 |
+| L3 | 追加 `signal-gatekeeper`、`lesson-harvest`、`post-merge-cleanup`、`release-drafter` | 明确边界内无人值守 |
 
 **默认从 L1 开始。** 第一周只看报告，确认 triage 准确后再升级。
+
+`harness-loop`（运行时编排）任何等级都装——它的边界由自己第 0 步的事件接线检查执行，不靠"到阶段几才装"来实现。
 
 ### 用法 ③ 技能对话式调用（最容易上手）
 
@@ -134,7 +143,7 @@ node scripts/init-loop-harness.mjs --target /path/to/repo --level L1
 | "修一下这个 CI 失败" | `ci-triage` → `minimal-fix` | 先分类（flake/regression/env），只有 regression 才动手 |
 | "这个 issue 值得修吗" | `issue-triage` | 定级、去重、提议标签，不自动应用 |
 | "我现在该做什么" | `harness-loop` | 走完整流程：加载约束→查预算→路由→派发→闸门→写状态 |
-| "给这个项目配一套 harness" | `harness-bootstrap` | 盘点现状，装配缺失部分 |
+| "给这个项目配一套 harness" | `harness-init` | 走完阶段 1 的 8 项判据，装配 7 个文件 |
 | "总结一下昨天的 commit 有什么教训" | `lesson-harvest` | 扫返工/不该合/验证太糙，写进 LESSONS.md |
 | "这条推文跟我们的项目有关吗" | `signal-gatekeeper` | 廉价判断相关性，不相关直接丢弃 |
 
@@ -179,11 +188,10 @@ cp examples/github-actions/*.yml /path/to/repo/.github/workflows/
 
 | 技能 | 什么时候用 | 关键约束 |
 |---|---|---|
-| `harness-init` | 阶段 1：新项目还没有 harness | 10 项判据；`init.sh` 必须是真实命令 |
-| `harness-strengthen` | 阶段 2：文件在但机制没生效 | 6 机械 + 3 人工（回退测试执行过 / NOT RUN 用过 / triage 准确率 > 70%） |
+| `harness-init` | 阶段 1：新项目还没有 harness | 8 项判据；启动脚本必须真的能跑通（退出码 0） |
+| `harness-loop-init` | 阶段 2：文件在但机制没生效 | 6 机械 + 3 人工（回退测试执行过 / NOT RUN 用过 / triage 准确率 > 70%） |
 | `harness-consolidate` | 阶段 3：要接事件、要积累经验 | 7 机械 + 1 人工（跑过完整循环周期） |
-| `harness-loop` | 有事件进来，要决定"接下来做什么" | 顶层编排：退出检查→约束→路由→预算→派发→闸门→写状态 |
-| `harness-bootstrap` | 新项目装配 / 审计已有 harness | 五子系统盘点，先给最小 harness |
+| `harness-loop` | 有事件进来，要决定"接下来做什么" | 顶层编排：退出检查→约束→路由→预算→派发→闸门→写状态。**运行时**，不属于任何建设阶段 |
 | `loop-constraints` | 每轮开始（其他技能的前置） | 加载拒绝列表与闸门；命中即升级，不编辑 |
 | `loop-budget` | 每轮开始和结束 | 80% 降级 report-only，100% 立即退出 |
 | `loop-guard` | 每次重试前 | 熔断：同一错误 3 次 / 连续失败 5 次 / 总迭代 10 次 |
@@ -209,9 +217,9 @@ cp examples/github-actions/*.yml /path/to/repo/.github/workflows/
 | `init-loop-harness.mjs` | 装配脚手架（等价于 `harness-stage --upgrade --stage 1`，但只做文件） | 0 = 成功 |
 | `event-router.mjs` | 事件路由 | 0 = 已注册；1 = 未注册 |
 | `gate-check.mjs` | 闸门判定 | 0 = 通过；2 = 升级；3 = 退出 |
-| `ledger-check.mjs` | 熔断检查 | 0 = 继续；2 = 停止并升级 |
+| `ledger-check.mjs` | 熔断检查 | 0 = 继续；2 = 停止并升级（**含账本缺失或畸形**） |
 | `install-skills.mjs` | 安装技能到 ZCode 发现路径 | 0 = 成功；1 = 错误 |
-| `test.mjs` | 自检（603 断言） | 0 = 全通过 |
+| `test.mjs` | 自检（721 断言） | 0 = 全通过 |
 
 **退出码是给自动化用的。** 在 CI 里可以直接 `node scripts/gate-check.mjs ... || exit 1`。
 

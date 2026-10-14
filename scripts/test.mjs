@@ -15,7 +15,7 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText } from './lib/common.mjs';
+import { parseArgs, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText, hasEventWiring } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { route, ROUTES, readLocks } from './event-router.mjs';
 import { checkGates } from './gate-check.mjs';
@@ -43,6 +43,24 @@ function eq(name, actual, expected) {
 
 function section(title) {
   process.stdout.write(`\n${title}\n`);
+}
+
+/**
+ * 把 feature_list.json 的占位 feature 换成真实条目。
+ *
+ * 阶段 1 判据 2 要求每条 feature 有可判定的完成标准——模板出厂的 3 条占位
+ * feature 自称"占位符"，会被判据拒绝。任何断言"阶段 1 达成"的用例都必须先
+ * 跑这个，否则测的是判据没生效而不是阶段达成了。
+ */
+function writeRealFeatures(fp) {
+  const fl = JSON.parse(fs.readFileSync(fp, 'utf8'));
+  fl.features.forEach((f, i) => {
+    f.title = `真实功能 ${i + 1}`;
+    f.user_visible_behavior = '用户执行 X 能看到 Y';
+    f.verification = ['运行 npm test', '确认全部通过'];
+    f.notes = '';
+  });
+  fs.writeFileSync(fp, JSON.stringify(fl, null, 2), 'utf8');
 }
 
 // ---------------------------------------------------------------- 1. 参数解析
@@ -155,6 +173,34 @@ section('4. 熔断器判定');
   }));
 
   eq('空账本 → ok', checkLedger({ attempts: [] }).verdict, 'ok');
+
+  // ---- 账本不可读时必须停下，而不是回落到"一切正常" ----
+  // 曾经 `Array.isArray(ledger?.attempts) ? ledger.attempts : []` 把缺字段、
+  // 类型错、甚至 ledger 为 null 的输入全变成空数组 → verdict ok / exit 0。
+  // 熔断器在它最需要说话的时候静默放行——而"永远生效不了的闸门"和
+  // "不存在的闸门"在退出码上不可区分（硬约束 11）。
+  for (const [label, bad] of [
+    ['attempts 字段缺失', {}],
+    ['attempts 不是数组（字符串）', { attempts: 'nope' }],
+    ['attempts 为 null', { attempts: null }],
+    ['attempts 为对象', { attempts: { a: 1 } }],
+    ['ledger 为 null', null],
+    ['ledger 为 undefined', undefined],
+    ['ledger 为数组', []],
+  ]) {
+    const r = checkLedger(bad);
+    eq(`${label} → no-ledger`, r.verdict, 'no-ledger');
+    eq(`${label} → 退出码 2`, r.exit_code, 2);
+  }
+  ok('no-ledger 给出可行动的 next', /ledger/i.test(checkLedger({}).next),
+    checkLedger({}).next);
+  ok('no-ledger 说明为什么不可读', typeof checkLedger({}).unreadable_reason === 'string'
+    && checkLedger({}).unreadable_reason.length > 0);
+  // 边界：空 attempts 仍是 ok（"还没开始跑" ≠ "读不到"）
+  eq('attempts 空数组仍是 ok', checkLedger({ attempts: [] }).verdict, 'ok');
+  eq('attempts 空数组退出码 0', checkLedger({ attempts: [] }).exit_code, 0);
+  // 真实账本不受影响
+  eq('3 次同错仍停滞', checkLedger({ attempts: mk(3, 'failure', 'E1') }).verdict, 'stagnation');
   eq('1 次失败 → ok', checkLedger({ attempts: mk(1, 'failure', 'E1') }).verdict, 'ok');
   eq('2 次同错 → ok', checkLedger({ attempts: mk(2, 'failure', 'E1') }).verdict, 'ok');
   eq('3 次同错 → stagnation', checkLedger({ attempts: mk(3, 'failure', 'E1') }).verdict, 'stagnation');
@@ -456,12 +502,12 @@ section('10. 模板完整性');
 section('11. 技能完整性');
 {
   const expectedSkills = [
-    'harness-loop', 'harness-bootstrap',
+    'harness-loop',
     'loop-constraints', 'loop-budget', 'loop-guard', 'event-router', 'signal-gatekeeper',
     'issue-triage', 'pr-review-triage', 'ci-triage',
     'minimal-fix', 'loop-verifier', 'post-merge-cleanup', 'release-drafter',
     'lesson-harvest',
-    'harness-init', 'harness-strengthen', 'harness-consolidate',
+    'harness-init', 'harness-loop-init', 'harness-consolidate',
   ];
   for (const s of expectedSkills) {
     const p = path.join(SKILLS_DIR, s, 'SKILL.md');
@@ -643,9 +689,11 @@ section('15. 端到端装配');
   }
 
   const expectCreated = [
-    'AGENTS.md', 'feature_list.json', 'progress.md', 'session-handoff.md',
-    'init.sh', 'loop-constraints.md', 'loop-budget.md', 'loop-run-log.md',
-    'LOOP.md', 'STATE.md', 'LESSONS.md', 'loop-ledger.json',
+    // L2 = 阶段 1 地基 + 阶段 2 的 loop 机制文档
+    'AGENTS.md', 'feature_list.json', 'progress.md', 'STATE.md', 'LESSONS.md',
+    'init.sh', 'loop-constraints.md',
+    'session-handoff.md', 'loop-budget.md', 'loop-run-log.md', 'LOOP.md',
+    'loop-ledger.json',
     // 技能必须落在 agent 会扫描的路径下，不是裸 skills/
     '.agents/skills/harness-loop/SKILL.md',
     '.agents/skills/loop-constraints/SKILL.md',
@@ -653,12 +701,53 @@ section('15. 端到端装配');
     '.agents/skills/loop-verifier/SKILL.md',
     '.agents/skills/issue-triage/SKILL.md',
     '.agents/skills/ci-triage/SKILL.md',
-    '.agents/skills/lesson-harvest/SKILL.md',
-    '.agents/skills/signal-gatekeeper/SKILL.md',
+    '.agents/skills/harness-loop-init/SKILL.md',
   ];
   for (const f of expectCreated) {
     ok(`装配生成: ${f}`, fs.existsSync(path.join(tmp, f)));
   }
+  // L2 不得装阶段 3 的技能——曾经 L1 就装了 signal-gatekeeper 与 lesson-harvest，
+  // 于是「装了多少技能」根本反映不出项目到了哪个阶段。
+  for (const s of ['lesson-harvest', 'signal-gatekeeper', 'post-merge-cleanup', 'release-drafter']) {
+    ok(`L2 不装阶段 3 技能 ${s}`,
+      !fs.existsSync(path.join(tmp, '.agents', 'skills', s, 'SKILL.md')));
+  }
+
+  // ---- L1 不得产出 loop 机制文档 ----
+  // 曾经 init-loop-harness --level L1 写全部 12 个文件（含 5 个 loop 机制文档），
+  // 而 harness-stage --upgrade --stage 1 写 7 个。同一件事两个脚本两套结果。
+  // L2 的断言抓不到这个：L2 本来就该有这些文件。
+  const tmpL1 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-e2e-l1-'));
+  fs.writeFileSync(path.join(tmpL1, 'package.json'), JSON.stringify({
+    name: 'e2e-l1', scripts: { test: 'echo ok' },
+  }));
+  try {
+    execFileSync(process.execPath, [
+      path.join(PACK_ROOT, 'scripts', 'init-loop-harness.mjs'),
+      '--target', tmpL1, '--level', 'L1',
+    ], { encoding: 'utf8' });
+    ok('init-loop-harness --level L1 执行成功', true);
+  } catch (e) {
+    ok('init-loop-harness --level L1 执行成功', false, e.message);
+  }
+  for (const f of ['LOOP.md', 'loop-budget.md', 'loop-run-log.md', 'session-handoff.md', 'loop-ledger.json']) {
+    ok(`L1 不产出 ${f}（loop 机制属阶段 2）`, !fs.existsSync(path.join(tmpL1, f)));
+  }
+  for (const f of ['AGENTS.md', 'feature_list.json', 'progress.md', 'STATE.md', 'LESSONS.md', 'loop-constraints.md']) {
+    ok(`L1 产出 ${f}`, fs.existsSync(path.join(tmpL1, f)));
+  }
+  for (const s of ['loop-guard', 'minimal-fix', 'loop-verifier', 'harness-loop-init']) {
+    ok(`L1 不装阶段 2 技能 ${s}`,
+      !fs.existsSync(path.join(tmpL1, '.agents', 'skills', s, 'SKILL.md')));
+  }
+  for (const s of ['signal-gatekeeper', 'lesson-harvest']) {
+    ok(`L1 不装阶段 3 技能 ${s}`,
+      !fs.existsSync(path.join(tmpL1, '.agents', 'skills', s, 'SKILL.md')));
+  }
+  // 运行时编排任何阶段都装
+  ok('L1 装运行时编排 harness-loop',
+    fs.existsSync(path.join(tmpL1, '.agents', 'skills', 'harness-loop', 'SKILL.md')));
+  fs.rmSync(tmpL1, { recursive: true, force: true });
   // 不得写进没有任何 agent 会扫描的裸 skills/
   ok('不写裸 <repo>/skills/（无人扫描的路径）', !fs.existsSync(path.join(tmp, 'skills')));
 
@@ -688,6 +777,50 @@ section('15. 端到端装配');
   ok('装配后至少 L1', ['L1', 'L2', 'L3'].includes(audit.level), `got ${audit.level}`);
   ok('审计识别出 verifier', audit.checks.find((c) => c.key === 'verifier')?.ok === true);
   ok('审计识别出状态文件', audit.checks.find((c) => c.key === 'stateFile')?.ok === true);
+
+  // ---- 子系统映射必须匹配阶段 1 的实际产物 ----
+  // 曾经 instructions 依赖 loopConfig（LOOP.md，阶段 2 才建）、lifecycle 依赖
+  // budgetDoc/budgetSkill/stallDetection/escalation（全在阶段 2）。于是阶段 1
+  // 项目明明有 AGENTS.md + STATE.md + progress.md，子系统却报缺口，
+  // 判据 #9「五子系统都有最小工件」永远 FAIL。
+  // 这条断言的意义：改动 summarizeSubsystems 的映射必须让阶段 1 变红。
+  {
+    const s1 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-sub-s1-'));
+    fs.writeFileSync(path.join(s1, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    execFileSync(process.execPath, [
+      path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), s1, '--upgrade', '--stage', '1',
+    ], { encoding: 'utf8' });
+    writeRealFeatures(path.join(s1, 'feature_list.json'));
+    const s1a = scoreHarness(s1);
+    // 断言全部检查项，而非只判 passed > 0。
+    // 曾经这里只判 lifecycle.passed > 0：映射改回
+    // budgetDoc/budgetSkill/stallDetection/escalation 之后，budgetSkill 与
+    // escalation 仍然通过（技能装上了、AGENTS.md 写着升级路径），passed 照样 > 0，
+    // 断言全绿——映射错了却测不出来。判 total 才能锁住"这个子系统有几个入口"。
+    for (const k of ['instructions', 'state', 'verification', 'scope', 'lifecycle']) {
+      const s = s1a.subsystems[k] || {};
+      ok(`阶段 1 项目 ${k} 子系统有工件`, s.passed > 0, `${k}: ${JSON.stringify(s)}`);
+    }
+    // 子系统的入口不能依赖阶段 2 才创建的文件
+    ok('阶段 1 无 loopConfig 但 instructions 仍成立',
+      s1a.checks.find((c) => c.key === 'loopConfig')?.ok === false
+      && (s1a.subsystems.instructions.passed > 0));
+    ok('阶段 1 无 budgetDoc 但 lifecycle 仍成立',
+      s1a.checks.find((c) => c.key === 'budgetDoc')?.ok === false
+      && (s1a.subsystems.lifecycle.passed > 0));
+    // lifecycle 的入口必须是阶段 1 就有的状态文件，而不是阶段 2 的预算文档。
+    // budgetSkill/escalation 在阶段 1 会因为"技能装上了"而通过——
+    // 技能存在 ≠ 机制生效，正是这条断言要防的事。
+    eq('lifecycle 子系统入口数（阶段 1 靠 STATE.md + run-log）',
+      s1a.subsystems.lifecycle.total, 2);
+    eq('instructions 子系统入口数（阶段 1 只有指令文件）',
+      s1a.subsystems.instructions.total, 1);
+    ok('lifecycle 全靠阶段 2 才建的 loop 文档时不成立',
+      s1a.subsystems.lifecycle.passed > 0
+      && s1a.subsystems.lifecycle.total < 4,
+      `lifecycle: ${JSON.stringify(s1a.subsystems.lifecycle)}——映射可能改回了阶段 2 入口`);
+    fs.rmSync(s1, { recursive: true, force: true });
+  }
 
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -1018,6 +1151,9 @@ section('20. 三阶段驱动器');
   // 装配后应达成阶段 1
   fs.writeFileSync(path.join(empty, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
   runStage(empty, ['--upgrade', '--stage', '1']);
+  // 模板出厂带的是占位 feature（notes 自称"占位符"），判据 2 会拒绝它。
+  // 这里换成真实 feature——这正是判据 2 存在的意义：逼人真的替换。
+  writeRealFeatures(path.join(empty, 'feature_list.json'));
   const r1 = runStage(empty, ['--json']);
   const j1 = JSON.parse(r1.out);
   eq('装配后达成阶段 1', j1.current_stage, 1);
@@ -1025,9 +1161,14 @@ section('20. 三阶段驱动器');
   eq('--stage 1 --require 退出 0', runStage(empty, ['--stage', '1', '--require']).code, 0);
   eq('--stage 2 --require 仍退出 2', runStage(empty, ['--stage', '2', '--require']).code, 2);
 
-  // 阶段 1 的关键文件都生成了
-  for (const f of ['AGENTS.md', 'feature_list.json', 'STATE.md', 'progress.md', 'init.sh', 'LOOP.md', 'loop-constraints.md', 'LESSONS.md']) {
+  // 阶段 1 的关键文件都生成了。注意：loop 机制文档（LOOP.md / loop-budget.md /
+  // loop-run-log.md / session-handoff.md / loop-ledger.json）属于阶段 2——
+  // 曾经它们在阶段 1 就被创建，于是阶段 1 项目看起来已经有循环机制。
+  for (const f of ['AGENTS.md', 'feature_list.json', 'STATE.md', 'progress.md', 'init.sh', 'loop-constraints.md', 'LESSONS.md']) {
     ok(`阶段 1 生成 ${f}`, fs.existsSync(path.join(empty, f)));
+  }
+  for (const f of ['LOOP.md', 'loop-budget.md', 'loop-run-log.md', 'session-handoff.md', 'loop-ledger.json']) {
+    ok(`阶段 1 不生成 ${f}（loop 机制属阶段 2）`, !fs.existsSync(path.join(empty, f)));
   }
 
   // 升级到阶段 2 应补上 verifier
@@ -1085,6 +1226,31 @@ section('20. 三阶段驱动器');
   ok('Python 仓库的 init.sh 使用 pytest', /pytest/.test(pyInit), pyInit.slice(0, 200));
   fs.rmSync(py, { recursive: true, force: true });
 
+  // ---- --commands 覆盖自动检测 ----
+  // 自动检测在混合栈或 CI 里会猜错，猜错的代价是判据 5 发假 PASS：
+  // 启动脚本生成了但跑不通，而判据当时只读文本。
+  // 所以这条覆盖必须真的改变生成的脚本，而不只是被接受。
+  const cm = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-cmds-'));
+  fs.writeFileSync(path.join(cm, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+  runStage(cm, ['--upgrade', '--stage', '1', '--commands', 'echo custom-verify && true']);
+  const cmInit = fs.readFileSync(path.join(cm, 'init.sh'), 'utf8');
+  ok('--commands 写入启动脚本', /custom-verify/.test(cmInit), cmInit.slice(0, 200));
+  ok('--commands 覆盖掉自动检测的 npm', !/\bnpm\b/.test(cmInit), cmInit.slice(0, 200));
+  // 判据 5 真的执行它 → 自定义命令可跑通时阶段 1 达成
+  writeRealFeatures(path.join(cm, 'feature_list.json'));
+  const cmj = JSON.parse(runStage(cm, ['--json']).out);
+  ok('--commands 覆盖后启动脚本仍能跑通',
+    cmj.stages[0].checks.find((x) => /能跑通/.test(x.label))?.ok === true);
+
+  // 非法输入必须被拒，而不是静默回落
+  const badPm = runStage(cm, ['--upgrade', '--stage', '1', '--package-manager', 'cargo']);
+  eq('非法 --package-manager 退出 1', badPm.code, 1);
+  ok('非法 --package-manager 给出可读错误', /package-manager must be/.test(badPm.out),
+    badPm.out.slice(0, 200));
+  const badCmds = runStage(cm, ['--upgrade', '--stage', '1', '--commands', ' , , ']);
+  eq('空 --commands 退出 1', badCmds.code, 1);
+  fs.rmSync(cm, { recursive: true, force: true });
+
   // 三阶段都定义且各有判据
   ok('三个阶段都有判据', j1.stages.length === 3 && j1.stages.every((s) => s.checks.length > 0));
   ok('每个阶段都有依据', j1.stages.every((s) => s.goal && s.level));
@@ -1092,20 +1258,75 @@ section('20. 三阶段驱动器');
   // 阶段技能必须在各自的升级列表里（否则 workspace 安装拿不到）
   const stageSrc = fs.readFileSync(path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), 'utf8');
   ok('阶段1 升级列表含 harness-init', /STAGE1_SKILLS[\s\S]{0,240}harness-init/.test(stageSrc));
-  ok('阶段2 升级列表含 harness-strengthen', /STAGE2_SKILLS[\s\S]{0,240}harness-strengthen/.test(stageSrc));
+  ok('阶段2 升级列表含 harness-loop-init', /STAGE2_SKILLS[\s\S]{0,240}harness-loop-init/.test(stageSrc));
   ok('阶段3 升级列表含 harness-consolidate', /STAGE3_SKILLS[\s\S]{0,240}harness-consolidate/.test(stageSrc));
+
+  // ---- frontmatter 的 stage: 必须与升级列表一致 ----
+  // stage: 字段是"这个技能属于哪个建设阶段"的唯一声明。如果它和
+  // STAGE*_SKILLS 各说各的，那它就是装饰品——而装饰性的配置比没有更糟，
+  // 因为人会以为边界存在。所以这里断言两者互相吻合，并且每个技能都有声明。
+  {
+    const readStage = (skill) => {
+      const f = path.join(SKILLS_DIR, skill, 'SKILL.md');
+      if (!fs.existsSync(f)) return null;
+      const fm = fs.readFileSync(f, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      const m = fm && fm[1].match(/^stage:\s*(\S+)/m);
+      return m ? m[1] : null;
+    };
+    const listFrom = (constName) => {
+      const m = stageSrc.match(new RegExp(`const ${constName} = \\[([\\s\\S]*?)\\];`));
+      if (!m) return [];
+      return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+    };
+    const s1 = listFrom('STAGE1_SKILLS');
+    const s2 = listFrom('STAGE2_SKILLS');
+    const s3 = listFrom('STAGE3_SKILLS');
+
+    ok('阶段1 升级列表非空', s1.length > 0);
+    ok('阶段2 升级列表非空', s2.length > 0);
+    ok('阶段3 升级列表非空', s3.length > 0);
+
+    for (const [label, list, want] of [['1', s1, '1'], ['2', s2, '2'], ['3', s3, '3']]) {
+      for (const s of list) {
+        eq(`${s} 的 frontmatter stage 与阶段${label}升级列表一致`, readStage(s), want);
+      }
+    }
+    // harness-loop 是运行时：任何阶段都装，但不属于任何建设阶段
+    eq('harness-loop 标为 runtime', readStage('harness-loop'), 'runtime');
+    ok('运行时技能不在任何建设阶段的升级列表里',
+      ![...s1, ...s2, ...s3].includes('harness-loop'));
+    // 每个技能都必须声明，且声明合法
+    for (const d of fs.readdirSync(SKILLS_DIR)) {
+      if (d.startsWith('.')) continue;
+      if (!fs.existsSync(path.join(SKILLS_DIR, d, 'SKILL.md'))) continue;
+      const st = readStage(d);
+      ok(`${d} 声明了 stage`,
+        st !== null && ['1', '2', '3', 'runtime'].includes(st), `got ${st}`);
+    }
+  }
 
   // 旧技能名不得残留（目录、frontmatter、文档引用）。
   // 拼接构造，避免测试文件自身命中这个检查。
-  const staleNames = ['init', 'strengthen', 'consolidate'].map((s) => 'stage' + '-' + s);
+  // 阶段 2 的旧名与已删技能的名字也在这张表里：改名前它只查 stage-* 前缀那
+  // 三个 slug，真实旧名根本不在扫描范围内——于是改名可以漏掉 14 处引用
+  // 而测试全绿。
+  const staleNames = [
+    ...['init', 'strengthen', 'consolidate'].map((s) => 'stage' + '-' + s),
+    // 拆分构造，避免本文件命中自身的检查
+    'harness' + '-strengthen',
+    'harness' + '-bootstrap',
+  ];
   const scanFiles = [];
+  // REVIEW-*.md 是带日期的审查记录，记录的是"当时发现了什么"。改写它们等于伪造历史
+  // ——审查报告的价值就在于它没被后来的改动擦掉。所以它们不进这个扫描。
+  const isHistorical = (name) => /^REVIEW-\d{4}-\d{2}-\d{2}/.test(name);
   (function walk(d, depth) {
     if (depth > 3) return;
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       if (['.git', '.mimosa', 'node_modules'].includes(e.name)) continue;
       const f = path.join(d, e.name);
       if (e.isDirectory()) walk(f, depth + 1);
-      else if (/\.(md|mjs|yaml|yml|json)$/.test(e.name)) scanFiles.push(f);
+      else if (/\.(md|mjs|yaml|yml|json)$/.test(e.name) && !isHistorical(e.name)) scanFiles.push(f);
     }
   })(PACK_ROOT, 0);
   const stale = [];
@@ -1121,10 +1342,49 @@ section('20. 三阶段驱动器');
   const registrySrc = fs.readFileSync(path.join(PACK_ROOT, 'patterns', 'registry.yaml'), 'utf8');
   ok('registry 阶段定义含 skill 字段',
     /skill:\s*harness-init/.test(registrySrc)
-    && /skill:\s*harness-strengthen/.test(registrySrc)
+    && /skill:\s*harness-loop-init/.test(registrySrc)
     && /skill:\s*harness-consolidate/.test(registrySrc));
 
   fs.rmSync(empty, { recursive: true, force: true });
+
+  // ---- 假阳性防护：占位 feature 不得让判据 2 通过 ----
+  // 判据 2 若退回「features 是非空数组」，模板原样就能过——而模板出厂带的就是占位。
+  // 这条断言必须存在：曾经判据 2 只查非空数组，替换占位 feature 这件真正的活
+  // 被判据完全放过。
+  const pf = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-feat-'));
+  fs.writeFileSync(path.join(pf, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+  runStage(pf, ['--upgrade', '--stage', '1']);
+  const rpf = JSON.parse(runStage(pf, ['--json']).out);
+  const featCheck = rpf.stages[0].checks.find((c) => /完成标准/.test(c.label));
+  ok('模板占位 feature 不满足判据 2', featCheck && featCheck.ok === false,
+    featCheck ? '判据 2 放过了模板占位 feature' : '找不到判据 2');
+  ok('占位 feature 时阶段 1 不达成', rpf.stages[0].complete === false);
+  ok('判据 2 的证据点明占位', featCheck && /占位/.test(featCheck.evidence || ''),
+    featCheck ? featCheck.evidence : '');
+  // 换成真实 feature 后必须通过（证明判据不是无条件 FAIL）
+  writeRealFeatures(path.join(pf, 'feature_list.json'));
+  const rpf2 = JSON.parse(runStage(pf, ['--json']).out);
+  ok('真实 feature 满足判据 2',
+    rpf2.stages[0].checks.find((c) => /完成标准/.test(c.label))?.ok === true);
+  fs.rmSync(pf, { recursive: true, force: true });
+
+  // ---- 假阳性防护：格式对但跑不通的启动脚本不得通过 ----
+  // 判据 5 若退回「只读文本」，一个写对了 set -e 却指向不存在命令的启动脚本
+  // 照样拿 PASS——而它正是新会话的启动路径，判据 8 的原意是拦住这种情况。
+  const nr = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-nonrun-'));
+  fs.writeFileSync(path.join(nr, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+  runStage(nr, ['--upgrade', '--stage', '1']);
+  // 格式合法（set -e 在），但命令不存在 → 退出码非 0
+  fs.writeFileSync(path.join(nr, 'init.sh'),
+    '#!/usr/bin/env bash\nset -e\nthis-command-definitely-does-not-exist --x\n', 'utf8');
+  const rnr = JSON.parse(runStage(nr, ['--json']).out);
+  const runCheck = rnr.stages[0].checks.find((c) => /能跑通/.test(c.label));
+  ok('跑不通的启动脚本不满足判据 5', runCheck && runCheck.ok === false,
+    runCheck ? '判据只看文本，放过了跑不通的脚本' : '找不到判据 5');
+  ok('跑不通的脚本时阶段 1 不达成', rnr.stages[0].complete === false);
+  ok('判据 5 的证据含退出码', runCheck && /退出码/.test(runCheck.evidence || ''),
+    runCheck ? runCheck.evidence : '');
+  fs.rmSync(nr, { recursive: true, force: true });
 
   // 假阳性防护：占位符 init.sh 不得让阶段 1 通过
   const ph = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-ph-'));
@@ -1136,8 +1396,65 @@ section('20. 三阶段驱动器');
   const rph = JSON.parse(runStage(ph, ['--json']).out);
   ok('占位符 init.sh 使阶段 1 不达成', rph.stages[0].complete === false, `stage=${rph.current_stage}`);
   ok('占位符 init.sh 被明确标出',
-    rph.stages[0].checks.some((c) => /非占位/.test(c.label) && !c.ok));
+    rph.stages[0].checks.some((c) => /能跑通/.test(c.label) && !c.ok));
   fs.rmSync(ph, { recursive: true, force: true });
+
+  // ---- 事件接线判据：阶段 3 与 harness-loop 第 0 步读同一份逻辑 ----
+  // 曾经这段逻辑只存在于 harness-stage.mjs 里，harness-loop 的技能文档让 agent
+  // "自己判断有没有接线"——两份判断会漂移。现在提在 common.hasEventWiring，
+  // 下面这些断言锁住它，并锁住阶段 3 判据确实读它。
+  {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wire-0-'));
+    const r0 = hasEventWiring(empty);
+    eq('空仓库未接线', r0.wired, false);
+    ok('未接线时给出原因', typeof r0.detail === 'string' && r0.detail.length > 0, r0.detail);
+    fs.rmSync(empty, { recursive: true, force: true });
+
+    // 阶段 3 判据读的是同一份答案
+    const w0 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wire-1-'));
+    fs.writeFileSync(path.join(w0, 'package.json'), JSON.stringify({ name: 'x' }));
+    runStage(w0, ['--upgrade', '--stage', '1']);
+    const wj = JSON.parse(runStage(w0, ['--json']).out);
+    const wiringCheck = wj.stages[2].checks.find((c) => /事件脊/.test(c.label));
+    eq('阶段 1 项目：判据说未接线', wiringCheck?.ok, false);
+    eq('阶段 1 项目：helper 也说未接线', hasEventWiring(w0).wired, false);
+    ok('判据的证据用 helper 的 detail', wiringCheck?.evidence === hasEventWiring(w0).detail,
+      `判据=${wiringCheck?.evidence} / helper=${hasEventWiring(w0).detail}`);
+
+    // 存在 workflow 目录但没有 loop 类文件 → 仍未接线，且理由要说清楚
+    fs.mkdirSync(path.join(w0, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(w0, '.github', 'workflows', 'ci.yml'), 'name: ci\n');
+    const w1 = hasEventWiring(w0);
+    eq('只有非 loop workflow 时仍未接线', w1.wired, false);
+    ok('区分"没目录"与"目录里没有 loop 文件"', /没有 loop/.test(w1.detail), w1.detail);
+
+    // 放一个 loop workflow → 接线
+    fs.writeFileSync(path.join(w0, '.github', 'workflows', 'loop-intake.yml'), 'name: loop\n');
+    const w2 = hasEventWiring(w0);
+    eq('有 loop workflow 时已接线', w2.wired, true);
+    eq('接线方式标为 workflow', w2.via, 'workflow');
+    const wj2 = JSON.parse(runStage(w0, ['--json']).out);
+    eq('阶段 3 判据同步转为 PASS',
+      wj2.stages[2].checks.find((c) => /事件脊/.test(c.label))?.ok, true);
+
+    // 非 GitHub 平台：LOOP.md 声明调度也算
+    const w3 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wire-2-'));
+    fs.writeFileSync(path.join(w3, 'LOOP.md'), '## 调度\n\n- schedule: daily\n- 事件驱动\n');
+    eq('LOOP.md 声明调度时算接线', hasEventWiring(w3).wired, true);
+    eq('声明式接线的 via', hasEventWiring(w3).via, 'declared');
+    // 只写 schedule 不写事件驱动 → 不算
+    fs.writeFileSync(path.join(w3, 'LOOP.md'), '## 调度\n\n- schedule: daily\n');
+    eq('只有 schedule 没有事件驱动时不算接线', hasEventWiring(w3).wired, false);
+    fs.rmSync(w3, { recursive: true, force: true });
+    fs.rmSync(w0, { recursive: true, force: true });
+
+    // harness-loop 的技能文档必须真的提到这一步——它是技能，不是脚本，
+    // 没有代码入口，只能断言文档写了它。
+    const loopSkill = fs.readFileSync(path.join(SKILLS_DIR, 'harness-loop', 'SKILL.md'), 'utf8');
+    ok('harness-loop 第 0 步包含事件接线检查', /事件接线/.test(loopSkill));
+    ok('harness-loop 声明 no-wiring 这个 outcome', /no-wiring/.test(loopSkill));
+    ok('harness-loop 指向共用的 helper', /hasEventWiring/.test(loopSkill));
+  }
 
   // 假阳性防护：Promoted 表只有占位符时不算转正
   const pr = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-promo-'));
@@ -1166,6 +1483,7 @@ section('20. 三阶段驱动器');
   const gate = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-gate-'));
   fs.writeFileSync(path.join(gate, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
   runStage(gate, ['--upgrade', '--stage', '1']);
+  writeRealFeatures(path.join(gate, 'feature_list.json'));
 
   const g1 = JSON.parse(runStage(gate, ['--json']).out);
   eq('只做阶段1 后，阶段1 达成', g1.stages[0].complete, true);

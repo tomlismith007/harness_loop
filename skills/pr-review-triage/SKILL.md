@@ -6,6 +6,7 @@ description: >-
   periodic PR watching. Does not fix anything — it decides what needs fixing.
 license: MIT
 user_invocable: true
+stage: 1
 ---
 
 # PR Review Triage

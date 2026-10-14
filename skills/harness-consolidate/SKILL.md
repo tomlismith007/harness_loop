@@ -8,6 +8,7 @@ description: >-
   promoted lessons.
 license: MIT
 user_invocable: true
+stage: 3
 ---
 
 # Stage 3 · 巩固（Consolidate）

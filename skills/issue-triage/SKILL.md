@@ -6,6 +6,7 @@ description: >-
   labels, comments, or closes issues. Use when issue events arrive or for the daily overview.
 license: MIT
 user_invocable: true
+stage: 1
 ---
 
 # Issue Triage

@@ -7,6 +7,7 @@ description: >-
   Use on a nightly schedule, not per-event.
 license: MIT
 user_invocable: true
+stage: 3
 ---
 
 # Lesson Harvest — 夜审循环

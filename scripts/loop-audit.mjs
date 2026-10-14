@@ -302,16 +302,25 @@ export function scoreHarness(root, opts = {}) {
 
 function summarizeSubsystems(checks) {
   const map = {
-    instructions: ['agentsMd', 'loopConfig'],
+    // loopConfig（LOOP.md）是阶段 2 的循环注册表。阶段 1 的 instructions 只由
+    // 指令文件承担——曾经映射依赖 loopConfig，于是阶段 1 明明有 AGENTS.md，
+    // 却因没有 LOOP.md 而被判「instructions 无工件」。
+    instructions: ['agentsMd'],
     state: ['stateFile', 'runLog'],
     // 验证子系统含两个层次：入口（阶段 1）与独立检查者（阶段 2）
     verification: ['verificationEntry', 'verifier'],
     scope: ['constraintsFile', 'constraintsSkill', 'toolScope'],
-    lifecycle: ['budgetDoc', 'budgetSkill', 'stallDetection', 'escalation'],
+    // lifecycle 的定义是「让下一会话可重启」。阶段 1 靠 progress.md（会话连续性）
+    // 与 STATE.md（跨轮记忆）实现这件事，只是机制文档要到阶段 2 才建。
+    // 曾经映射到 budgetDoc/budgetSkill/stallDetection/escalation（全是 loop 机制），
+    // 于是阶段 1 必然缺 lifecycle 子系统，判据 #9 永远 FAIL。
+    lifecycle: ['stateFile', 'runLog'],
   };
   const out = {};
   for (const [name, keys] of Object.entries(map)) {
-    const items = checks.filter((c) => keys.includes(c.key));
+    // 去重：lifecycle 与 state 引用同一批 check，重复计数会让 total 虚高
+    const uniq = [...new Set(keys)];
+    const items = checks.filter((c) => uniq.includes(c.key));
     const passed = items.filter((c) => c.ok).length;
     out[name] = { passed, total: items.length, score: items.length ? Math.max(1, Math.round(passed / items.length * 5)) : 0 };
   }
@@ -387,7 +396,9 @@ Exit codes:
         for (const c of failing) process.stdout.write(`  - ${SUGGESTIONS[c.key]}\n`);
       }
       process.stdout.write('\nScaffold everything missing:\n');
-      process.stdout.write('  node scripts/init-loop-harness.mjs --target . --level L1\n');
+      process.stdout.write('  node scripts/harness-stage.mjs . --upgrade --stage 1\n');
+      // init-loop-harness.mjs 也能装，但它是同一件事的无闸门版本：
+      // 它报告写了什么，不判定是否达成。推荐带 --require 的那条路径。
     }
   }
 

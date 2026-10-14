@@ -79,7 +79,7 @@ Loop Harness 是一套让编码智能体围绕 issue/PR 事件持续、可靠工
 | 真实生产案例（全自动 loop） | `docs/09-case-magpie.md` |
 | 错题本（agent 夜审写入） | `LESSONS.md` |
 | 具体动作怎么做 | `skills/<技能名>/SKILL.md` |
-| 装配新项目 | `templates/` + `scripts/init-loop-harness.mjs` |
+| 装配新项目 | `templates/` + `scripts/harness-stage.mjs . --upgrade --stage 1` |
 
 ## 三阶段建设
 
@@ -91,8 +91,8 @@ node scripts/harness-stage.mjs /path/to/repo
 
 | 阶段 | 目标 | 判据 | 对应等级 | 技能 |
 |---|---|---|---|---|
-| **1 初始化** | 创建必要的 md 文件，让结构完整、下一会话可重启 | 10 项（全机械） | L1 | `harness-init` |
-| **2 强化** | 梳理并强化文件与机制，让验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 | `harness-strengthen` |
+| **1 初始化** | 创建 7 个文件，让结构完整、下一会话可重启（**不产出 loop 机制文档**） | 8 项（全机械） | L1 | `harness-init` |
+| **2 装配 loop 机制** | 装配阶段 1 不产出的 5 个 loop 机制文档，让验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 | `harness-loop-init` |
 | **3 巩固** | 事件接上、循环跑起来、经验自己积累并转正为规则 | 7 机械 + 1 人工 | L3 | `harness-consolidate` |
 
 **不要跳级。** 每一阶段的目的是让下一层的效果可观测、可归因。跳级会导致：无法判断哪一层出问题、跳过 triage 校准、无法量化每层贡献。

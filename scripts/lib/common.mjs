@@ -55,7 +55,9 @@ export const LOOP_SKILL_NAMES = [
   'minimal-fix',
   'post-merge-cleanup',
   'release-drafter',
-  'harness-bootstrap',
+  'harness-init',
+  'harness-loop-init',
+  'harness-consolidate',
 ];
 
 /** 技能扫描目录
@@ -383,6 +385,36 @@ export function loadDenylist(root = '.') {
     if (parsed.length) return parsed;
   }
   return DENYLIST_PATTERNS;
+}
+
+/**
+ * 项目是否接好了事件脊。
+ *
+ * 阶段 3 的判据 1 与 `harness-loop` 的第 0 步退出检查共用这一份逻辑——同一件事
+ * 判两遍就有两遍可能漂移。它在 common 而不是留在 harness-stage 里，正是为了让
+ * 两个消费者读同一个答案。
+ */
+export function hasEventWiring(root = '.') {
+  const wfDir = path.join(root, '.github', 'workflows');
+  if (exists(wfDir)) {
+    let files = [];
+    try { files = fs.readdirSync(wfDir); } catch { /* 权限或竞态 */ }
+    if (files.some((f) => /loop|triage|ci-sweeper|merge-gate|post-merge|release-draft|lesson-harvest|issue-intake/i.test(f))) {
+      return { wired: true, via: 'workflow', detail: `.github/workflows/ 下的 ${files.length} 个文件` };
+    }
+  }
+  // 非 GitHub 平台：LOOP.md 里声明了调度也算
+  const loop = readText(path.join(root, 'LOOP.md'));
+  if (loop && /schedule|cron|scheduler|automation/i.test(loop) && /on:|事件驱动/.test(loop)) {
+    return { wired: true, via: 'declared', detail: 'LOOP.md 声明了调度' };
+  }
+  return {
+    wired: false,
+    via: null,
+    detail: wfDir && exists(wfDir)
+      ? '存在 .github/workflows/，但里面没有 loop 类 workflow'
+      : '没有 .github/workflows/，LOOP.md 也未声明调度',
+  };
 }
 
 /**

@@ -7,6 +7,7 @@ description: >-
   instruction when they conflict.
 license: MIT
 user_invocable: true
+stage: 1
 ---
 
 # Loop Constraints Enforcer

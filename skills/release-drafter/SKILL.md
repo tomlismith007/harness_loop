@@ -6,6 +6,7 @@ description: >-
   to CHANGELOG without approval. Use on tag events or before release prep.
 license: MIT
 user_invocable: true
+stage: 3
 ---
 
 # Release Drafter

@@ -72,7 +72,7 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade # 补齐下一阶段缺�
 | 阶段 | 目标 | 判据 | 等级 | 技能 |
 |---|---|---|---|---|
 | **1 初始化** | 创建必要的 md 文件，让结构完整、下一会话可重启 | 10 项（全机械） | L1 | `harness-init` |
-| **2 强化** | 梳理并强化文件与机制，让**验证真的有效、约束真的被强制执行** | 6 机械 + 3 人工 | L2 | `harness-strengthen` |
+| **2 装配 loop 机制** | 装配阶段 1 不产出的 5 个 loop 文档，让**验证真的有效、约束真的被强制执行** | 6 机械 + 3 人工 | L2 | `harness-loop-init` |
 | **3 巩固** | 事件接上、循环跑起来、**经验自己积累并转正为规则** | 7 机械 + 1 人工 | L3 | `harness-consolidate` |
 
 **关键区别**：
@@ -149,7 +149,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 | 用法 | 怎么做 | 适合 |
 |---|---|---|
 | **① 单次审计** | `node scripts/loop-audit.mjs . --suggest` | 想知道现有仓库离"agent 可靠工作"还差什么 |
-| **② 装配新项目** | `node scripts/init-loop-harness.mjs --target . --level L1` | 从零建立 harness + loop 脚手架 |
+| **② 装配新项目** | `node scripts/harness-stage.mjs . --upgrade --stage 1` | 从零建立阶段 1 地基（7 个文件）。想直接装配到 L2/L3 用 `init-loop-harness.mjs --level L2`，但它没有闸门 |
 | **③ 技能对话式调用** | 装完技能后说"帮我把这个 PR 验证一下" | 人在场，让 agent 按框架的规则干活 |
 | **④ 事件驱动自动化** | 接 `examples/github-actions/` 的 workflow | 想让 issue/PR/CI 事件自动触发循环 |
 | **⑤ 定时循环** | 夜审 `lesson-harvest.yml` + 每日 triage | 想让系统自己积累经验、自己发现问题 |
@@ -161,7 +161,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 框架自带测试套件，覆盖闸门判定、熔断逻辑、拒绝列表匹配、事件路由、模板与技能完整性、端到端装配：
 
 ```bash
-node scripts/test.mjs           # 603 项断言
+node scripts/test.mjs           # 721 项断言
 node scripts/test.mjs --verbose # 显示每一项
 ```
 
@@ -194,8 +194,8 @@ CI 在每次 push 时运行测试套件、自审计、CLI 入口检查，以及�
 
 | 面 | 技能 | 职责 |
 |---|---|---|
-| **阶段** | `harness-init` | **阶段 1 初始化**：创建必要的 md 文件，10 项判据 |
-| **阶段** | `harness-strengthen` | **阶段 2 强化**：让验证真的有效、约束真的被强制执行 |
+| **阶段** | `harness-init` | **阶段 1 初始化**：创建 7 个文件，8 项判据（**不产出 loop 文档**） |
+| **阶段** | `harness-loop-init` | **阶段 2 装配 loop 机制**：补上 5 个 loop 文档，让验证真的有效、约束真的被强制执行 |
 | **阶段** | `harness-consolidate` | **阶段 3 巩固**：事件接上、经验积累、规则转正 |
 | 控制 | `loop-constraints` | 每轮开始加载约束，拒绝列表与闸门是绑定的 |
 | 控制 | `loop-budget` | 开始/结束检查花费；80% 降级为只报告，100% 立即退出 |
@@ -210,8 +210,14 @@ CI 在每次 push 时运行测试套件、自审计、CLI 入口检查，以及�
 | 执行 | `post-merge-cleanup` | 合并后扫描技术债与文档缺口 |
 | 验证 | `loop-verifier` | 独立检查者，默认立场 REJECT；含回退测试与 NOT RUN 声明 |
 | 学习 | `lesson-harvest` | **夜审循环**：扫当天 commit 的教训写进 LESSONS.md，3 次出现转正为硬规则 |
-| 编排 | `harness-loop` | 顶层：把事件脊跑起来的完整编排 |
-| 初始化 | `harness-bootstrap` | 为新仓库装配整套 harness |
+| 编排 | `harness-loop` | 顶层：把事件脊跑起来的完整编排（**运行时**，不属于任何建设阶段） |
+
+> **三个 `/` 命令就是三个建设阶段**：`/harness-init`（阶段 1）、`/harness-loop-init`（阶段 2）、
+> `/harness-consolidate`（阶段 3）。其余技能由 agent 按上下文自动调用，不是人敲的入口。
+>
+> 技能安装永远是**全量**的（18 个都在菜单里）——边界不靠裁剪安装，而是靠每个技能
+> frontmatter 的 `stage:` 字段和 description 里的前置阶段声明，让 agent 在被触发的
+> 瞬间知道自己该不该用它。
 
 ---
 

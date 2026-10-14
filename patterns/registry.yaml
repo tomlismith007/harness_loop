@@ -196,7 +196,7 @@ stages:
     skill: harness-init
     mechanical_checks: 10
     human_checks: 0
-    exit: 10 项判据全过，且 init.sh 是真实命令（非占位符）
+    exit: 8 项判据全过，且启动脚本真的能跑通（退出码 0）
     grounding:
       - LHE 五子系统最小工件
       - LHE 给地图不给手册（AGENTS.md 约 100 行）
@@ -204,11 +204,13 @@ stages:
       - LEC 第一周只报告
 
   - id: 2
-    name: 强化
-    en: Strengthen
-    goal: 梳理并强化 harness 文件与机制，让验证真的有效、约束真的被强制执行
+    name: 装配 loop 机制
+    en: Loop Init
+    goal: 装配 loop 机制文档，让验证真的有效、约束真的被强制执行
     level: L2
-    skill: harness-strengthen
+    skill: harness-loop-init
+    produces:
+      [LOOP.md, loop-budget.md, loop-run-log.md, session-handoff.md, loop-ledger.json]
     mechanical_checks: 6
     human_checks: 3
     exit: 6 项机械判据全过 + 三项人工确认（回退测试执行过 / NOT RUN 用过 / triage 准确率 > 70%）

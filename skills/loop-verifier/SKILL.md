@@ -6,6 +6,7 @@ description: >-
   sub-agent — never in the same role, session, or context as the implementer.
 license: MIT
 user_invocable: true
+stage: 2
 ---
 
 # Loop Verifier

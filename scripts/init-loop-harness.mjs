@@ -113,9 +113,7 @@ What gets created:
     TIME: new Date().toISOString().slice(11, 16),
   }, { force }));
 
-  results.push(copyTemplate('session-handoff.md', path.join(target, 'session-handoff.md'), {}, { force }));
-
-  // ---- init.sh（程序化生成） ----
+  // ---- 启动脚本（程序化生成） ----
   const initPath = path.join(target, 'init.sh');
   if (force || !exists(initPath)) {
     writeText(initPath, initScriptFromCommands(commands));
@@ -125,41 +123,55 @@ What gets created:
     results.push({ status: 'skipped', path: initPath });
   }
 
-  // ---- 循环控制面 ----
+  // ---- 状态与约束 ----
+  // 阶段 1 只产出这 3 个 + 上面的启动脚本与清单。loop 机制文档
+  // （LOOP.md / loop-budget.md / loop-run-log.md / session-handoff.md /
+  // loop-ledger.json）属于阶段 2，--level L2/L3 才写。曾经 L1 也写它们，
+  // 于是同一个 "L1" 在两个脚本里意味着两套不同的文件集合。
   results.push(copyTemplate('loop-constraints.md', path.join(target, 'loop-constraints.md'), {}, { force }));
-  results.push(copyTemplate('loop-budget.md', path.join(target, 'loop-budget.md'), {}, { force }));
-  results.push(copyTemplate('loop-run-log.md', path.join(target, 'loop-run-log.md'), {}, { force }));
-  results.push(copyTemplate('LOOP.md', path.join(target, 'LOOP.md'), {}, { force }));
   results.push(copyTemplate('STATE.md', path.join(target, 'STATE.md'), {}, { force }));
   results.push(copyTemplate('LESSONS.md', path.join(target, 'LESSONS.md'), {}, { force }));
 
-  // ---- 账本 ----
-  const ledgerPath = path.join(target, 'loop-ledger.json');
-  if (force || !exists(ledgerPath)) {
-    writeText(ledgerPath, JSON.stringify({
-      goal: 'Replace with the current loop goal',
-      pattern: 'pr-review-triage',
-      level,
-      attempts: [],
-    }, null, 2) + '\n');
-    results.push({ status: 'written', path: ledgerPath });
-  } else {
-    results.push({ status: 'skipped', path: ledgerPath });
+  if (level === 'L2' || level === 'L3') {
+    results.push(copyTemplate('session-handoff.md', path.join(target, 'session-handoff.md'), {}, { force }));
+    results.push(copyTemplate('LOOP.md', path.join(target, 'LOOP.md'), {}, { force }));
+    results.push(copyTemplate('loop-budget.md', path.join(target, 'loop-budget.md'), {}, { force }));
+    results.push(copyTemplate('loop-run-log.md', path.join(target, 'loop-run-log.md'), {}, { force }));
+  }
+
+  // ---- 账本（阶段 2 机制，熔断器的运行时状态）----
+  if (level === 'L2' || level === 'L3') {
+    const ledgerPath = path.join(target, 'loop-ledger.json');
+    if (force || !exists(ledgerPath)) {
+      writeText(ledgerPath, JSON.stringify({
+        goal: 'Replace with the current loop goal',
+        pattern: 'pr-review-triage',
+        level,
+        attempts: [],
+      }, null, 2) + '\n');
+      results.push({ status: 'written', path: ledgerPath });
+    } else {
+      results.push({ status: 'skipped', path: ledgerPath });
+    }
   }
 
   // ---- 技能 ----
-  const controlSkills = ['loop-constraints', 'loop-budget', 'loop-guard', 'event-router', 'signal-gatekeeper'];
-  const perceptionSkills = ['issue-triage', 'pr-review-triage', 'ci-triage'];
-  const l2Skills = ['minimal-fix', 'loop-verifier'];
-  const alwaysSkills = ['harness-loop', 'harness-bootstrap', 'lesson-harvest'];
+  // 与 harness-stage.mjs 的 STAGE1/2/3_SKILLS 对齐。曾经这里另有一套划分：
+  // L1 装 loop-guard（阶段 2）、signal-gatekeeper 与 lesson-harvest（阶段 3），
+  // 却不装 harness-init——"装了多少技能"根本反映不出项目到了哪个阶段。
+  const stage1Skills = [
+    'harness-loop', 'loop-constraints', 'loop-budget', 'event-router',
+    'issue-triage', 'pr-review-triage', 'ci-triage',
+  ];
+  const stage2Skills = ['harness-loop-init', 'loop-guard', 'minimal-fix', 'loop-verifier'];
+  const stage3Skills = ['signal-gatekeeper', 'lesson-harvest', 'post-merge-cleanup', 'release-drafter'];
 
-  for (const s of [...alwaysSkills, ...controlSkills, ...perceptionSkills]) {
-    copySkill(s, target, level, results);
-  }
+  for (const s of stage1Skills) copySkill(s, target, level, results);
   if (level === 'L2' || level === 'L3') {
-    for (const s of [...l2Skills, 'post-merge-cleanup', 'release-drafter']) {
-      copySkill(s, target, level, results);
-    }
+    for (const s of stage2Skills) copySkill(s, target, level, results);
+  }
+  if (level === 'L3') {
+    for (const s of stage3Skills) copySkill(s, target, level, results);
   }
 
   // ---- 输出 ----

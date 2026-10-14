@@ -7,6 +7,7 @@ description: >-
   irrelevant items are dropped without being forwarded.
 license: MIT
 user_invocable: true
+stage: 3
 ---
 
 # Signal Gatekeeper — 成本分层门卫

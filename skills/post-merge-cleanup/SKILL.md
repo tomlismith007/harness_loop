@@ -6,6 +6,7 @@ description: >-
   and file tickets for large items. Does not block the merge itself.
 license: MIT
 user_invocable: true
+stage: 3
 ---
 
 # Post-Merge Cleanup

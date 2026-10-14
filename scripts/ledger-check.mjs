@@ -62,14 +62,59 @@ export function normalizeError(raw) {
   return s;
 }
 
-/** 判定熔断状态 */
+/**
+ * 账本不可读时的判定：停下并升级。
+ *
+ * exit 2 与其他熔断触发一致——不是新的一类失败，而是熔断器在说
+ * "我不知道当前状态"，而"不知道"绝不能被读成"一切正常"。
+ */
+function unreadableLedger(why, thresholds) {
+  return {
+    iterations: 0,
+    consecutive_failures: 0,
+    tokens_used: 0,
+    last_error_signature: null,
+    thresholds: {
+      max_iterations: thresholds.maxIterations,
+      stagnation: thresholds.stagnationThreshold,
+      no_progress: thresholds.noProgressThreshold,
+      token_budget: thresholds.tokenBudget,
+    },
+    verdict: 'no-ledger',
+    exit_code: 2,
+    unreadable_reason: why,
+    next: 'STOP — the ledger is missing or malformed, so there is no readable state to judge. '
+      + 'Fix or create loop-ledger.json (stage 2 produces it), then re-run. Do not retry blind.',
+  };
+}
+
+/**
+ * 判定熔断状态。
+ *
+ * 账本不可读时**必须**停在 no-ledger，而不是回落到"没有尝试记录所以一切正常"。
+ * 曾经 `Array.isArray(ledger?.attempts) ? ledger.attempts : []` 把一个缺字段、
+ * 字段类型错、甚至 ledger 本身是 null 的输入都变成空数组，于是 verdict=ok、
+ * exit 0——熔断器在它最需要说话的时候静默放行。一个永远生效不了的闸门，
+ * 和一个不存在的闸门，在退出码上不可区分（硬约束 11）。
+ *
+ * 空 attempts 数组仍然是 ok：那是"还没开始跑"，不是"读不到"。
+ */
 export function checkLedger(ledger, opts = {}) {
   const maxIterations = opts.maxIterations ?? DEFAULT_BREAKER.maxIterations;
   const stagnationThreshold = opts.stagnationThreshold ?? DEFAULT_BREAKER.stagnationThreshold;
   const noProgressThreshold = opts.noProgressThreshold ?? DEFAULT_BREAKER.noProgressThreshold;
   const tokenBudget = opts.tokenBudget ?? null;
 
-  const attempts = Array.isArray(ledger?.attempts) ? ledger.attempts : [];
+  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
+    return unreadableLedger(null, { maxIterations, stagnationThreshold, noProgressThreshold, tokenBudget });
+  }
+  if (!Array.isArray(ledger.attempts)) {
+    return unreadableLedger(
+      ledger.attempts === undefined ? 'attempts 字段缺失' : `attempts 不是数组（${typeof ledger.attempts}）`,
+      { maxIterations, stagnationThreshold, noProgressThreshold, tokenBudget });
+  }
+
+  const attempts = ledger.attempts;
   const iterations = attempts.length;
   const tokensUsed = attempts.reduce((sum, a) => sum + (Number(a.tokensUsed) || 0), 0);
 
@@ -174,6 +219,12 @@ export function renderEscalation(ledger, result) {
       break;
     case 'max-iterations':
       lines.push(`${result.iterations} iterations reached the limit of ${result.thresholds.max_iterations}.`);
+      break;
+    case 'no-ledger':
+      lines.push(`The ledger could not be read: ${result.unreadable_reason}.`);
+      lines.push('A circuit breaker with no readable state cannot judge whether the loop is stuck,');
+      lines.push('so it stops rather than assuming progress. Do not retry blind — create or repair the');
+      lines.push('ledger first (stage 2, `harness-loop-init`, produces it).');
       break;
     default:
       lines.push('(no blocking condition)');

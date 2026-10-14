@@ -42,29 +42,35 @@
 
 创建必要的 md 文件，让 harness 结构完整、下一会话可重启。
 
-### 判据（10 项，全部机械判定）
+### 判据（8 项，全部机械判定）
 
 | # | 判据 | 检查方式 |
 |---|---|---|
 | 1 | 指令文件存在 | `AGENTS.md` 或 `CLAUDE.md` |
-| 2 | 功能清单存在且合法 | `feature_list.json` 有非空 `features` 数组 |
+| 2 | 功能清单每条 feature 有**可判定的完成标准** | 非空 `verification` 数组 + 非空 `user_visible_behavior`；占位（`notes` 自称占位、步骤是元指令）不算 |
 | 3 | 状态文件存在 | `STATE.md` |
 | 4 | 会话进度日志存在 | `progress.md` |
-| 5 | 启动脚本存在 | `init.sh` |
-| 6 | 循环配置存在 | `LOOP.md` |
+| 5 | **init.sh 真的能跑通** | 实际执行一次，退出码 0。含占位符或跑不通都 FAIL |
+| 6 | 指令文件声明了**工作规则** | `AGENTS.md` 正文含「一次一个 item / 不验证不宣称完成 / 完成定义」 |
 | 7 | 约束文件存在 | `loop-constraints.md` |
-| 8 | **init.sh 可执行且非占位** | 不含 "No package manifest detected"、"replace this line" 等占位符，且含 `set -e` |
-| 9 | 五子系统都有最小工件 | instructions / state / verification / scope / lifecycle |
-| 10 | 就绪度评分 ≥ 40 | `loop-audit.mjs` |
+| 8 | 核心子系统有最小工件 **且** 就绪度评分 ≥ 40 | instructions / state / verification / scope + `loop-audit.mjs` 评分 |
+
+### 阶段 1 产出什么、不产出什么
+
+产出 **7 个文件**：`AGENTS.md`、`feature_list.json`、`STATE.md`、`progress.md`、`init.sh`、`loop-constraints.md`、`LESSONS.md`。
+
+**不产出 loop 机制文档**——`LOOP.md`、`loop-budget.md`、`loop-run-log.md`、`session-handoff.md`、`loop-ledger.json` 属于阶段 2。它们曾经也在阶段 1 被创建，于是阶段 1 项目在没有 verifier、没有闸门执行力的状态下就把就绪度评分推到 56，而 `loop-audit` 在没有 verifier 时把等级封顶在 L1。分数高不等于阶段到了。
+
+`loop-constraints.md` 是唯一保留的 loop 文件，因为它是 agent 的**行为底线**而非运行机制：阶段 1 的 agent 已经在写文件，没有拒绝列表就意味着它可以编辑 `.env`。阶段 1 用模板原文，本地化是阶段 2 判据 5 的事。
 
 ### 依据
 
 | 来源 | 具体内容 |
 |---|---|
-| **LHE** 五子系统最小工件 | `AGENTS.md`（instructions）、`feature_list.json` + `progress.md`（state）、`init.sh`（verification）、feature 依赖与完成标准（scope）、`session-handoff.md`（lifecycle） |
+| **LHE** 五子系统最小工件 | `AGENTS.md`（instructions）、`feature_list.json` + `progress.md` + `STATE.md`（state）、`init.sh`（verification）、拒绝列表（scope） |
 | **LHE** 给地图不给手册 | `AGENTS.md` 是路由器，约 100 行；装不下就拆进 `docs/` |
 | **LHE** 初始化是独立阶段 | 初始化产出基础设施而非业务代码；`init.sh` 的职责是"开工前确认环境健康" |
-| **LEC** 脚手架产物 | `STATE.md` / `LOOP.md` / `loop-budget.md` / `loop-run-log.md` |
+| **LEC** 脚手架产物 | `STATE.md` / `feature_list.json` / `progress.md` / `LESSONS.md` |
 | **LEC** 第一周只报告 | 阶段 1 对应 L1，不自动修复、不自动合并 |
 
 ### 怎么执行
@@ -82,7 +88,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 1 --require
 
 ### 退出条件
 
-10 项判据全过。**但注意判据 8**——`init.sh` 必须是真实命令，不是占位符。
+8 项判据全过。**但注意判据 5**——`init.sh` 必须真的能跑通（退出码 0），不是占位符、也不是格式对但命令跑不通。
 
 ### 阶段 1 的常见错误
 

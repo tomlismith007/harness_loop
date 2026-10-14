@@ -7,6 +7,7 @@ description: >-
   Also detects multi-loop conflicts via the acting_on lock.
 license: MIT
 user_invocable: true
+stage: 1
 ---
 
 # Event Router

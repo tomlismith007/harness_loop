@@ -6,6 +6,7 @@ description: >-
   refactor unrelated code, never touch denylist paths, never mark your own work done.
 license: MIT
 user_invocable: true
+stage: 2
 ---
 
 # Minimal Fix

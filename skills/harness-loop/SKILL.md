@@ -6,9 +6,16 @@ description: >-
   persist state. Use this as the top-level entry when an event arrives (issue opened,
   PR review requested changes, CI failed, PR merged, tag pushed) and something needs to
   happen. Reach for it whenever you need to decide "what should happen next" rather than
-  executing one specific action.
+  executing one specific action. Do NOT invoke by hand — step 2 needs an --event name
+  only the event source knows. Requires event wiring (.github/workflows/loop-*.yml or a
+  schedule declared in LOOP.md); without it, step 0 exits and asks for stage 3.
 license: MIT
+stage: runtime
 ---
+
+<!-- stage: runtime = 不属于任何建设阶段，任何阶段都安装。
+     但它需要阶段 3 的事件接线才跑得起来——所以第 0 步会检查并直接退出。
+     这条边界是本技能自己执行的，不依赖任何人记住阶段。 -->
 
 # Harness Loop — 顶层编排
 
@@ -24,7 +31,24 @@ license: MIT
 
 1. `loop-pause-all` 是否生效（`loop-constraints.md`、`STATE.md`、issue 标签）→ **立即退出**
 2. 预算是否 ≥ 100% 日上限（读 `loop-budget.md` + `loop-run-log.md` 近 24h）→ **立即退出**
-3. 是否无待办（本事件对应的队列为空）→ **在 <5k token 内退出**，记录 `outcome: "no-op"`
+3. **事件接线是否存在** → **未接线即退出**，记 `outcome: "no-wiring"`，提示"本项目未接事件，请先跑阶段 3（`/harness-consolidate`）"
+4. 是否无待办（本事件对应的队列为空）→ **在 <5k token 内退出**，记录 `outcome: "no-op"`
+
+第 3 条是本技能**自己执行的边界**，不依赖任何人记住项目到了哪个阶段：
+
+```bash
+node -e "import('./scripts/lib/common.mjs').then(m=>{
+  const r = m.hasEventWiring(process.cwd());
+  console.log(r.wired ? 'wired: ' + r.detail : 'NOT wired: ' + r.detail);
+})"
+```
+
+未接线说明**没有任何来源会派发事件**——继续走完 8 步只会对着空队列空转，然后把"没做事"记成一次正常运行。与判据 3 的区别要分清：
+
+| 情况 | 结论 | 记什么 |
+|---|---|---|
+| 没有 `.github/workflows/` 且 `LOOP.md` 未声明调度 | 未初始化 | `outcome: "no-wiring"`，退出 |
+| 接线存在，但队列为空 | 正常空转 | `outcome: "no-op"`，<5k token 退出 |
 
 **为什么退出检查放最前面**：避免在应该停的时候还在分析。这是高节奏循环唯一的经济性来源。
 
@@ -136,11 +160,14 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 
 | 条件 | outcome |
 |---|---|
+| 未接事件脊，第 0 步退出 | `no-wiring` |
 | 无待办，提前退出 | `no-op` |
 | 产出报告，未改代码 | `report-only` |
 | 提出修复，等待验证 | `fix-proposed` |
 | 修复通过独立验证 | `verified` |
 | 交给人类 | `escalated` |
+
+`no-wiring` 与 `escalated` 都指向人，但含义不同：`no-wiring` 是**项目还没到阶段 3**，不是出了问题；`escalated` 是有问题需要人处理。别把前者记成后者，否则阶段推进的信号会丢在噪声里。
 
 **不允许**的结束方式："做了一些工作，感觉差不多了。"
 

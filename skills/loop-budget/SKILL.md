@@ -7,6 +7,7 @@ description: >-
   append a run record.
 license: MIT
 user_invocable: true
+stage: 1
 ---
 
 # Loop Budget Guard

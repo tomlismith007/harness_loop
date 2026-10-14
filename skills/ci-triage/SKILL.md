@@ -6,6 +6,7 @@ description: >-
   Use when a check_suite or workflow run fails and you need to decide whether to attempt a fix.
 license: MIT
 user_invocable: true
+stage: 1
 ---
 
 # CI Triage

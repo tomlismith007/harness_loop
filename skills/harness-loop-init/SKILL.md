@@ -1,16 +1,20 @@
 ---
-name: harness-strengthen
+name: harness-loop-init
 description: >-
-  Stage 2 of harness building: audit and strengthen existing harness files and mechanisms
-  so verification actually fails when it should, and constraints are actually enforced.
-  Use when a project has stage-1 files but they are still placeholders, when there is no
-  independent verifier, or when you need to calibrate triage accuracy before enabling
-  autonomous fixes. Produces a working verifier, enforced constraints, and a circuit breaker.
+  Stage 2 of harness building: install the loop mechanism — constraints that are actually
+  enforced, an independent verifier, and a circuit breaker with a ledger. Assembles the
+  loop documents stage 1 deliberately does not produce (LOOP.md, loop-budget.md,
+  loop-run-log.md, session-handoff.md, loop-ledger.json). Use when a project has passed
+  stage 1 but its constraints are still just documentation and verification is still
+  self-assessed. Requires stage 1 COMPLETE; do not run it on a project that has not.
+  Produces enforced constraints, a working verifier, and a circuit breaker.
 license: MIT
 user_invocable: true
+stage: 2
+requires_stage: 1
 ---
 
-# Stage 2 · 强化（Strengthen）
+# Stage 2 · 装配 loop 机制（Loop Init）
 
 **目标**：梳理并强化 harness 文件与机制，让**验证真的有效、约束真的被强制执行**。
 
@@ -50,7 +54,13 @@ node scripts/harness-stage.mjs <target>
 node scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
-补齐 `harness-strengthen`、`loop-guard`、`minimal-fix`、`loop-verifier`，全部装到 `.agents/skills/`。
+补齐两类产物。
+
+**loop 机制文档**（阶段 1 刻意不产出的那 5 个）：`LOOP.md`、`loop-budget.md`、`loop-run-log.md`、`session-handoff.md`、`loop-ledger.json`。
+
+**技能**（4 个，全部装到 `.agents/skills/`）：`harness-loop-init`（自己）、`loop-guard`、`minimal-fix`、`loop-verifier`。
+
+**手工改一处**：`loop-constraints.md` 的拒绝列表要按本仓库实际路径增删（判据 5）。阶段 1 留下的是模板原文，`gate-check` 会真的读它——它必须是真的。
 
 ## 核心：为什么 verifier 是阶段 2 的关键
 

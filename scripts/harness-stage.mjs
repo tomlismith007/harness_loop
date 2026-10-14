@@ -19,14 +19,30 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
   PACK_ROOT, SKILLS_DIR, SKILL_DIRS, parseDenylistFrom, detectProject, verificationCommands,
-  initScriptFromCommands, textHas, structuredText, fail,
+  initScriptFromCommands, textHas, structuredText, fail, hasEventWiring,
 } from './lib/common.mjs';
 import { scoreHarness } from './loop-audit.mjs';
 
 // ---------------------------------------------------------------- 阶段定义
+
+/**
+ * 阶段 1 的就绪度下限。
+ *
+ * 保持 40（与拆分前同值）。实测：空目录跑 --upgrade --stage 1 后得分 56，
+ * 留 16 分余量；删掉 loop-constraints.md 会掉到 52，仍在阈值内——但那是判据 7
+ * 的职责，评分只是粗筛。
+ *
+ * 注意这个分数被技能存在性抬高了不少：triage(14) + skills(14) + budgetSkill(2)
+ * 共 30 分来自「技能装上了」而非「机制在跑」。阶段 1 与阶段 2 的评分因此高度重叠
+ * （阶段 1 已达 56，阶段 2 阈值 58），真正区分两阶段的是 verifier(14)——
+ * loop-audit 在没有 verifier 时把 level 封顶在 L1，所以越不过去。
+ * 「技能存在 ≠ 机制生效」这条账记在 STATE.md 的 Watch List，另轮处理。
+ */
+const STAGE1_MIN_SCORE = 40;
 
 export const STAGES = [
   {
@@ -36,9 +52,9 @@ export const STAGES = [
     goal: '创建必要的 md 文件，让 harness 结构完整、下一会话可重启',
     level: 'L1',
     grounding: [
-      'LHE 五子系统最小工件：AGENTS.md / feature_list.json / progress.md / init.sh / session-handoff.md',
+      'LHE 五子系统最小工件：AGENTS.md / feature_list.json / progress.md / STATE.md / init.sh',
       'LHE「给地图不给手册」：AGENTS.md 是路由表，约 100 行',
-      'LEC 脚手架产物：STATE.md / LOOP.md / loop-budget.md / loop-run-log.md',
+      'LEC 脚手架产物：STATE.md / feature_list.json / progress.md / LESSONS.md',
       'LEC：第一周只报告，不自动修复',
     ],
   },
@@ -186,18 +202,10 @@ function denylistLocalized(root) {
   };
 }
 
-/** 是否接了事件脊 */
-function hasEventWiring(root) {
-  const wfDir = path.join(root, '.github', 'workflows');
-  if (exists(wfDir)) {
-    const files = fs.readdirSync(wfDir);
-    if (files.some((f) => /loop|triage|ci-sweeper|merge-gate|post-merge|release-draft|lesson-harvest|issue-intake/i.test(f))) {
-      return true;
-    }
-  }
-  // 非 GitHub 平台：LOOP.md 里声明了调度也算
-  const loop = readText(path.join(root, 'LOOP.md'));
-  return /schedule|cron|scheduler|automation/i.test(loop) && /on:|事件驱动/.test(loop);
+/** 是否接了事件脊（判据复用 scripts/lib/common.mjs 的 hasEventWiring，
+ *  与 harness-loop 第 0 步的退出检查读同一份逻辑） */
+function eventWiringPresent(root) {
+  return hasEventWiring(root).wired;
 }
 
 /** 是否声明了多循环协调 */
@@ -210,6 +218,85 @@ function hasMultiLoopCoordination(root) {
   return /acting_on/.test(corpus) && /优先级|priority/i.test(corpus);
 }
 
+/**
+ * AGENTS.md 是否声明了工作规则。
+ *
+ * 阶段 1 不产出 LOOP.md（那是阶段 2 的循环注册表），但"agent 该怎么干活"
+ * 必须在阶段 1 就写下来——否则新会话启动时读不到任何行为约束。
+ * 判据读的是 AGENTS.md 正文里那几条不变式，而不是文件是否存在。
+ */
+function agentsDeclaresWorkRules(root) {
+  const text = readText(path.join(root, 'AGENTS.md')) || readText(path.join(root, 'CLAUDE.md'));
+  if (!text) return { declared: false, reason: 'AGENTS.md / CLAUDE.md 都不存在' };
+
+  // 只看正文：模板占位符区块不算数
+  const body = stripHtmlComments(text);
+  const rules = [
+    { re: /一次只做一个|one (work )?item at a time|恰好一个/i, label: '一次只做一个 work item' },
+    { re: /不得宣称完成|不跑验证|before claim|verification.*required|must run.*(test|verification)/i, label: '不跑验证不得宣称完成' },
+    { re: /完成定义|definition of done|DoD/i, label: '完成定义' },
+  ];
+  const missing = rules.filter((r) => !r.re.test(body)).map((r) => r.label);
+  if (missing.length) {
+    return { declared: false, reason: `AGENTS.md 正文缺少工作规则：${missing.join('、')}` };
+  }
+  return { declared: true, reason: null };
+}
+
+/**
+ * feature_list.json 的每条 feature 是否有可判定的完成标准。
+ *
+ * 曾经判据只检查"features 是非空数组"——模板出厂就带 3 条占位 feature，
+ * 于是"替换占位 feature"这条真正该做的活被判据放过了。
+ *
+ * 完成的判据字段是 `verification`（模板 schema 用的名字），内容是「怎么验证它
+ * 做完了」的步骤。占位特征的判法：
+ *   1. 没有 verification 字段，或它不是非空数组
+ *   2. verification 步骤是元指令（"替换为…"/"描述…"）而不是可执行的检查
+ *   3. notes 里自称占位符
+ * 只查"非空数组"会把模板原样放过——那正是这个判据要抓的东西。
+ */
+function featuresHaveAcceptance(root) {
+  const fl = readJson(path.join(root, 'feature_list.json'));
+  if (!fl || !Array.isArray(fl.features) || !fl.features.length) {
+    return { ok: false, reason: 'feature_list.json 不存在或 features 为空' };
+  }
+
+  const metaDirective = /^\s*(replace|描述|填写|待补|todo|tbd|placeholder|替换|xxx)/i;
+  const loose = fl.features.filter((f) => {
+    const title = String(f?.title || f?.name || '');
+    const ver = f?.verification;
+    const notes = String(f?.notes || '');
+
+    // 自称占位符
+    if (/占位|placeholder/i.test(notes)) return true;
+    if (metaDirective.test(title)) return true;
+
+    // verification 缺失或不是非空数组
+    if (!Array.isArray(ver) || !ver.length) return true;
+
+    // verification 步骤全是元指令
+    const steps = ver.map((s) => String(s).trim()).filter(Boolean);
+    if (!steps.length) return true;
+    if (steps.every((s) => metaDirective.test(s))) return true;
+
+    // 缺 user_visible_behavior：说不清用户能观察到什么
+    if (!String(f?.user_visible_behavior || '').trim()) return true;
+
+    return false;
+  });
+
+  if (loose.length) {
+    const names = loose.slice(0, 2).map((f) => f?.title || f?.name || '(无名)').join('、');
+    return {
+      ok: false,
+      reason: `${loose.length}/${fl.features.length} 条 feature 的完成标准不可判定`
+        + `（如：${names}）——占位 feature 不算"有完成标准"`,
+    };
+  }
+  return { ok: true, reason: null };
+}
+
 /** 阶段 1 判据 */
 function checkStage1(root, audit) {
   const c = [];
@@ -220,33 +307,65 @@ function checkStage1(root, audit) {
     instr ? null : '两者都不存在',
     '复制 templates/AGENTS.md，替换占位符');
 
-  add('功能清单存在且合法（feature_list.json）', (() => {
-    const fl = readJson(path.join(root, 'feature_list.json'));
-    return Boolean(fl && Array.isArray(fl.features) && fl.features.length);
-  })(), null, '复制 templates/feature_list.json，替换占位 feature');
+  const fa = featuresHaveAcceptance(root);
+  add('功能清单存在且每条 feature 有可判定的完成标准', fa.ok,
+    fa.ok ? null : fa.reason,
+    '编辑 feature_list.json：把占位 feature 换成真实功能，写明怎么算完成');
 
   add('状态文件存在（STATE.md）', hasFile(root, 'STATE.md'), null, '复制 templates/STATE.md');
 
   add('会话进度日志存在（progress.md）', hasFile(root, 'progress.md'), null, '复制 templates/progress.md');
 
-  add('启动脚本存在（init.sh）', hasFile(root, 'init.sh'), null, '复制 templates/init.sh 并替换命令');
-
-  add('循环配置存在（LOOP.md）', hasFile(root, 'LOOP.md'), null, '复制 templates/LOOP.md');
-
-  add('约束文件存在（loop-constraints.md）', hasFile(root, 'loop-constraints.md'), null, '复制 templates/loop-constraints.md');
-
+  // init.sh 从"非占位符"升级为"真的能跑"：原判据只读文本，
+  // 一个写对了格式但命令跑不通的 init.sh 照样拿 PASS——而它是新会话的启动路径。
   const ph = initScriptHasPlaceholder(root);
-  add('init.sh 可执行且非占位', hasFile(root, 'init.sh') && !ph.placeholder, ph.reason,
-    '编辑 init.sh，替换为项目真实的安装/测试/构建命令');
+  const runnable = ph.placeholder ? { ok: false, reason: ph.reason } : (() => {
+    const initPath = path.join(root, 'init.sh');
+    try {
+      execFileSync('bash', [initPath], { cwd: root, encoding: 'utf8', timeout: 120000 });
+      return { ok: true, reason: null };
+    } catch (e) {
+      const out = `${e.stdout || ''}${e.stderr || ''}`;
+      // 区分两种失败：bash 本身跑不起来（spawn 层失败），vs bash 起来了但脚本非零退出。
+      // 早期版本按 /not found/ 匹配输出，把脚本里的 "command not found"
+      // 误报成「bash 不可用」——证据指向了错误的原因。
+      const spawnFailed = e.status === null
+        || e.code === 'ENOENT'
+        || e.code === 'EACCES'
+        || /^Error: spawn/i.test(String(e.message || ''));
+      if (spawnFailed) {
+        return { ok: false, reason: `无法执行 init.sh（bash 不可用或脚本不存在）：${(e.message || out).trim().slice(0, 160)}` };
+      }
+      return { ok: false, reason: `init.sh 退出码 ${e.status}——启动路径跑不通：${out.trim().slice(0, 200)}` };
+    }
+  })();
+  add('init.sh 存在、可执行且真的能跑通', !ph.placeholder && runnable.ok,
+    runnable.ok ? null : runnable.reason,
+    '运行 bash init.sh 直到退出码 0；脚本是会话启动路径，跑不通等于没有验证');
 
+  const wr = agentsDeclaresWorkRules(root);
+  add('指令文件声明了工作规则（一次一个 item / 不验证不宣称完成 / 完成定义）', wr.declared,
+    wr.declared ? null : wr.reason,
+    '在 AGENTS.md 的「工作规则」章节写明这三条不变式');
+
+  add('约束文件存在（loop-constraints.md：拒绝列表与闸门）', hasFile(root, 'loop-constraints.md'), null,
+    '复制 templates/loop-constraints.md。阶段 1 就要有底线：没有拒绝列表意味着 agent 可以编辑 .env');
+
+  // 就绪度阈值与核心子系统合为一条判据：两者都是"整体够不够"，
+  // 拆成两项会让报告看起来比实际更细，实际是同一个判断。
   const subsystems = audit.subsystems || {};
-  const allSub = ['instructions', 'state', 'verification', 'scope', 'lifecycle']
-    .every((k) => subsystems[k] && subsystems[k].passed > 0);
-  add('五子系统都有最小工件', allSub,
-    allSub ? null : `缺失：${Object.entries(subsystems).filter(([, v]) => !v.passed).map(([k]) => k).join(', ') || '多个'}`,
-    '补齐缺失子系统的工件');
-
-  add(`就绪度评分 ≥ 40（当前 ${audit.score}）`, audit.score >= 40, null, '运行 --upgrade 补齐文件');
+  const coreSub = ['instructions', 'state', 'verification', 'scope'].every((k) => {
+    const entries = (subsystems[k] || {}).passed ?? 0;
+    const total = (subsystems[k] || {}).total ?? 0;
+    return total === 0 ? false : entries > 0;
+  });
+  const scoreOk = audit.score >= STAGE1_MIN_SCORE;
+  add(`核心子系统有最小工件且就绪度评分 ≥ ${STAGE1_MIN_SCORE}（当前 ${audit.score}）`,
+    coreSub && scoreOk,
+    scoreOk ? (coreSub ? null : `缺失：${Object.entries(subsystems)
+      .filter(([k]) => ['instructions', 'state', 'verification', 'scope'].includes(k) && (subsystems[k] || {}).passed === 0)
+      .map(([k]) => k).join('、') || '多个'}`) : '先补齐上面失败的项',
+    '补齐缺失工件；lifecycle 子系统在阶段 2 才建立入口（loop-budget.md）');
 
   return c;
 }
@@ -324,8 +443,9 @@ function checkStage3(root, audit) {
   const add = (label, ok, evidence, action, human = false) =>
     c.push({ label, ok: Boolean(ok), evidence, action, human });
 
-  add('事件脊已接线', hasEventWiring(root),
-    hasEventWiring(root) ? null : '未找到 loop 相关 workflow，LOOP.md 也未声明调度',
+  const wiring = hasEventWiring(root);
+  add('事件脊已接线', wiring.wired,
+    wiring.wired ? null : wiring.detail,
     '复制 examples/github-actions/*.yml，或在平台上配置事件触发');
 
   const lessons = lessonsHasEntries(root);
@@ -397,26 +517,54 @@ export function detectStage(root, audit) {
 
 // ---------------------------------------------------------------- 升级（补齐文件）
 
+/**
+ * 阶段 1 只产出 harness 地基，不产出 loop 机制文档。
+ *
+ * loop 机制（LOOP.md / loop-budget.md / loop-run-log.md / session-handoff.md /
+ * loop-ledger.json）属于阶段 2 `harness-loop-init`。曾经它们在阶段 1 就被创建，
+ * 于是阶段 1 项目在没有 verifier、没有闸门执行力的状态下也能把就绪度评分推高——
+ * 声明 ≠ 生效，而这里连声明都还没有就先给了分。
+ *
+ * `loop-constraints.md` 是唯一例外：它是 agent 的行为底线（拒绝列表 +
+ * loop-pause-all 紧急刹车），不是 loop 运行机制。阶段 1 的 agent 已经在写文件，
+ * 没有拒绝列表就意味着它可以编辑 .env。阶段 2 判据才要求它按本仓库本地化。
+ */
 const STAGE1_FILES = [
   ['AGENTS.md', 'AGENTS.md'],
   ['feature_list.json', 'feature_list.json'],
   ['progress.md', 'progress.md'],
-  ['session-handoff.md', 'session-handoff.md'],
-  ['loop-constraints.md', 'loop-constraints.md'],
-  ['loop-budget.md', 'loop-budget.md'],
-  ['loop-run-log.md', 'loop-run-log.md'],
-  ['LOOP.md', 'LOOP.md'],
   ['STATE.md', 'STATE.md'],
   ['LESSONS.md', 'LESSONS.md'],
+  ['loop-constraints.md', 'loop-constraints.md'],
 ];
 
+/**
+ * 阶段 2 产出的 loop 机制文档。
+ *
+ * 这五个文件是"循环怎么跑"的答案：路由表（LOOP.md）、钱（loop-budget.md）、
+ * 跑过的记录（loop-run-log.md）、跨会话接力（session-handoff.md），
+ * 外加 upgrade() 里单独创建的账本（loop-ledger.json）。
+ */
+const STAGE2_FILES = [
+  ['LOOP.md', 'LOOP.md'],
+  ['loop-budget.md', 'loop-budget.md'],
+  ['loop-run-log.md', 'loop-run-log.md'],
+  ['session-handoff.md', 'session-handoff.md'],
+];
+
+/**
+ * 每个阶段的技能。
+ *
+ * `harness-loop` 不在这里——它是运行时编排，任何阶段都装。它的边界由自己
+ * 第 0 步的事件接线检查执行，不靠"到阶段几才装"来实现。
+ */
 const STAGE1_SKILLS = [
   'harness-init',
-  'harness-loop', 'harness-bootstrap', 'loop-constraints', 'loop-budget',
+  'loop-constraints', 'loop-budget',
   'event-router', 'issue-triage', 'pr-review-triage', 'ci-triage',
 ];
 
-const STAGE2_SKILLS = ['harness-strengthen', 'loop-guard', 'minimal-fix', 'loop-verifier'];
+const STAGE2_SKILLS = ['harness-loop-init', 'loop-guard', 'minimal-fix', 'loop-verifier'];
 
 const STAGE3_SKILLS = [
   'harness-consolidate',
@@ -444,13 +592,22 @@ function copySkillDir(name, target, results) {
   results.push({ status: 'written', path: dest });
 }
 
-function upgrade(root, targetStage, force, results) {
+function upgrade(root, targetStage, force, results, opts = {}) {
   const today = new Date().toISOString().slice(0, 10);
+  // 显式覆盖优先于自动检测。自动检测在混合栈或 CI 环境里会猜错，
+  // 而猜错的代价是判据 5 发假 PASS——它生成了启动脚本但跑不通。
+  const commands = Array.isArray(opts.commands) && opts.commands.length
+    ? opts.commands
+    : verificationCommands(detectProject(root), opts.packageManager ?? null);
 
   if (targetStage >= 1) {
     for (const [tpl, out] of STAGE1_FILES) {
       const replacements = out === 'AGENTS.md'
-        ? { PROJECT_PURPOSE: `Project harness for reliable agent-assisted development.`, PRIMARY_VERIFICATION_COMMAND: './init.sh', VERIFICATION_COMMANDS: '- `./init.sh`' }
+        ? {
+            PROJECT_PURPOSE: `Project harness for reliable agent-assisted development.`,
+            PRIMARY_VERIFICATION_COMMAND: './init.sh',
+            VERIFICATION_COMMANDS: commands.map((c) => `- \`${c}\``).join('\n'),
+          }
         : out === 'feature_list.json'
           ? { PROJECT_NAME: path.basename(root), DATE: today }
           : out === 'progress.md'
@@ -458,12 +615,10 @@ function upgrade(root, targetStage, force, results) {
             : {};
       results.push(copyTemplate(tpl, path.join(root, out), replacements, { force }));
     }
-    // init.sh 由脚本生成
+    // 启动脚本由脚本生成
     const initPath = path.join(root, 'init.sh');
     if (force || !exists(initPath)) {
-      // 复用 verificationCommands()：硬编码 npm 会给纯 Python 仓库生成一条
-      // 根本跑不起来的启动路径，而阶段 1 判据还给它发了 PASS。
-      const script = initScriptFromCommands(verificationCommands(detectProject(root)));
+      const script = initScriptFromCommands(commands);
       fs.writeFileSync(initPath, script, 'utf8');
       try { fs.chmodSync(initPath, 0o755); } catch { /* Windows */ }
       results.push({ status: 'written', path: initPath });
@@ -471,6 +626,18 @@ function upgrade(root, targetStage, force, results) {
       results.push({ status: 'skipped', path: initPath });
     }
 
+    for (const s of STAGE1_SKILLS) copySkillDir(s, root, results);
+    // 运行时编排：任何阶段都装。它的第 0 步会检查事件接线，
+    // 没接线就退出并提示先跑阶段 3——所以"装了但跑不了"是有意状态。
+    copySkillDir('harness-loop', root, results);
+  }
+
+  if (targetStage >= 2) {
+    for (const tpl of STAGE2_FILES) {
+      results.push(copyTemplate(tpl[0], path.join(root, tpl[1]), {}, { force }));
+    }
+    // 账本是熔断器的运行时状态，熔断器是阶段 2 机制——阶段 1 不该创建它。
+    // 曾经它在阶段 1 就被建出来，于是"阶段 1 装了什么"看起来像有熔断能力。
     const ledgerPath = path.join(root, 'loop-ledger.json');
     if (force || !exists(ledgerPath)) {
       fs.writeFileSync(ledgerPath, JSON.stringify({
@@ -481,10 +648,6 @@ function upgrade(root, targetStage, force, results) {
       results.push({ status: 'skipped', path: ledgerPath });
     }
 
-    for (const s of STAGE1_SKILLS) copySkillDir(s, root, results);
-  }
-
-  if (targetStage >= 2) {
     for (const s of STAGE2_SKILLS) copySkillDir(s, root, results);
   }
 
@@ -569,6 +732,11 @@ Options:
   --require       Exit 2 if the target stage is not met
   --upgrade       Scaffold files and skills the target stage needs
   --force         Overwrite existing files during --upgrade
+  --commands "a,b"  Override the verification commands (comma separated).
+                    Auto-detection guesses wrong on mixed stacks; a wrong guess
+                    means the stage-1 criterion that actually runs the startup
+                    script fails for the wrong reason.
+  --package-manager PM   Force npm|pnpm|yarn|bun instead of auto-detecting
   --json          JSON output
   --help          Show this help
 
@@ -592,10 +760,23 @@ Exit codes:
     fail(`--stage must be 1, 2, or 3 (got: ${args.stage})`);
   }
 
+  // 验证命令覆盖。自动检测在混合栈/CI 里会猜错，猜错的代价是判据 5 发假 PASS。
+  const explicitCommands = typeof args.commands === 'string'
+    ? args.commands.split(',').map((s) => s.trim()).filter(Boolean)
+    : null;
+  const explicitPm = typeof args.packageManager === 'string' ? args.packageManager : null;
+  if (explicitPm && !['npm', 'pnpm', 'yarn', 'bun'].includes(explicitPm)) {
+    fail(`--package-manager must be npm, pnpm, yarn, or bun (got: ${explicitPm})`);
+  }
+  if (args.commands !== undefined && explicitCommands && !explicitCommands.length) {
+    fail('--commands was given but contains no usable command');
+  }
+
   if (args.upgrade) {
     const to = targetStage ?? Math.min(3, current + 1);
     const results = [];
-    upgrade(root, to, Boolean(args.force), results);
+    upgrade(root, to, Boolean(args.force), results,
+      { commands: explicitCommands, packageManager: explicitPm });
     const written = results.filter((r) => r.status === 'written').length;
     process.stdout.write(`Upgraded harness to stage ${to} in ${root}\n`);
     process.stdout.write(`  written: ${written}, skipped: ${results.length - written}\n\n`);

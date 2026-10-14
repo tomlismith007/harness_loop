@@ -7,6 +7,7 @@ description: >-
   retry. Use before every retry attempt in a fix loop.
 license: MIT
 user_invocable: true
+stage: 2
 ---
 
 # Loop Guard — 熔断器

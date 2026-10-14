@@ -36,7 +36,8 @@
 
 2. **装配脚手架。**
    ```bash
-   node scripts/init-loop-harness.mjs --target . --level L1
+   node scripts/harness-stage.mjs . --upgrade --stage 1
+   node scripts/harness-stage.mjs . --stage 1 --require   # 退出码 0 = 达成
    ```
 
 3. **只跑 triage。** 每轮产出报告，写进 `STATE.md`，不改任何代码。
@@ -220,4 +221,4 @@ PR 长期停滞？                  → PR Review Triage
 
 - 术语 → [08-glossary.md](08-glossary.md)
 - 失效模式 → [05-failure-modes.md](05-failure-modes.md)
-- 装配工具 → `scripts/init-loop-harness.mjs`
+- 装配工具 → `scripts/harness-stage.mjs --upgrade --stage 1`（`init-loop-harness.mjs` 是无闸门的等价物）

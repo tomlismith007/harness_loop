@@ -11,10 +11,10 @@
 ### What's Done
 
 - [x] 蒸馏两个参考仓库（LHE harness engineering + LEC loop engineering）
-- [x] 18 个技能（`harness-init` / `harness-strengthen` / `harness-consolidate` 三阶段 + 控制/感知/执行/验证/学习）
+- [x] 17 个技能（`harness-init` / `harness-loop-init` / `harness-consolidate` 三阶段 + `harness-loop` 运行时 + 控制/感知/执行/验证/学习）
 - [x] 8 个脚本（7 个顶层 `.mjs` + `lib/common.mjs`），含 `harness-stage.mjs` 三阶段驱动器、`install-skills.mjs`
 - [x] 13 篇文档、13 个模板、8 个事件接线 workflow
-- [x] 603 项测试断言全通过
+- [x] 721 项测试断言全通过
 - [x] 修复审计盲区 — `SKILL_DIRS` 补 `.zcode/skills` 与 `.agents/skills`
 - [x] 修复审计 bug：verification 子系统只计 verifier，导致阶段 1 永远无法达成
 - [x] 修复假阳性：Promoted 表占位符被误判为已转正
@@ -79,7 +79,7 @@
   新增 `skillInDiscoverablePath` / `denylistLocalized` / `stripHtmlComments`
 - `scripts/init-loop-harness.mjs` — 技能写入 `.agents/skills/`
 - `scripts/test.mjs` — 路径断言更新；新增阶段闸门回归测试
-- `skills/harness-strengthen/SKILL.md` — 判据表与人工确认章节重写
+- `skills/harness-loop-init/SKILL.md`（本轮从阶段 2 的旧名改来）— 判据表与人工确认章节重写
 - `skills/harness-init/SKILL.md` — 阶段 2 提示更新
 - `docs/11-three-stages.md`、`docs/12-stage-commands.md`、`docs/10-how-to-use.md` — 判据数同步
 - `patterns/registry.yaml` — `mechanical_checks` / `human_checks` 更新

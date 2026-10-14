@@ -163,6 +163,85 @@
         "2026-10-14：修前清单里的路径穿越可递归删除目标目录之外的任意目录"
       ],
       "notes": "修前 SKILL_DIRS 不含 .zcode/.agents，导致安装成功也报 0 found，且 L2 永远不可达（level=L2 要求 verifierPresent）"
+    },
+    {
+      "id": "stage-001",
+      "priority": 8,
+      "area": "stage",
+      "title": "阶段 1 只产出 harness 地基，不产出 loop 机制文档",
+      "user_visible_behavior": "新项目跑 /harness-init 后只有 7 个文件；LOOP.md / loop-budget.md / loop-run-log.md / session-handoff.md / loop-ledger.json 要到阶段 2 才出现。阶段 1 的 8 项判据拦得住占位 feature 和跑不通的启动脚本。",
+      "status": "passing",
+      "verification": [
+        "空目录跑 --upgrade --stage 1，确认只有 7 个文件且 5 个 loop 机制文件都不存在",
+        "确认模板出厂的占位 feature 判据 2 FAIL、换成真实 feature 后 PASS",
+        "把启动脚本换成格式合法但命令跑不通的版本，确认判据 5 FAIL 且证据含退出码",
+        "确认阶段 1 项目五个子系统都成立，且 lifecycle 入口不是阶段 2 才建的 loop 文档",
+        "跑 --upgrade --stage 2，确认 5 个 loop 机制文件此时才被补上",
+        "bash init.sh 与 node scripts/test.mjs 全绿"
+      ],
+      "evidence": [
+        "node scripts/test.mjs：624 断言全通过（修前 603，新增 21 条）",
+        "变异回退 4 轮：把 5 个 loop 文件塞回阶段 1 → 2 条断言红；判据 2 的 if(loose.length) 改 if(false) → 3 条红；判据 5 退回只读文本 → 1 条红；lifecycle 映射改回阶段 2 入口 → 2 条红",
+        "实测空目录跑 --upgrade --stage 1：就绪度 56/100，阶段 1 报告 7/8（唯一 FAIL 是模板占位 feature）",
+        "实测 --upgrade --stage 2 后目录新增 LOOP.md / loop-budget.md / loop-run-log.md / session-handoff.md / loop-ledger.json",
+        "2026-10-14 修前：阶段 1 产出 12 个文件（含 5 个 loop 机制文档），子系统映射依赖阶段 2 文件导致判据「五子系统都有最小工件」永远 FAIL",
+        "2026-10-14 修前：init.sh 判据只读文本，格式对但命令跑不通照样 PASS；且把脚本内 command not found 误报成 bash 不可用"
+      ],
+      "notes": "21 条新断言里有 4 条第一版是无牙齿的（变异后测试仍全绿），经双向断言补强。这个比例说明「加判据」不等于「加了闸门」"
+    },
+    {
+      "id": "stage-002",
+      "priority": 9,
+      "area": "stage",
+      "title": "三个建设阶段的技能归属唯一且可机械验证",
+      "user_visible_behavior": "装技能后菜单里是三个 / 入口（/harness-init、/harness-loop-init、/harness-consolidate），其余技能由 agent 按上下文自动调用。每个技能的 frontmatter 声明自己属于哪个阶段，且声明与升级列表一致。",
+      "status": "passing",
+      "verification": [
+        "跑 node scripts/test.mjs，确认 686 断言全通过",
+        "确认 17 个技能全部有 stage: 字段（1/2/3/runtime）",
+        "确认 harness-loop 标 runtime 且不在任何 STAGE*_SKILLS 里",
+        "把 harness-loop 塞回 STAGE1_SKILLS，确认测试变红",
+        "把 init-loop-harness 的 L1 门改成 if(true)，确认 4 条断言变红",
+        "把 --commands 覆盖逻辑删掉，确认 2 条断言变红",
+        "确认 REVIEW-*.md 里的旧名引用不被改名波及（审查记录不改）",
+        "空目录跑 --upgrade --stage 1 → 7 个文件；再跑 --stage 2 → 新增 5 个 loop 文件"
+      ],
+      "evidence": [
+        "node scripts/test.mjs：686 断言全通过（第一批结束时 624，新增 62）",
+        "变异回退 4 轮：STAGE1_SKILLS 加 harness-loop → 2 条红；init-loop-harness L1 门改 if(true) → 4 条红；--commands 覆盖删除 → 2 条红；frontmatter stage 改成 1 → 当场红",
+        "实测：新断言当场抓到我引入的矛盾——harness-loop 标 runtime 却被列在 STAGE1_SKILLS",
+        "2026-10-14 修前：init-loop-harness --level L1 写 12 个文件（含 5 个 loop 机制文档），技能分级另有一套（L1 装 loop-guard/signal-gatekeeper/lesson-harvest 却不装 harness-init）",
+        "2026-10-14 修前：loop-audit.mjs 的 Scaffold 建议、README、docs/07 都推荐无闸门的 init-loop-harness 路径",
+        "2026-10-14 修前：阶段 2 技能名与其「装配 loop 机制」的职责不符；README 同一个技能在两张表里分别标为「阶段」和「初始化」"
+      ],
+      "notes": "本轮 2 条新断言第一版无牙齿，经变异发现后补强。过程中我自己犯两个错：批量改 frontmatter 造出 11 个重复围栏；用 git checkout 撤销变异时抹掉了本轮已有改动——恢复变异应用改动前的副本，不是 git checkout"
+    },
+    {
+      "id": "stage-003",
+      "priority": 10,
+      "area": "stage",
+      "title": "熔断器读不到账本时停下，而不是默认放行",
+      "user_visible_behavior": "跑 ledger-check 时，账本文件缺失、attempts 字段缺失或类型不对，退出码是 2 且 verdict 是 no-ledger；attempts 为空数组仍是 0。harness-loop 第 0 步会检查事件接线，没接线记 no-wiring 而不是走完 8 步对着空队列空转。",
+      "status": "passing",
+      "verification": [
+        "node scripts/test.mjs，确认 721 断言全通过",
+        "对 7 种畸形账本输入调用 checkLedger，全部返回 no-ledger / 退出码 2",
+        "对 {attempts: []} 调用 checkLedger，仍返回 ok / 退出码 0",
+        "把 no-ledger 的 exit_code 改成 0，确认 7 条断言变红",
+        "把 LOOP.md 声明式接线的条件改成永假，确认 2 条断言变红",
+        "把 workflow 匹配放宽成「目录里有文件就算接线」，确认 2 条断言变红",
+        "空目录调用 hasEventWiring，确认返回 wired:false 并给出具体原因",
+        "在临时仓库只放一个 ci.yml（不含 loop 字样），确认仍判未接线"
+      ],
+      "evidence": [
+        "node scripts/test.mjs：721 断言全通过（第二批结束时 686，新增 35）",
+        "变异回退 4 轮：exit_code 改 0 → 7 条红；删 ledger 本体检查 → 崩溃；声明式接线条件改永假 → 2 条红；workflow 匹配放宽 → 2 条红",
+        "实测修前行为：{} / {attempts:nope} / {attempts:null} / null / undefined / [] 六种输入全部返回 verdict=ok exit=0",
+        "实测 hasEventWiring：本仓库返回 wired:true via:declared（LOOP.md 声明了调度）；不存在的目录返回 wired:false 并说明「没有 .github/workflows/，LOOP.md 也未声明调度」",
+        "2026-10-14 修前：ledger-check.mjs:72 的 Array.isArray(...)?...:[] 让 6 种畸形输入静默放行——熔断器在最需要说话的时候说「一切正常」（硬约束 11：永远生效不了的闸门和不存在的闸门在退出码上不可区分）",
+        "2026-10-14 修前：事件接线逻辑只存在于 harness-stage.mjs，harness-loop 只能靠技能文档让 agent「自己判断」，两份判断会漂移"
+      ],
+      "notes": "变异回退里出现过一次「变异没落地就宣布通过」的假绿灯：我以为写进去了，其实同一条命令末尾的 cp 已经还原了文件。确认变异落地要眼看那行代码，不能只读测试结果"
     }
   ]
 }

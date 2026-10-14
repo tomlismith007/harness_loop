@@ -49,8 +49,7 @@ node scripts/install-skills.mjs --target /path/to/repo
 
 | 技能 | 什么时候用 | 它做什么 |
 |---|---|---|
-| `harness-init` | **主技能**，一开始就用 | 走完 10 项判据，补齐文件，提醒你改哪三处 |
-| `harness-bootstrap` | 想先盘点现状 | 检查五子系统各缺什么 |
+| `harness-init` | **主技能**，一开始就用 | 走完 8 项判据，补齐 7 个文件，提醒你要改哪两处 |
 
 ### 该敲哪些命令
 
@@ -60,7 +59,7 @@ node scripts/install-skills.mjs --target /path/to/repo
 node scripts/harness-stage.mjs /path/to/repo
 ```
 
-输出：当前阶段、阶段 1 的 10 项判据逐条 PASS/FAIL、失败项的具体补齐动作。
+输出：当前阶段、阶段 1 的 8 项判据逐条 PASS/FAIL、失败项的具体补齐动作。
 
 **第 2 步：补齐缺失文件**
 
@@ -68,15 +67,16 @@ node scripts/harness-stage.mjs /path/to/repo
 node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
 ```
 
-生成 10 个文件 + 8 个 L1 技能目录。
+生成 7 个文件 + 9 个阶段 1 技能目录。**不生成 loop 机制文档**（`LOOP.md` / `loop-budget.md` / `loop-run-log.md` / `session-handoff.md` / `loop-ledger.json`）——那些属于阶段 2。
 
-**第 3 步：手工改三处**（脚本改不了，必须人做）
+**第 3 步：手工改两处**（脚本改不了，必须人做）
 
 | 文件 | 改什么 | 为什么 |
 |---|---|---|
-| `init.sh` | 把 `npm install && npm test` 换成项目真实命令 | 判据 8 专门检查这个——占位符留着，harness 形同虚设 |
-| `loop-constraints.md` | 拒绝列表换成真实路径 | 模板里的 `auth/`、`payments/` 是示例，不真实等于没约束 |
-| `feature_list.json` | 3 条占位 feature 换成真实功能 | 粒度标准：一条能在一个 session 内完成 |
+| `init.sh` | 把 `npm install && npm test` 换成项目真实命令 | 判据 5 会**实际执行**它——占位符留着或命令跑不通，harness 形同虚设 |
+| `feature_list.json` | 3 条占位 feature 换成真实功能 | 判据 2 会拦住占位。粒度标准：一条能在一个 session 内完成 |
+
+`loop-constraints.md` 的本地化是**阶段 2** 的活（判据 5）。阶段 1 保持模板原文即可——底线要在，但按本仓库调整要等机制都装好之后。
 
 **第 4 步：验证**
 
@@ -131,7 +131,7 @@ node scripts/harness-stage.mjs /path/to/repo   # 阶段 1 应为 [COMPLETE] 10/1
 
 | 技能 | 什么时候用 | 它做什么 |
 |---|---|---|
-| `harness-strengthen` | **主技能** | 走完 6 项机械判据 + 提醒你做 3 项人工确认 |
+| `harness-loop-init` | **主技能** | 走完 6 项机械判据 + 提醒你做 3 项人工确认；装配 5 个 loop 机制文档 |
 | `loop-constraints` | 每轮开始 | 加载约束，输出 `Constraints loaded from loop-constraints.md: N rules active.` |
 | `loop-verifier` | 每次修复后 | 独立验证：跑测试、回退测试、NOT RUN 声明 |
 | `minimal-fix` | 修复目标明确时 | 产出最小 diff，不得自标完成 |
@@ -184,6 +184,8 @@ node scripts/gate-check.mjs \
 node scripts/ledger-check.mjs --ledger loop-ledger.json
 # 退出码 0 = 继续；2 = 停止并升级给人
 ```
+
+退出码 2 有四种情况，除了三个阈值还有一种容易忽略的：`verdict: no-ledger`——账本文件缺失、`attempts` 字段缺失或类型不对。熔断器读不到状态时**停下**，因为"我不知道"不能被读成"一切正常"。空 `attempts` 数组仍然是 0（那是"还没开始跑"，不是"读不到"）。
 
 **第 5 步：三项人工确认**（脚本不判定）
 
@@ -380,9 +382,10 @@ node scripts/harness-stage.mjs <repo> --stage 3 --require
 
 | 阶段 | 主技能 | 配套技能 |
 |---|---|---|
-| 1 | `/harness-init` | `harness-bootstrap` |
-| 2 | `/harness-strengthen` | `loop-constraints`、`loop-verifier`、`minimal-fix`、`loop-guard` |
-| 3 | `/harness-consolidate` | `harness-loop`、`lesson-harvest`、`event-router`、`signal-gatekeeper`、`loop-budget`、`post-merge-cleanup`、`release-drafter` |
+| 1 | `/harness-init` | `loop-constraints`、`loop-budget`、`event-router`、`issue-triage`、`pr-review-triage`、`ci-triage` |
+| 2 | `/harness-loop-init` | `loop-constraints`、`loop-verifier`、`minimal-fix`、`loop-guard` |
+| 3 | `/harness-consolidate` | `lesson-harvest`、`signal-gatekeeper`、`post-merge-cleanup`、`release-drafter` |
+| 运行时 | `harness-loop` | `event-router`、`loop-budget`、`loop-guard`（**不属于建设阶段**，任何阶段都装、任何阶段都能用，但要有事件接线才跑得起来） |
 | 诊断 | — | `ci-triage`、`issue-triage`、`pr-review-triage` |
 
 ### 退出码速查
@@ -400,6 +403,6 @@ node scripts/harness-stage.mjs <repo> --stage 3 --require
 
 **1. 装完技能没重启会话。** 技能在会话启动时扫描，不重启 `/harness-init` 调不出来。
 
-**2. 阶段 1 只看文件存在，不看内容。** `init.sh` 留着占位符、拒绝列表留着模板——文件都在但 harness 不起作用。判据 8 专门抓这个，`--require` 会失败。
+**2. 阶段 1 的占位物不被判据拦住。** `init.sh` 留着占位符、feature 留着占位——文件都在但 harness 不起作用。判据 2 查占位 feature，判据 5 **实际执行**启动脚本检查退出码，`--require` 会失败。
 
 **3. 跳过阶段 2 的三项人工确认直接进阶段 3。** 回退测试执行、NOT RUN 使用、triage 准确率都是人工确认项，脚本不判定，容易被跳过。但误报率高时，自动修复会在错误目标上烧钱，并消耗人对系统的信任——信任一旦消耗，团队会静音机器人，那是所有升级机制失效的终点。
