@@ -645,6 +645,61 @@ section('13. 文档完整性');
   for (const r of [...new Set(rrefs)]) {
     ok(`README 引用有效: docs/${r}`, fs.existsSync(path.join(PACK_ROOT, 'docs', r)));
   }
+
+  // ---- 文档里关于"阶段 1 有几项判据 / 几个技能"的说法必须与代码一致 ----
+  // 这次重构把阶段 1 从 10 项判据 12 个文件改成 8 项 7 个文件，技能从 18 减到 17。
+  // 改完代码才发现 README 和 docs/10 的三处表格还写着旧数字——因为没有任何东西
+  // 在校验它们。声明与实现脱节就是这个仓库反复出的同一类病，所以把它测出来。
+  {
+    const skillsOnDisk = fs.readdirSync(SKILLS_DIR)
+      .filter((d) => fs.existsSync(path.join(SKILLS_DIR, d, 'SKILL.md'))).length;
+    const stage1Checks = JSON.parse((() => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-doc-crit-'));
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+      execFileSync(process.execPath, [
+        path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), tmp, '--upgrade', '--stage', '1',
+      ], { encoding: 'utf8' });
+      writeRealFeatures(path.join(tmp, 'feature_list.json'));
+      const j = JSON.parse(execFileSync(process.execPath, [
+        path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), tmp, '--json',
+      ], { encoding: 'utf8' }));
+      fs.rmSync(tmp, { recursive: true, force: true });
+      return JSON.stringify(j.stages[0].checks.length);
+    })());
+    eq('阶段 1 判据数（供文档比对）', stage1Checks, 8);
+
+    // 扫描全部对外文档：出现旧数字就是漂移
+    const docFiles = [
+      'README.md', 'AGENTS.md',
+      ...fs.readdirSync(path.join(PACK_ROOT, 'docs')).map((d) => path.join('docs', d)),
+    ];
+    const drift = [];
+    for (const rel of docFiles) {
+      const f = path.join(PACK_ROOT, rel);
+      if (!fs.existsSync(f) || !/\.(md)$/.test(rel)) continue;
+      const text = fs.readFileSync(f, 'utf8');
+      // 「阶段 1 … 10 项」是已知的历史说法
+      if (/1[01]\s*项/.test(text)) drift.push(`${rel} → 阶段判据数仍写成 10/11 项`);
+      // 技能总数：只认目录树注释与带「共/一共/全部/总计」的措辞。
+      // 「补上 4 个技能」是某阶段的增量，正确且不该判漂移。
+      for (const m of text.matchAll(/skills?\/\s*#\s*(\d+)\s*个技能|(?:共|一共|全部|总计)\s*(\d+)\s*个技能/g)) {
+        const n = Number(m[1] ?? m[2]);
+        if (n !== skillsOnDisk) drift.push(`${rel} → 总数 ${n} 个技能（实际 ${skillsOnDisk}）`);
+      }
+      // 旧技能名不得出现在对外文档里。
+      // 字面量拆开构造，否则本行会命中第 20 节的残留扫描。
+      const OLD_NAMES = ['harness' + '-strengthen', 'harness' + '-bootstrap'];
+      for (const rel of docFiles) {
+        const f = path.join(PACK_ROOT, rel);
+        if (!fs.existsSync(f) || !/\.(md)$/.test(rel)) continue;
+        if (OLD_NAMES.some((n) => fs.readFileSync(f, 'utf8').includes(n))) {
+          drift.push(`${rel} → 旧技能名`);
+        }
+      }
+    }
+    ok('文档里的阶段判据数与技能数与代码一致', drift.length === 0, drift.join('; '));
+    ok(`技能数实测 ${skillsOnDisk}（供文档比对）`, skillsOnDisk === 17, String(skillsOnDisk));
+  }
 }
 
 // ---------------------------------------------------------------- 14. 事件接线

@@ -8,12 +8,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 技能 | 18 个，全部带 frontmatter 与触发描述 |
+| 技能 | 17 个，全部带 frontmatter（含 `stage:`）与触发描述 |
 | 脚本 | 8 个（`scripts/` 下 7 个顶层 `.mjs` + `lib/common.mjs`），零依赖 Node |
 | 文档 | 13 篇 |
 | 模板 | 13 个 |
 | 事件接线 | 8 个 GitHub Actions workflow |
-| 测试 | 721 项断言全通过 |
+| 测试 | 724 项断言全通过 |
 | 自审计 | 94/100，L2 |
 | 技能已安装 | ✅ `~/.zcode/skills/` + `~/.agents/skills/` |
 
@@ -80,8 +80,8 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require
 
 | 阶段 | 目标 | 判据 | 等级 |
 |---|---|---|---|
-| 1 初始化 | 创建必要的 md 文件 | 10 项（全机械） | L1 |
-| 2 强化 | 让验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 |
+| 1 初始化 | 创建 7 个文件（不含 loop 机制文档） | 8 项（全机械） | L1 |
+| 2 装配 loop 机制 | 补上 5 个 loop 文档，让验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 |
 | 3 巩固 | 事件接上、经验积累、规则转正 | 7 机械 + 1 人工 | L3 |
 
 **对应的技能**：`harness-init`、`harness-loop-init`、`harness-consolidate`。
@@ -219,7 +219,7 @@ cp examples/github-actions/*.yml /path/to/repo/.github/workflows/
 | `gate-check.mjs` | 闸门判定 | 0 = 通过；2 = 升级；3 = 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 = 继续；2 = 停止并升级（**含账本缺失或畸形**） |
 | `install-skills.mjs` | 安装技能到 ZCode 发现路径 | 0 = 成功；1 = 错误 |
-| `test.mjs` | 自检（721 断言） | 0 = 全通过 |
+| `test.mjs` | 自检（724 断言） | 0 = 全通过 |
 
 **退出码是给自动化用的。** 在 CI 里可以直接 `node scripts/gate-check.mjs ... || exit 1`。
 

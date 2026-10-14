@@ -71,7 +71,7 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade # 补齐下一阶段缺�
 
 | 阶段 | 目标 | 判据 | 等级 | 技能 |
 |---|---|---|---|---|
-| **1 初始化** | 创建必要的 md 文件，让结构完整、下一会话可重启 | 10 项（全机械） | L1 | `harness-init` |
+| **1 初始化** | 创建 7 个文件（**不含 loop 机制文档**），让结构完整、下一会话可重启 | 8 项（全机械） | L1 | `harness-init` |
 | **2 装配 loop 机制** | 装配阶段 1 不产出的 5 个 loop 文档，让**验证真的有效、约束真的被强制执行** | 6 机械 + 3 人工 | L2 | `harness-loop-init` |
 | **3 巩固** | 事件接上、循环跑起来、**经验自己积累并转正为规则** | 7 机械 + 1 人工 | L3 | `harness-consolidate` |
 
@@ -161,7 +161,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 框架自带测试套件，覆盖闸门判定、熔断逻辑、拒绝列表匹配、事件路由、模板与技能完整性、端到端装配：
 
 ```bash
-node scripts/test.mjs           # 721 项断言
+node scripts/test.mjs           # 724 项断言
 node scripts/test.mjs --verbose # 显示每一项
 ```
 
@@ -181,7 +181,7 @@ CI 在每次 push 时运行测试套件、自审计、CLI 入口检查，以及�
 ├── loop-budget.md             # 每日 token/运行/子智能体上限
 ├── loop-run-log.md            # 只追加运行日志（可观测性）
 ├── docs/                      # 方法论 + 三阶段路线（13 篇）
-├── skills/                    # 18 个技能：三阶段 / 控制 / 感知 / 执行 / 验证 / 学习
+├── skills/                    # 17 个技能：三阶段 + 运行时 / 控制 / 感知 / 执行 / 验证 / 学习
 ├── templates/                 # 可直接复制进项目的模板
 ├── scripts/                   # 可执行工具（零依赖 Node）
 ├── patterns/registry.yaml     # 机器可读的循环注册表 + 三阶段定义
@@ -215,9 +215,10 @@ CI 在每次 push 时运行测试套件、自审计、CLI 入口检查，以及�
 > **三个 `/` 命令就是三个建设阶段**：`/harness-init`（阶段 1）、`/harness-loop-init`（阶段 2）、
 > `/harness-consolidate`（阶段 3）。其余技能由 agent 按上下文自动调用，不是人敲的入口。
 >
-> 技能安装永远是**全量**的（18 个都在菜单里）——边界不靠裁剪安装，而是靠每个技能
+> 技能安装永远是**全量**的（17 个都在菜单里）——边界不靠裁剪安装，而是靠每个技能
 > frontmatter 的 `stage:` 字段和 description 里的前置阶段声明，让 agent 在被触发的
-> 瞬间知道自己该不该用它。
+> 瞬间知道自己该不该用它。这两条都是**软约束**：agent 可能读了仍然越界。
+> 唯一由代码强制的一条是 `harness-loop` 第 0 步的事件接线检查——没接线它自己退出。
 
 ---
 
