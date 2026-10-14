@@ -50,4 +50,8 @@
 
 ## Log
 
-<!-- 每轮追加。最新在下方。尚未运行任何真实循环——第一条记录应由实际运行产生。 -->
+<!-- 每轮追加。最新在下方。单行 JSON。 -->
+
+{"run_id":"2026-10-14T00:00:00Z","pattern":"review-remediation","event":"manual.audit","item":"three-review-fail-open","level":"L2","duration_s":0,"items_found":28,"actions_taken":8,"escalations":0,"tokens_estimate":0,"outcome":"fixed","notes":"三份独立审查收敛到同一根因（闸门未被闸门保护）。修了 gate-check 的 fail-open 族、拒绝列表真相源分裂、uninstall 数据销毁与路径穿越、阶段判据的空壳假绿、registry 无消费者、事件队列写进虚空、锁键命名空间错配、文档漂移。断言 498 → 589，每条新断言做过变异回退。"}
+
+{"run_id":"2026-10-14T00:00:00Z","pattern":"review-remediation","event":"manual.audit","item":"baseline-repair","level":"L2","duration_s":0,"items_found":1,"actions_taken":1,"escalations":0,"tokens_estimate":0,"outcome":"fixed","notes":"工作区 loop-audit.mjs:258 的未提交改动删掉了 L2 分支的 verifierPresent，测试红在 497/1。已 revert 并把散在 5 处的条件合并为一次判定（改一处漏一处正是这次回归的成因）。"}

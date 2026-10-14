@@ -1315,6 +1315,25 @@ section('17. registry 与路由一致性');
 
 // ---------------------------------------------------------------- 汇总
 
+// 文档里声称的断言数必须与实测一致，否则"验证已完成"这句话本身就是不可信的。
+// 本仓库曾有四个互相矛盾的数字（323 / 409 / 451 / 498），实测是第三个值。
+// 断言总数依赖配置（如 registry 的事件数），所以用固定偏移量而不是硬编码。
+const DOC_OFFSET = 3; // 本节自增 3 条
+const docChecks = [
+  ['README.md', /\b(\d{3})\s*项断言/],
+  ['progress.md', /\b(\d{3})\s*项测试断言/],
+  ['docs/10-how-to-use.md', /\b(\d{3})\s*项断言/],
+];
+const expectedTotal = passed + failed + DOC_OFFSET;
+for (const [file, re] of docChecks) {
+  const m = fs.readFileSync(path.join(PACK_ROOT, file), 'utf8').match(re);
+  if (!m) {
+    ok(`${file} 声称了断言数`, false, '未找到断言数声明');
+    continue;
+  }
+  ok(`${file} 声称的断言数与实测一致`, Number(m[1]) === expectedTotal, `文档写 ${m[1]}，实测 ${expectedTotal}`);
+}
+
 process.stdout.write(`\n${'='.repeat(60)}\n`);
 process.stdout.write(`Passed: ${passed}   Failed: ${failed}\n`);
 if (failed) {

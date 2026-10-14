@@ -8,12 +8,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 技能 | 15 个，全部带 frontmatter 与触发描述 |
-| 脚本 | 7 个，零依赖 Node |
-| 文档 | 11 篇 |
+| 技能 | 18 个，全部带 frontmatter 与触发描述 |
+| 脚本 | 8 个（`scripts/` 下 7 个顶层 `.mjs` + `lib/common.mjs`），零依赖 Node |
+| 文档 | 13 篇 |
 | 模板 | 13 个 |
 | 事件接线 | 8 个 GitHub Actions workflow |
-| 测试 | 409 项断言全通过 |
+| 测试 | 590 项断言全通过 |
 | 自审计 | 94/100，L2 |
 | 技能已安装 | ✅ `~/.zcode/skills/` + `~/.agents/skills/` |
 
@@ -30,7 +30,7 @@
 .zcode/skills/     ZCode 专属
 ```
 
-两类都可以装在用户级（`~/`）或工作区级（`<repo>/`）。**要跨 agent 通用就选 `--layout agents`**（默认 `zcode`）：
+两类都可以装在用户级（`~/`）或工作区级（`<repo>/`）。**默认布局就是 `agents`（跨 agent 共享）**，ZCode 专属路径用 `--layout zcode`：
 
 ```bash
 # 用户级：所有项目都能用
@@ -82,7 +82,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require
 |---|---|---|---|
 | 1 初始化 | 创建必要的 md 文件 | 10 项（全机械） | L1 |
 | 2 强化 | 让验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 |
-| 3 巩固 | 事件接上、经验积累、规则转正 | 7 机械 + 2 人工 | L3 |
+| 3 巩固 | 事件接上、经验积累、规则转正 | 7 机械 + 1 人工 | L3 |
 
 **对应的技能**：`harness-init`、`harness-strengthen`、`harness-consolidate`。
 
@@ -180,8 +180,8 @@ cp examples/github-actions/*.yml /path/to/repo/.github/workflows/
 | 技能 | 什么时候用 | 关键约束 |
 |---|---|---|
 | `harness-init` | 阶段 1：新项目还没有 harness | 10 项判据；`init.sh` 必须是真实命令 |
-| `harness-strengthen` | 阶段 2：文件在但机制没生效 | 9 机械 + triage 准确率 > 70%（人工） |
-| `harness-consolidate` | 阶段 3：要接事件、要积累经验 | 7 机械 + 完整周期与指标（人工） |
+| `harness-strengthen` | 阶段 2：文件在但机制没生效 | 6 机械 + 3 人工（回退测试执行过 / NOT RUN 用过 / triage 准确率 > 70%） |
+| `harness-consolidate` | 阶段 3：要接事件、要积累经验 | 7 机械 + 1 人工（跑过完整循环周期） |
 | `harness-loop` | 有事件进来，要决定"接下来做什么" | 顶层编排：退出检查→约束→路由→预算→派发→闸门→写状态 |
 | `harness-bootstrap` | 新项目装配 / 审计已有 harness | 五子系统盘点，先给最小 harness |
 | `loop-constraints` | 每轮开始（其他技能的前置） | 加载拒绝列表与闸门；命中即升级，不编辑 |
@@ -211,7 +211,7 @@ cp examples/github-actions/*.yml /path/to/repo/.github/workflows/
 | `gate-check.mjs` | 闸门判定 | 0 = 通过；2 = 升级；3 = 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 = 继续；2 = 停止并升级 |
 | `install-skills.mjs` | 安装技能到 ZCode 发现路径 | 0 = 成功；1 = 错误 |
-| `test.mjs` | 自检（451 断言） | 0 = 全通过 |
+| `test.mjs` | 自检（590 断言） | 0 = 全通过 |
 
 **退出码是给自动化用的。** 在 CI 里可以直接 `node scripts/gate-check.mjs ... || exit 1`。
 

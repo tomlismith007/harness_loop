@@ -45,13 +45,17 @@
         "运行 --upgrade --stage 1，确认生成 10 个必需文件",
         "再运行检测，确认阶段 1 达成 10/10",
         "运行 --stage 1 --require，确认退出码 0",
-        "对阶段 2 运行 --require，确认退出码 2"
+        "对阶段 2 运行 --require，确认退出码 2",
+        "verifier/breaker 技能写成 lorem ipsum + 账本 attempts 为空 → --stage 2 --require 必须非 0",
+        "对只有 pyproject.toml 的仓库 --upgrade --stage 1，生成的启动脚本不得含 npm 命令"
       ],
       "evidence": [
         "node scripts/test.mjs 第 20 节：空目录阶段 0、装配后阶段 1、--require 退出码 0/2 全部通过",
-        "占位符 init.sh 使阶段 1 不达成的假阳性防护已测试"
+        "占位符 init.sh 使阶段 1 不达成的假阳性防护已测试",
+        "2026-10-14：判据从「文件存在」升级为「读内容」——曾有 verifier 全文 lorem ipsum 仍 6/6 PASS exit 0",
+        "2026-10-14：--upgrade 改用 verificationCommands()，曾硬编码 npm 给 Python 仓库且判据仍给 PASS"
       ],
-      "notes": "判据 10（triage 准确率）与阶段 3 的完整周期需人工确认，脚本不判定"
+      "notes": "阶段 2 = 6 机械 + 3 人工，阶段 3 = 7 机械 + 1 人工（以代码为准）。无法机械判定的项传 ok=null，不参与阶段达成计算。本仓库是技能源仓库，阶段判据对它天然不适用——自报阶段 1 是正确结果。"
     },
     {
       "id": "loop-001",
@@ -66,12 +70,20 @@
         "对未注册事件路由，确认 registered=false 且不自创流程",
         "运行 gate-check.mjs 传入拒绝列表路径，确认 decision=escalate",
         "传入 reviewed-sha 与 head-sha 不一致，确认命中 head-commit 闸门",
-        "传入 red-check fail，确认命中 red-check 闸门"
+        "传入 red-check fail，确认命中 red-check 闸门",
+        "省略 --red-check 且 --phase gate，必须 exit 2（忘传参数不得放行）",
+        "--verdict aprove / --phase gtae 等未识别值，必须 exit 1",
+        "--attempts abc / --budget-pct abc 必须 exit 1（NaN 会关闭所有熔断器）",
+        "gate 阶段缺任一 sha 必须 exit 2（TOCTOU 不可绕过）",
+        "在 loop-constraints.md 的 Paths 块加 infra/prod/** 后，gate-check 必须 escalate",
+        "无参调用 gate-check 必须 exit 1"
       ],
       "evidence": [
-        "node scripts/test.mjs 第 5、6 节：路由与闸门共 40+ 断言全部通过"
+        "node scripts/test.mjs 第 5、6 节：路由与闸门共 40+ 断言全部通过",
+        "2026-10-14：断言 498 → 590，全部通过；上述六项均做过变异回退（改回旧行为必挂）",
+        "2026-10-14：三份独立审查复现的 fail-open 全部关闭"
       ],
-      "notes": "闸门优先级：pause > budget100 > denylist > attempts > budget80 > scope > head-commit > red-check > verification"
+      "notes": "闸门优先级：pause > budget100 > denylist > attempts > budget80 > scope > head-commit > red-check > verification。阈值来自 patterns/registry.yaml 的 defaults（readRegistryDefaults），CLI 可覆盖。拒绝列表真相源是 loop-constraints.md 的 ## Paths，不是脚本常量。"
     },
     {
       "id": "learn-001",
@@ -137,13 +149,18 @@
         "运行 --layout both，确认两边都有技能",
         "运行 --layout nonsense，确认退出码 1 且不写任何目录",
         "运行 --layout agents --list 与 --uninstall，确认可用",
-        "对目标仓库运行 loop-audit.mjs，确认技能被计入（不再报 0 found）"
+        "对目标仓库运行 loop-audit.mjs，确认技能被计入（不再报 0 found）",
+        "预置同名不同内容的技能后 --uninstall，该用户技能必须仍在（清单只记本次实写）",
+        "清单写入 ../../../victim 路径后 --uninstall 必须拒绝退出 1，目标树外目录不得被删",
+        "--target 指向一个已存在的文件，必须给出可读错误而非裸 ENOTDIR 堆栈"
       ],
       "evidence": [
         "node scripts/test.mjs 第 19 节：477 断言全通过（新增 16 项布局断言）",
         "回退测试：把 --layout 改回硬编码 .zcode 后，10 项断言失败（含「非法 --layout 退出码 1」与「manifest 记录 layout」），确认测试真的在测行为",
         "对 personal-agent 运行 loop-audit.mjs：7/100 → 43/100，Loop skills present (13 found) PASS，Independent verifier PASS",
-        "18 个技能文件与 skills/ 源逐字节一致（cmp 比对）"
+        "18 个技能文件与 skills/ 源逐字节一致（cmp 比对）",
+        "2026-10-14：修前 --uninstall 会删除安装器明确拒绝覆盖的用户技能（静默数据销毁）",
+        "2026-10-14：修前清单里的路径穿越可递归删除目标目录之外的任意目录"
       ],
       "notes": "修前 SKILL_DIRS 不含 .zcode/.agents，导致安装成功也报 0 found，且 L2 永远不可达（level=L2 要求 verifierPresent）"
     }

@@ -37,8 +37,8 @@ node scripts/event-router.mjs --event <事件名> [--item <item-id>]
 | `pull_request.opened` | review | `pr-review-triage` | L1 |
 | `pull_request.synchronize` | review | `pr-review-triage` | L1 |
 | `pull_request_review.changes_requested` | fix | `minimal-fix` → `loop-verifier` | L2 |
-| `pull_request_review.approved` | gate | `gate-check` | L2 |
-| `pull_request.ready_for_review` | gate | `gate-check` | L2 |
+| `pull_request_review.approved` | gate | `gate-check`（脚本 `scripts/gate-check.mjs`） | L2 |
+| `pull_request.ready_for_review` | gate | `gate-check`（脚本 `scripts/gate-check.mjs`） | L2 |
 | `pull_request.closed:merged` | post-merge | `post-merge-cleanup` | L1 |
 | `pull_request.closed:unmerged` | close | 记录到运行日志 | — |
 

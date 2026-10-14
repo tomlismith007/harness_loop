@@ -20,7 +20,7 @@
 | `issue-intake.yml` | `issues` | `issue-triage` (intake) |
 | `pr-review.yml` | `pull_request`, `pull_request_review` | `pr-review-triage` (review) / `minimal-fix` (fix) |
 | `ci-sweeper.yml` | `workflow_run`, `check_suite` | `ci-triage` (fix) |
-| `merge-gate.yml` | `pull_request: ready_for_review` | `gate-check` (gate) |
+| `merge-gate.yml` | `pull_request: ready_for_review` | `scripts/gate-check.mjs` (gate) |
 | `post-merge.yml` | `pull_request: closed` | `post-merge-cleanup` (post-merge) |
 | `release-draft.yml` | `push: tags`, `release` | `release-drafter` (release) |
 | `daily-triage.yml` | `schedule` | 每日兜底概览 |

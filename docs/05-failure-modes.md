@@ -154,7 +154,7 @@
    → 否：LOOP.md 路由表错误
 
 3. 约束加载了吗？
-   → 看运行日志开头有没有 "Constraints loaded: N rules active."
+   → 看运行日志开头有没有 "Constraints loaded from loop-constraints.md: N rules active."
    → 否：技能没读约束文件
 
 4. 预算内吗？
@@ -229,7 +229,7 @@
 | 6 | MCP 拥有无限制写入权限 | L1 只用只读连接器 |
 | 7 | 没有紧急停止开关 | 在 `LOOP.md` 与预算文件中记录暂停机制 |
 | 8 | 用代码修复间歇性故障 | 分类 → 隔离或重试策略 → 升级环境故障 |
-| 9 | 没有路径许可清单却自动合并 | 明确允许列表；拒绝列表路径人工合并 |
+| 9 | 没有路径许可清单却自动合并 | 明确允许列表（`loop-auto-merge-allowlist.md`，尚未创建——只在真要开启自动合并时才需要；默认 `auto_merge: false` 所以当前安全）；拒绝列表路径人工合并 |
 | 10 | 没有运行日志（只有 STATE.md） | 追加到 `loop-run-log.md` |
 
 ---

@@ -92,7 +92,7 @@ node scripts/harness-stage.mjs <target> --upgrade --stage 2
 
 机制：
 
-1. `loop-constraints` 技能在每轮开始加载，输出确认行 `Constraints loaded: N rules active.`
+1. `loop-constraints` 技能在每轮开始加载，输出确认行 `Constraints loaded from loop-constraints.md: N rules active.`
 2. 每个动作前复核对应章节（推送前复核 Push & Merge，编辑前复核 Paths）
 3. 命中拒绝列表 → 立即升级，**不执行任何编辑**
 

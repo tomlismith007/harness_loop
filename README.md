@@ -72,8 +72,8 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade # 补齐下一阶段缺�
 | 阶段 | 目标 | 判据 | 等级 | 技能 |
 |---|---|---|---|---|
 | **1 初始化** | 创建必要的 md 文件，让结构完整、下一会话可重启 | 10 项（全机械） | L1 | `harness-init` |
-| **2 强化** | 梳理并强化文件与机制，让**验证真的有效、约束真的被强制执行** | 9 机械 + 1 人工 | L2 | `harness-strengthen` |
-| **3 巩固** | 事件接上、循环跑起来、**经验自己积累并转正为规则** | 7 机械 + 2 人工 | L3 | `harness-consolidate` |
+| **2 强化** | 梳理并强化文件与机制，让**验证真的有效、约束真的被强制执行** | 6 机械 + 3 人工 | L2 | `harness-strengthen` |
+| **3 巩固** | 事件接上、循环跑起来、**经验自己积累并转正为规则** | 7 机械 + 1 人工 | L3 | `harness-consolidate` |
 
 **关键区别**：
 
@@ -98,7 +98,7 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade # 补齐下一阶段缺�
 .zcode/skills/    ZCode 专属
 ```
 
-**想让技能在 ZCode 之外的 agent 里也能用，用 `--layout agents`**（默认是 `zcode`）：
+**默认布局就是 `agents`**（跨 agent 共享），ZCode 专属路径用 `--layout zcode`：
 
 ```bash
 # 用户级：所有项目都能用
@@ -161,7 +161,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 框架自带测试套件，覆盖闸门判定、熔断逻辑、拒绝列表匹配、事件路由、模板与技能完整性、端到端装配：
 
 ```bash
-node scripts/test.mjs           # 323 项断言
+node scripts/test.mjs           # 590 项断言
 node scripts/test.mjs --verbose # 显示每一项
 ```
 
@@ -180,7 +180,7 @@ CI 在每次 push 时运行测试套件、自审计、CLI 入口检查，以及�
 ├── loop-constraints.md        # 机器可读约束（拒绝列表/闸门/预算），每轮必读
 ├── loop-budget.md             # 每日 token/运行/子智能体上限
 ├── loop-run-log.md            # 只追加运行日志（可观测性）
-├── docs/                      # 方法论 + 三阶段路线（12 篇）
+├── docs/                      # 方法论 + 三阶段路线（13 篇）
 ├── skills/                    # 18 个技能：三阶段 / 控制 / 感知 / 执行 / 验证 / 学习
 ├── templates/                 # 可直接复制进项目的模板
 ├── scripts/                   # 可执行工具（零依赖 Node）

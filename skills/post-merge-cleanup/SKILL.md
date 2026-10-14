@@ -12,12 +12,25 @@ user_invocable: true
 
 合并之后扫描跟进项。**不阻塞合并本身** —— 这是合并后的清理，不是合并前的关卡。
 
+本技能被两类事件触发，输入完全不同：**先判断本次是哪一种**。
+
 ## 输入
+
+**A. `pull_request.closed:merged` —— 合并后清理**
 
 - 近期合并到 main 的 PR（用 GitHub API 的合并列表，不只是本地 `git log`）
 - 合并 PR 的 diff
 - 现有 TODO / FIXME / HACK 标记
 - 技术债工单
+
+**B. `issues.closed` —— issue 关闭**
+
+- 被关闭 issue 的编号、标题、关闭原因
+- 该 issue 关联的 PR 与分支（若有）
+- **没有合并 diff**：不要去找"最近合并的 PR"——那会扫到与本 issue 无关的代码，
+  产出一份看起来合理、实则无关的报告
+
+两种触发都只扫描、只提议，不阻塞任何流程。
 
 ## 输出格式
 

@@ -10,7 +10,7 @@
 
 1. `pwd` 确认工作目录是仓库根。
 2. 完整读本文件。
-3. 读项目文档（`docs/ARCHITECTURE.md`、`docs/PRODUCT.md`、README 或等价物）。
+3. 读项目文档（README 或等价物；本脚手架**不生成** `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`，若项目有就在这里补读，没有就跳过）。
 4. 读 `progress.md` 拿最新已核实状态与下一步。
 5. 读 `feature_list.json`，选**一个**最高优先级未完成 feature。
 6. 跑 `./init.sh` 验证环境健康。

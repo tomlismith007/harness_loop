@@ -35,8 +35,8 @@
 | `pull_request.opened` | 新 PR 待审 | review | `pr-review-triage` |
 | `pull_request.synchronize` | PR 有新提交 | review | `pr-review-triage`（重新评估） |
 | `pull_request_review.changes_requested` | 审查要求修改 | fix | `minimal-fix` → `loop-verifier` |
-| `pull_request_review.approved` | 审查通过 | gate | `gate-check` |
-| `pull_request.ready_for_review` | draft 转正 | gate | `gate-check` |
+| `pull_request_review.approved` | 审查通过 | gate | `gate-check`（脚本 `scripts/gate-check.mjs`） |
+| `pull_request.ready_for_review` | draft 转正 | gate | `gate-check`（脚本 `scripts/gate-check.mjs`） |
 | `pull_request.closed:merged` | 已合并 | post-merge | `post-merge-cleanup` |
 | `pull_request.closed:unmerged` | 被拒绝 | close | 记录到 `loop-run-log.md`（用于统计） |
 
@@ -115,7 +115,7 @@ loop-pause-all      → exit
 `scripts/event-router.mjs` 接受事件名，输出阶段、技能、闸门和下一步：
 
 ```bash
-node scripts/event-router.mjs --event pull_request_review.changes_requested --pr 123
+node scripts/event-router.mjs --event pull_request_review.changes_requested --item pr-123
 ```
 
 输出：

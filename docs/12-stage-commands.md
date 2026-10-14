@@ -132,7 +132,7 @@ node scripts/harness-stage.mjs /path/to/repo   # 阶段 1 应为 [COMPLETE] 10/1
 | 技能 | 什么时候用 | 它做什么 |
 |---|---|---|
 | `harness-strengthen` | **主技能** | 走完 6 项机械判据 + 提醒你做 3 项人工确认 |
-| `loop-constraints` | 每轮开始 | 加载约束，输出 `Constraints loaded: N rules active.` |
+| `loop-constraints` | 每轮开始 | 加载约束，输出 `Constraints loaded from loop-constraints.md: N rules active.` |
 | `loop-verifier` | 每次修复后 | 独立验证：跑测试、回退测试、NOT RUN 声明 |
 | `minimal-fix` | 修复目标明确时 | 产出最小 diff，不得自标完成 |
 | `loop-guard` | 每次重试前 | 熔断：同一错误 3 次 / 连续失败 5 次 |

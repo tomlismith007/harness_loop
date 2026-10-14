@@ -78,7 +78,9 @@ patterns:
     risk: low
     level_default: L2
     phases: [gate]
-    skills: [gate-check]
+    # gate-check 是脚本 scripts/gate-check.mjs，不是 skills/gate-check/ 技能目录
+    scripts: [scripts/gate-check.mjs]
+    skills: []
     state: STATE.md
     human_gates: [merge-always-human, denylist, scope, large-diffs]
     week_one_mode: L2
@@ -224,8 +226,8 @@ stages:
     level: L3
     skill: harness-consolidate
     mechanical_checks: 7
-    human_checks: 2
-    exit: 7 项机械判据全过 + 跑过完整周期 + 指标健康（人工）
+    human_checks: 1
+    exit: 7 项机械判据全过 + 跑过完整循环周期（人工）
     grounding:
       - LHE 六原语 + 图工程多循环协调
       - LEC 事件驱动 + 多循环优先级 + 成本可观测

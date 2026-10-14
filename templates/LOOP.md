@@ -12,7 +12,7 @@
 | `pull_request.opened` | review | `pr-review-triage` | L1 | 无 |
 | `pull_request_review.changes_requested` | fix | `minimal-fix` → `loop-verifier` | L2 | 拒绝列表路径 |
 | `check_suite.completed:failure` | fix | `ci-triage` → `minimal-fix` | L2 | infra/env；3 次上限 |
-| `pull_request.ready_for_review` | gate | `gate-check` | L2 | **合并始终人工** |
+| `pull_request.ready_for_review` | gate | `gate-check`（脚本 `scripts/gate-check.mjs`） | L2 | **合并始终人工** |
 | `pull_request.closed:merged` | post-merge | `post-merge-cleanup` | L1 | 大范围清理 |
 | `push:tags` | release | `release-drafter` | L1 | 发布始终人工 |
 

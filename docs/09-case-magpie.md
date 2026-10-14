@@ -21,9 +21,11 @@
 |---|---|---|
 | `AGENTS.md` | **纯路由表**，自己不写规则 | 开工前 |
 | `docs/subsystems/` | 子系统改动规范 | 改子系统时 |
-| `docs/code-standards.md` | 写码/审码标准（6 条验收 + 转正后的硬规则） | 写代码、审代码时 |
-| `docs/contributors.md` | 社区 PR 审查规范 | 审社区 PR 时 |
+| `docs/code-standards.md`（案例仓库的文件） | 写码/审码标准（6 条验收 + 转正后的硬规则） | 写代码、审代码时 |
+| `docs/contributors.md`（案例仓库的文件） | 社区 PR 审查规范 | 审社区 PR 时 |
 | `LESSONS.md` | 错题本，agent 自己每晚写 | 夜间写入，白天读取 |
+
+> 下表中除 `AGENTS.md` 外，`docs/subsystems/`、`docs/code-standards.md`、`docs/contributors.md` 都属于**案例仓库（magpie）**——本仓库（loop-harness）没有这些文件，也不在脚手架里生成它们。
 
 **关键设计**：`AGENTS.md` 不承载规则，只承载「去哪找规则」。
 
@@ -32,6 +34,8 @@
 写代码、审代码 → docs/code-standards.md
 审社区 PR     → docs/contributors.md
 ```
+
+（以上三条目标文件均在**案例仓库**中，本仓库没有。）
 
 **【述】** 灵感来源于 dsh（DeepSeek Harness 的「能力缝 + 插件化」思路）。**【述】** 在此之前，别人已经在自动 review 和管理了——也就是说路由表是后来加的优化，不是起点。
 
