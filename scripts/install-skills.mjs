@@ -58,6 +58,11 @@ function resolveDestinations(args) {
 
   if (typeof args.target === 'string') {
     const root = path.resolve(args.target);
+    // 目标是已存在的文件时，mkdirSync 会抛裸 ENOTDIR 堆栈（而且 "Installed" 横幅
+    // 已经打印过了）。这里给仓库统一的 fail() 消息。
+    if (exists(root) && !fs.statSync(root).isDirectory()) {
+      fail(`--target must be a directory (got a file): ${root}`);
+    }
     return {
       layout, scope: 'workspace', root,
       dirs: dots.map((dot) => ({ dot, dir: path.join(root, dot, 'skills') })),
@@ -90,6 +95,7 @@ function install(args) {
     fs.mkdirSync(target.dir, { recursive: true });
 
     const results = [];
+    const written = [];
     for (const name of skills) {
       const src = path.join(PACK_ROOT, 'skills', name, 'SKILL.md');
       const targetDir = path.join(target.dir, name);
@@ -99,21 +105,25 @@ function install(args) {
         // 已存在：检查是否同一个包的内容
         const same = readText(src) === readText(targetFile);
         results.push({ name, status: same ? 'unchanged' : 'skipped-exists' });
+        // unchanged 是本包写的，可以卸载；skipped-exists 是用户自己的内容，绝不能删。
+        if (same) written.push(name);
         continue;
       }
       fs.mkdirSync(targetDir, { recursive: true });
       fs.copyFileSync(src, targetFile);
       results.push({ name, status: 'installed' });
+      written.push(name);
     }
 
-    // 写清单，供 uninstall 使用
+    // 清单只记本次真正写入的技能。记整包列表会让 uninstall 把用户自己的
+    // 同名技能删掉——安装器承诺"不覆盖"，卸载却销毁。
     writeText(path.join(target.dir, MANIFEST_NAME), JSON.stringify({
       installedAt: new Date().toISOString(),
       packRoot: PACK_ROOT,
       scope: dest.scope,
       layout: dest.layout,
       dotDir: target.dot,
-      skills,
+      skills: written,
     }, null, 2) + '\n');
 
     const installed = results.filter((r) => r.status === 'installed').length;
@@ -164,8 +174,14 @@ function uninstall(args) {
       fail(`manifest is not valid JSON: ${manifestPath}`);
     }
 
+    // 清单是目标目录里用户可写的普通文件，name 不做校验就是任意递归删除。
+    // 解析后断言仍在目标目录内，越界一律拒绝并报错。
+    const rootDir = path.resolve(target.dir);
     for (const name of manifest.skills || []) {
-      const targetDir = path.join(target.dir, name);
+      const targetDir = path.resolve(rootDir, name);
+      if (targetDir !== rootDir && !targetDir.startsWith(rootDir + path.sep)) {
+        fail(`refusing to delete outside the install directory: ${name} (resolved to ${targetDir})`);
+      }
       if (exists(targetDir)) {
         fs.rmSync(targetDir, { recursive: true, force: true });
         removed.push(`${target.dot}/${name}`);

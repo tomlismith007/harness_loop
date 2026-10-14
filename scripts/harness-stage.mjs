@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
-  PACK_ROOT, SKILLS_DIR, fail,
+  PACK_ROOT, SKILLS_DIR, parseDenylistFrom, fail,
 } from './lib/common.mjs';
 import { scoreHarness } from './loop-audit.mjs';
 
@@ -141,21 +141,13 @@ const TEMPLATE_DENYLIST = [
 function denylistLocalized(root) {
   const p = path.join(root, 'loop-constraints.md');
   if (!exists(p)) return { localized: false, reason: 'loop-constraints.md 不存在' };
-  const text = readText(p);
 
-  // 取 Paths 章节的代码块内容
-  const section = text.split(/^##\s*Paths/m)[1] ?? '';
-  const block = section.split('```')[1] ?? '';
-  if (!block.trim()) {
+  // 解析逻辑与 gate-check 的强制执行共用 common.parseDenylistFrom——
+  // 曾经这里和强制执行各有一份，是"文档说 A、代码做 B"的来源之一。
+  const lines = parseDenylistFrom(readText(p));
+  if (!lines.length) {
     return { localized: false, reason: 'Paths 章节没有代码块（拒绝列表为空）' };
   }
-
-  const lines = block.split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'))
-    // 去掉行尾注释，只保留路径本身
-    .map((l) => l.split(/\s+#/)[0].trim())
-    .filter(Boolean);
 
   const templateSet = new Set(TEMPLATE_DENYLIST);
   const currentSet = new Set(lines);

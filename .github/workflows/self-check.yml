@@ -40,7 +40,20 @@ jobs:
           set -e
           node scripts/event-router.mjs --list > /dev/null
           node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null
-          node scripts/gate-check.mjs --item pr-1 --diff-files a.ts --verdict approve > /dev/null
+          node scripts/loop-audit.mjs . > /dev/null
+          node scripts/harness-stage.mjs . > /dev/null
+          # gate-check 的冒烟测试必须覆盖 gate 路径，且同时断言 escalate 分支——
+          # 只跑 --verdict approve 会落在"闸门全关"的路径上，等于什么都没验。
+          node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
+            --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null
+          if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict none --diff-files a.ts > /dev/null 2>&1; then
+            echo "::error::gate+no-verdict must escalate"
+            exit 1
+          fi
+          if node scripts/gate-check.mjs --item pr-1 --phase gtae --verdict approve > /dev/null 2>&1; then
+            echo "::error::unknown --phase must be rejected"
+            exit 1
+          fi
           echo "All CLI entry points respond."
 
       - name: Verify no auto-merge in event wiring

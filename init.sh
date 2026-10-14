@@ -21,10 +21,28 @@ node scripts/test.mjs
 echo "=== Self audit ==="
 node scripts/loop-audit.mjs .
 
+echo "=== Pre-commit hook ==="
+# 装一次就常驻。断言套件是唯一能拦住"删掉 verifier 条件"这类改动的机制，
+# 手动跑是纪律，钩子是机制。
+if [ "$(git config core.hooksPath || true)" = ".githooks" ]; then
+  echo "  hooks path    OK (.githooks)"
+else
+  git config core.hooksPath .githooks
+  echo "  hooks path    installed (.githooks)"
+fi
+
 echo "=== CLI entry points ==="
 node scripts/event-router.mjs --list > /dev/null && echo "  event-router  OK"
 node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null && echo "  ledger-check  OK"
-node scripts/gate-check.mjs --item pr-1 --diff-files a.ts --verdict approve > /dev/null && echo "  gate-check    OK"
+node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
+  --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null \
+  && echo "  gate-check    OK (proceed path)"
+node scripts/gate-check.mjs --item pr-1 --phase gate --verdict none --diff-files a.ts > /dev/null \
+  && echo "  gate-check    BROKEN (gate+no-verdict should escalate)" \
+  || echo "  gate-check    OK (escalate path)"
+node scripts/gate-check.mjs --item pr-1 --phase gtae --verdict approve > /dev/null 2>&1 \
+  && echo "  gate-check    BROKEN (bad phase should be rejected)" \
+  || echo "  gate-check    OK (bad phase rejected)"
 node scripts/loop-audit.mjs . > /dev/null && echo "  loop-audit    OK"
 node scripts/harness-stage.mjs . > /dev/null && echo "  harness-stage OK"
 

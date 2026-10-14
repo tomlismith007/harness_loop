@@ -251,22 +251,27 @@ export function scoreHarness(root, opts = {}) {
   const hasRealActivity = activity.present;
   const l3Ready = costReady && hasRealActivity;
 
+  // verifier 条件只在这里判一次。之前它散在 L2/L3/三条 findings 里，
+  // 改一处漏一处就会静默放水（d7d049d 之后真的发生过一次）。
+  const verifierOk = Boolean(verifierPresent);
+  const stateOk = Boolean(statePath);
+
   let level = 'L0';
   // L2 的定义是"由独立 verifier 验证的辅助修复"——没有 verifier 就不成立。
   // 没有 verifier 却给 L2，等于批准自我验证，与 docs/03 的规则冲突。
-  if (score >= LEVEL_THRESHOLDS.L3 && verifierPresent && Boolean(statePath) && l3Ready) level = 'L3';
-  else if (score >= LEVEL_THRESHOLDS.L2 && triagePresent && verifierPresent) level = 'L2';
-  else if (score >= LEVEL_THRESHOLDS.L1 && Boolean(statePath)) level = 'L1';
+  if (verifierOk && score >= LEVEL_THRESHOLDS.L3 && stateOk && l3Ready) level = 'L3';
+  else if (verifierOk && score >= LEVEL_THRESHOLDS.L2 && triagePresent) level = 'L2';
+  else if (score >= LEVEL_THRESHOLDS.L1 && stateOk) level = 'L1';
 
   // 封顶告警
   const findings = [];
-  if (score >= LEVEL_THRESHOLDS.L2 && triagePresent && !verifierPresent) {
+  if (score >= LEVEL_THRESHOLDS.L2 && triagePresent && !verifierOk) {
     findings.push('Capped at L1: no verifier. L2 means "fixes verified by an independent checker" — without one, the loop would self-verify.');
   }
-  if (score >= LEVEL_THRESHOLDS.L3 && verifierPresent && Boolean(statePath) && !costReady) {
+  if (verifierOk && score >= LEVEL_THRESHOLDS.L3 && stateOk && !costReady) {
     findings.push('Capped at L2: cost observability incomplete (need loop-budget.md + loop-run-log.md + a budget section in LOOP.md).');
   }
-  if (score >= LEVEL_THRESHOLDS.L3 && verifierPresent && Boolean(statePath) && costReady && !hasRealActivity) {
+  if (verifierOk && score >= LEVEL_THRESHOLDS.L3 && stateOk && costReady && !hasRealActivity) {
     findings.push('Capped at L2: no real loop activity recorded yet. Structural readiness is not the same as having run.');
   }
   if (!statePath) findings.push('FAIL: no state file. The loop loses memory every run.');

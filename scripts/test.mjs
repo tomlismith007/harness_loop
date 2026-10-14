@@ -15,7 +15,7 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs, matchesDenylist, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText } from './lib/common.mjs';
+import { parseArgs, matchesDenylist, loadDenylist, parseDenylistFrom, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { route, ROUTES, readLocks } from './event-router.mjs';
 import { checkGates } from './gate-check.mjs';
@@ -88,6 +88,11 @@ const denyCases = [
   ['.terraform/state.tf', true],
   ['k8s/production/deploy.yml', true],
   ['db/migrations/001_init.sql', true],
+  // 同名的配置文件形态：旧实现要求 x 是目录且后面有内容，这几个全部漏匹配
+  ['secrets.yml', true],
+  ['config/secrets.yml', true],
+  ['secrets/', true],
+  ['src/credentials.json', true],
   // 不应命中
   ['src/api/handler.ts', false],
   ['README.md', false],
@@ -99,6 +104,29 @@ const denyCases = [
 for (const [file, shouldMatch] of denyCases) {
   const hit = matchesDenylist(file) !== null;
   eq(`denylist ${file} → ${shouldMatch}`, hit, shouldMatch);
+}
+
+// 拒绝列表的真相源是 loop-constraints.md，不是脚本里的常量。
+// 维护者按文档在 ## Paths 加的仓库特定路径必须真的被强制执行。
+{
+  eq('无 loop-constraints.md 时回落到常量', matchesDenylist('auth/x.ts', loadDenylist('/nonexistent-dir-xyz')) !== null, true);
+
+  const parsed = parseDenylistFrom(fs.readFileSync(path.join(PACK_ROOT, 'loop-constraints.md'), 'utf8'));
+  ok('能从 loop-constraints.md 解析出拒绝列表', parsed.length >= 10);
+  ok('解析结果含 auth/**', parsed.includes('auth/**'));
+  ok('解析时忽略行尾注释', parsed.every((p) => !p.includes('#') && !p.includes(' ')));
+
+  // 用一个真实存在的文件当 repo 根：加一条自定义路径 → 必须命中
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-deny-'));
+  const base = fs.readFileSync(path.join(PACK_ROOT, 'loop-constraints.md'), 'utf8');
+  fs.writeFileSync(path.join(tmp, 'loop-constraints.md'),
+    base.replace('auth/**', 'auth/**\ninfra/prod/**'));
+  const loaded = loadDenylist(tmp);
+  ok('自定义路径进入生效列表', loaded.includes('infra/prod/**'));
+  eq('自定义路径被强制执行', matchesDenylist('infra/prod/main.tf', loaded), 'infra/prod/**');
+  eq('自定义路径不影响既有规则', matchesDenylist('auth/x.ts', loaded), 'auth/**');
+
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------- 3. 错误签名归一化
@@ -156,6 +184,25 @@ section('4. 熔断器判定');
 
   // 自定义阈值
   eq('自定义 stagnation=2', checkLedger({ attempts: mk(2, 'failure', 'E1') }, { stagnationThreshold: 2 }).verdict, 'stagnation');
+}
+
+// CLI 层：拼错的阈值必须 fail-closed（NaN 会让所有比较恒为 false）
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-ledcli-'));
+  const lp = path.join(tmp, 'l.json');
+  fs.writeFileSync(lp, JSON.stringify({ attempts: [] }));
+  const run = (args) => {
+    try {
+      execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'ledger-check.mjs'), '--ledger', lp, ...args], { encoding: 'utf8', cwd: tmp });
+      return 0;
+    } catch (e) { return e.status; }
+  };
+  eq('非数字 --stagnation 退出 1', run(['--stagnation', 'abc']), 1);
+  eq('非数字 --max-iterations 退出 1', run(['--max-iterations', 'abc']), 1);
+  eq('非数字 --no-progress 退出 1', run(['--no-progress', 'abc']), 1);
+  eq('非数字 --token-budget 退出 1', run(['--token-budget', 'abc']), 1);
+  eq('合法数字阈值退出 0', run(['--stagnation', '3']), 0);
+  fs.rmSync(tmp, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------- 5. 事件路由
@@ -227,7 +274,9 @@ section('5. 事件路由');
 
 section('6. 闸门判定');
 {
-  eq('干净通过', checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', budgetPct: 10 }).decision, 'proceed');
+  // gate 阶段现在要求 redCheck 明确通过 + 两个 sha 都给，否则一律 escalate（fail-closed）。
+  const GATE = { phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass', reviewedSha: 'abc123', headSha: 'abc123' };
+  eq('干净通过', checkGates({ item: 'p', ...GATE, budgetPct: 10 }).decision, 'proceed');
   eq('pause → exit', checkGates({ item: 'p', pause: true }).decision, 'exit');
   eq('pause 退出码 3', checkGates({ item: 'p', pause: true }).exit_code, 3);
   eq('预算 100% → exit', checkGates({ item: 'p', budgetPct: 100 }).decision, 'exit');
@@ -245,28 +294,35 @@ section('6. 闸门判定');
   eq('gate 阶段无 verdict → escalate', checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'none' }).decision, 'escalate');
 
   // ---- TOCTOU：合并绑定审查过的 commit ----
-  const t1 = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', reviewedSha: 'abc123', headSha: 'abc123' });
+  const t1 = checkGates({ item: 'p', ...GATE });
   eq('sha 一致 → proceed', t1.decision, 'proceed');
-  const t2 = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', reviewedSha: 'abc123', headSha: 'def456' });
+  const t2 = checkGates({ item: 'p', ...GATE, headSha: 'def456' });
   eq('sha 不一致 → escalate', t2.decision, 'escalate');
   eq('sha 不一致闸门名', t2.gate, 'head-commit');
   ok('sha 不一致提示 --match-head-commit', /match-head-commit/.test(t2.next));
-  const t3 = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve' });
-  eq('未提供 sha 时不阻断', t3.decision, 'proceed');
+  const t3 = checkGates({ item: 'p', ...GATE, reviewedSha: null, headSha: null });
+  eq('gate 阶段缺 sha → escalate', t3.decision, 'escalate');
+  eq('gate 阶段缺 sha 闸门名', t3.gate, 'head-commit');
+  eq('只给 head-sha 也要拦', checkGates({ item: 'p', ...GATE, reviewedSha: null }).decision, 'escalate');
+  eq('只给 reviewed-sha 也要拦', checkGates({ item: 'p', ...GATE, headSha: null }).decision, 'escalate');
+  eq('非 gate 阶段不要求 sha', checkGates({ item: 'p', phase: 'fix', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass' }).decision, 'proceed');
 
   // ---- 回退测试（Red check）----
-  const r1 = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass' });
+  const r1 = checkGates({ item: 'p', ...GATE });
   eq('red check 通过 → proceed', r1.decision, 'proceed');
-  const r2 = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'fail' });
+  const r2 = checkGates({ item: 'p', ...GATE, redCheck: 'fail' });
   eq('red check 失败 → escalate', r2.decision, 'escalate');
   eq('red check 闸门名', r2.gate, 'red-check');
-  const r3 = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'not-run' });
+  const r3 = checkGates({ item: 'p', ...GATE, redCheck: 'not-run' });
   eq('gate 阶段未跑 red check → escalate', r3.decision, 'escalate');
   const r4 = checkGates({ item: 'p', phase: 'fix', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'not-run' });
   eq('fix 阶段未跑 red check 不阻断', r4.decision, 'proceed');
+  const r5 = checkGates({ item: 'p', ...GATE, redCheck: undefined });
+  eq('省略 redCheck 等同 not-run（忘传参数不得放行）', r5.decision, 'escalate');
+  eq('省略 redCheck 时闸门名', r5.gate, 'red-check');
 
   // ---- NOT RUN 声明 ----
-  const n1 = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', notRun: ['real-device', 'load-test'] });
+  const n1 = checkGates({ item: 'p', ...GATE, notRun: ['real-device', 'load-test'] });
   eq('有未跑项仍可 proceed', n1.decision, 'proceed');
   ok('未跑项出现在输出', Array.isArray(n1.checks_not_run) && n1.checks_not_run.length === 2);
   ok('未跑项在 next 中被提示列出', /NOT RUN/.test(n1.next));
@@ -705,8 +761,10 @@ section('18. gate-check CLI 文件列表');
     }
   };
 
+  // 裸路径一律按单一路径处理——曾经"文件存在就当清单读"，同一命令串因
+  // 文件系统状态不同而含义不同。要传清单必须写 @ 前缀。
   const r1 = run(['--item', 'p', '--diff-files', listPath, '--verdict', 'approve']);
-  ok('裸文件路径按列表读取', r1.out.includes('"files_changed": 2'), r1.out.slice(0, 120));
+  ok('裸文件路径按单一路径处理', r1.out.includes('"files_changed": 1'), r1.out.slice(0, 120));
 
   const r2 = run(['--item', 'p', '--diff-files', '@' + denyList, '--verdict', 'approve']);
   ok('@前缀文件列表命中拒绝列表', r2.out.includes('"gate": "denylist"'), r2.out.slice(0, 160));
@@ -717,6 +775,53 @@ section('18. gate-check CLI 文件列表');
 
   const r4 = run(['--item', 'p', '--diff-files', '@' + path.join(tmp, 'nope.txt')]);
   eq('缺失的 @文件报错退出 1', r4.code, 1);
+
+  // ---- 参数校验：畸形输入必须 fail-closed ----
+  eq('拼错的 verdict 退出 1', run(['--item', 'p', '--phase', 'gate', '--verdict', 'aprove']).code, 1);
+  eq('未知 verdict 值退出 1', run(['--item', 'p', '--phase', 'gate', '--verdict', 'xyzzy']).code, 1);
+  eq('拼错的 phase 退出 1', run(['--item', 'p', '--phase', 'gtae', '--verdict', 'approve']).code, 1);
+  eq('未知 red-check 退出 1', run(['--item', 'p', '--phase', 'gate', '--red-check', 'maybe', '--verdict', 'approve']).code, 1);
+  eq('非数字 attempts 退出 1', run(['--item', 'p', '--phase', 'fix', '--attempts', 'abc']).code, 1);
+  eq('非数字 budget-pct 退出 1', run(['--item', 'p', '--phase', 'fix', '--budget-pct', 'abc']).code, 1);
+  eq('无参调用退出 1', run([]).code, 1);
+
+  // 省略 --red-check 且处于 gate → 必须 escalate（忘传参数不得放行）
+  const g1 = run(['--item', 'p', '--phase', 'gate', '--verdict', 'approve',
+    '--reviewed-sha', 'abc123', '--head-sha', 'abc123']);
+  eq('gate 省略 red-check 时退出 2', g1.code, 2);
+  ok('gate 省略 red-check 命中 red-check 闸', g1.out.includes('"gate": "red-check"'), g1.out.slice(0, 160));
+
+  // gate 缺 sha → 必须 escalate（TOCTOU 不可绕过）
+  const g2 = run(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass']);
+  eq('gate 缺 sha 时退出 2', g2.code, 2);
+  ok('gate 缺 sha 命中 head-commit 闸', g2.out.includes('"gate": "head-commit"'), g2.out.slice(0, 160));
+
+  // 完整合法调用 → proceed
+  const g3 = run(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
+    '--reviewed-sha', 'abc123', '--head-sha', 'abc123', '--diff-files', 'a.ts']);
+  eq('完整 gate 调用退出 0', g3.code, 0);
+  ok('完整 gate 调用 proceed', g3.out.includes('"decision": "proceed"'), g3.out.slice(0, 120));
+
+  // 端到端：loop-constraints.md 里声明的仓库特定路径必须真的被 gate-check 强制执行。
+  // 曾经只读脚本常量，文档说 A、代码做 B（且 B 是危险的那一侧）。
+  const root2 = path.join(tmp, 'repo');
+  fs.mkdirSync(root2, { recursive: true });
+  const lc = path.join(root2, 'loop-constraints.md');
+  const baseText = fs.readFileSync(path.join(PACK_ROOT, 'loop-constraints.md'), 'utf8');
+  fs.writeFileSync(lc, baseText);
+  const run2 = (args) => {
+    try {
+      execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'), '--constraints-root', root2, ...args],
+        { encoding: 'utf8', cwd: tmp });
+      return { code: 0, out: '' };
+    } catch (e) { return { code: e.status, out: e.stdout || '' }; }
+  };
+  const before = run2(['--item', 'p', '--phase', 'fix', '--diff-files', 'infra/prod/main.tf', '--verdict', 'approve']);
+  eq('未声明的自定义路径不拦', before.code, 0);
+  fs.writeFileSync(lc, baseText.replace('payments/**', 'payments/**\ninfra/prod/**'));
+  const after = run2(['--item', 'p', '--phase', 'fix', '--diff-files', 'infra/prod/main.tf', '--verdict', 'approve']);
+  eq('loop-constraints.md 里声明的路径被强制执行', after.code, 2);
+  ok('命中时闸门名为 denylist', after.out.includes('"gate": "denylist"'), after.out.slice(0, 160));
 
   fs.rmSync(tmp, { recursive: true, force: true });
 }
@@ -775,6 +880,45 @@ section('19. 技能安装（ZCode 发现路径）');
   // 无 manifest 时卸载应报错
   const r5 = run(['--target', tmp, '--uninstall']);
   eq('无 manifest 卸载报错退出 1', r5.code, 1);
+
+  // ---- 卸载不得销毁用户自己的技能 ----
+  // 曾经安装时 skipped-exists 保护了文件，清单却记整包列表，卸载时照样删掉。
+  const tmpUser = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-install-user-'));
+  const mine = path.join(tmpUser, '.agents', 'skills', 'loop-guard', 'SKILL.md');
+  fs.mkdirSync(path.dirname(mine), { recursive: true });
+  fs.writeFileSync(mine, '# MY OWN loop-guard - do not delete\n');
+  run(['--target', tmpUser]);
+  const manifestFile = path.join(tmpUser, '.agents', 'skills', '.loop-harness-install.json');
+  const listed = JSON.parse(fs.readFileSync(manifestFile, 'utf8')).skills;
+  ok('清单不含被跳过的用户技能', !listed.includes('loop-guard'), JSON.stringify(listed.slice(0, 3)));
+  const u1 = run(['--target', tmpUser, '--uninstall']);
+  eq('卸载用户目录退出码 0', u1.code, 0);
+  ok('用户的同名技能未被删除', fs.existsSync(mine));
+  ok('包写入的技能被清理', !fs.existsSync(path.join(tmpUser, '.agents', 'skills', 'harness-loop')));
+  fs.rmSync(tmpUser, { recursive: true, force: true });
+
+  // ---- 清单里的路径穿越必须被拒绝 ----
+  const tmpTrav = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-install-trav-'));
+  fs.mkdirSync(path.join(tmpTrav, 'proj', '.agents', 'skills'), { recursive: true });
+  const victim = path.join(tmpTrav, 'victim_dir');
+  fs.mkdirSync(victim, { recursive: true });
+  fs.writeFileSync(path.join(victim, 'precious.txt'), 'IMPORTANT VICTIM DATA\n');
+  fs.writeFileSync(path.join(tmpTrav, 'proj', '.agents', 'skills', '.loop-harness-install.json'),
+    JSON.stringify({ skills: ['../../../victim_dir'] }));
+  const u2 = run(['--target', path.join(tmpTrav, 'proj'), '--uninstall']);
+  eq('路径穿越被拒绝退出 1', u2.code, 1);
+  ok('目标树外的目录未被删除', fs.existsSync(victim));
+  ok('受害文件仍在', fs.existsSync(path.join(victim, 'precious.txt')));
+  fs.rmSync(tmpTrav, { recursive: true, force: true });
+
+  // ---- --target 指向文件 ----
+  const tmpFile = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-install-file-'));
+  const notDir = path.join(tmpFile, 'notadir.txt');
+  fs.writeFileSync(notDir, 'i am a file\n');
+  const t1 = run(['--target', notDir]);
+  eq('--target 指向文件退出 1', t1.code, 1);
+  ok('--target 指向文件给出可读消息', /must be a directory/.test(t1.out), t1.out.slice(0, 160));
+  fs.rmSync(tmpFile, { recursive: true, force: true });
 
   fs.rmSync(tmp, { recursive: true, force: true });
 

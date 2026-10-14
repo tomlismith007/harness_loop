@@ -220,11 +220,19 @@ Exit codes:
   const ledger = readJson(ledgerPath);
   if (!ledger) fail(`ledger is not valid JSON: ${ledgerPath}`);
 
+  // Number('abc') 是 NaN，而 checkLedger 里的 ?? 只接 null/undefined——NaN 会原样
+  // 穿过去，让所有阈值比较恒为 false，等于把所有熔断器关掉。必须 fail-closed。
+  const numArg = (value, flag) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) fail(`${flag} must be a finite number (got: ${value})`);
+    return n;
+  };
+
   const opts = {};
-  if (args.stagnation !== undefined) opts.stagnationThreshold = Number(args.stagnation);
-  if (args.noProgress !== undefined) opts.noProgressThreshold = Number(args.noProgress);
-  if (args.maxIterations !== undefined) opts.maxIterations = Number(args.maxIterations);
-  if (args.tokenBudget !== undefined) opts.tokenBudget = Number(args.tokenBudget);
+  if (args.stagnation !== undefined) opts.stagnationThreshold = numArg(args.stagnation, '--stagnation');
+  if (args.noProgress !== undefined) opts.noProgressThreshold = numArg(args.noProgress, '--no-progress');
+  if (args.maxIterations !== undefined) opts.maxIterations = numArg(args.maxIterations, '--max-iterations');
+  if (args.tokenBudget !== undefined) opts.tokenBudget = numArg(args.tokenBudget, '--token-budget');
 
   const result = checkLedger(ledger, opts);
 

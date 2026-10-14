@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# 提交前跑完整断言套件。
+# 存在原因：loop-audit.mjs:258 的一次未提交改动让 test.mjs 497/1 红着过了好几天，
+# 只有"记得手动跑一次"这一道防线。装法见 init.sh（git config core.hooksPath）。
+set -e
+node scripts/test.mjs

@@ -357,12 +357,41 @@ export function structuredHas(src, needles) {
 
 // ---------------------------------------------------------------- 拒绝列表
 
+/**
+ * 解析 loop-constraints.md 的 `## Paths` 代码块，取出拒绝列表。
+ *
+ * 这是拒绝列表的人类真相源。文档写 A、代码做 B（且 B 是危险的那一侧）曾经是
+ * 这个安全机制的单点失效，所以强制执行必须读它，而不是只读下面的 JS 常量。
+ * 放这里而不是 harness-stage，因为 gate-check 与阶段判据要共用同一个实现。
+ */
+export function parseDenylistFrom(text) {
+  const section = text.split(/^##\s*Paths/m)[1] ?? '';
+  const block = section.split('```')[1] ?? '';
+  if (!block.trim()) return [];
+  return block.split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
+    // 去掉行尾注释，只保留路径本身
+    .map((l) => l.split(/\s+#/)[0].trim())
+    .filter(Boolean);
+}
+
+/** 读项目的 loop-constraints.md 拒绝列表；文件不存在或为空时回落到 JS 常量。 */
+export function loadDenylist(root = '.') {
+  const p = path.join(root, 'loop-constraints.md');
+  if (exists(p)) {
+    const parsed = parseDenylistFrom(readText(p));
+    if (parsed.length) return parsed;
+  }
+  return DENYLIST_PATTERNS;
+}
+
 /** 判断路径是否命中拒绝列表 */
-export function matchesDenylist(filePath) {
+export function matchesDenylist(filePath, patterns = DENYLIST_PATTERNS) {
   const p = filePath.split(path.sep).join('/').replace(/^\.\//, '');
   const base = path.basename(p);
 
-  for (const pattern of DENYLIST_PATTERNS) {
+  for (const pattern of patterns) {
     if (globMatch(p, pattern, base)) return pattern;
   }
   return null;
@@ -377,35 +406,28 @@ function globMatch(p, pattern, base) {
     return base.startsWith('.env.') && base !== '.env';
   }
 
-  const regex = globToRegex(pattern);
-  return regex.test(p);
+  return globToRegex(pattern).test(p);
 }
 
 function globToRegex(pattern) {
-  // **/x/** → 任意层级含 x 目录
-  let out = '';
-  let i = 0;
-  while (i < pattern.length) {
-    const c = pattern[i];
-    if (c === '*' && pattern[i + 1] === '*') {
-      out += '.*';
-      i += 2;
-      if (pattern[i] === '/') i++;
-      continue;
-    }
-    if (c === '*') {
-      out += '[^/]*';
-      i++;
-      continue;
-    }
-    if ('.+?^${}()|[]\\'.includes(c)) {
-      out += '\\' + c;
-    } else {
-      out += c;
-    }
-    i++;
+  // 语义（改自旧实现，旧实现两个方向都错）：
+  //   **/x/** → 任意层级的 x 目录、其内容，**以及同名的配置文件**。
+  //     旧版要求 x 是"目录段且后面有内容"，于是 secrets.yml、config/secrets.yml、
+  //     src/credentials.json 全部漏匹配——而它们显然是敏感的。
+  //   x/**（无 **/ 前缀）→ 任意层级的 x 目录，不含同名文件。
+  //     auth/** 要命中 src/auth/login.ts（嵌套 auth 同样敏感），
+  //     但不能命中 tests/billing.test.ts（那是测试文件，不是 billing 目录）。
+  //   * → 段内任意字符。
+  const dirTail = pattern.endsWith('/**');
+  const core = dirTail ? pattern.slice(0, -3) : pattern;
+  const anyDepth = core.startsWith('**/');
+  const body = (anyDepth ? core.slice(3) : core).replace(/\*/g, '[^/]*');
+
+  if (dirTail) {
+    const fileForm = anyDepth ? '(?:\\.[A-Za-z0-9]+)?' : '';
+    return new RegExp(`^(?:.*/)?${body}(?:$|/|${fileForm}$)`);
   }
-  return new RegExp(`(^|/)${out}($|/)`);
+  return new RegExp(`^(?:.*/)?${body}$`);
 }
 
 // ---------------------------------------------------------------- 输出

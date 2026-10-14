@@ -31,7 +31,7 @@ Loop Harness 是一套让编码智能体围绕 issue/PR 事件持续、可靠工
 
 1. 执行者与验证者必须是不同的智能体、不同的指令。同一会话自我验证无效。
 2. 同一事项最多 3 次自动尝试，之后升级给人。
-3. 拒绝列表路径（`.env*`、`**/secrets/**`、`**/credentials/**`、`auth/**`、`payments/**`、`billing/**`、`.terraform/**`、`k8s/production/**`、`**/migrations/**`）未经人工批准绝不自动编辑。
+3. 拒绝列表路径（`.env`、`.env.*`、`**/secrets/**`、`**/credentials/**`、`**/*_key*`、`**/*_secret*`、`auth/**`、`payments/**`、`billing/**`、`.terraform/**`、`k8s/production/**`、`**/migrations/**`）未经人工批准绝不自动编辑。完整清单以 `loop-constraints.md` 的 `## Paths` 代码块为准——`gate-check.mjs` 从那里读取，仓库特定路径加在那里就真的会被强制执行。
 4. 没有显式允许列表时，绝不自动合并。
 5. 绝不为了让 CI 变绿而禁用测试、跳过断言或注释掉检查。
 6. `loop-pause-all` 生效时立即退出，不做任何动作。
