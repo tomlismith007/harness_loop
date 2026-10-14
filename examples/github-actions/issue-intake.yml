@@ -18,7 +18,11 @@ concurrency:
 
 jobs:
   route:
+    # 跳过机器人自己的打标签：agent 应用 area:*/needs-* 会再次触发 issues.labeled，
+    # 形成自触发环路（pr-review.yml 有同样的守卫）。
+    if: github.actor != 'loop-bot'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -59,3 +63,13 @@ jobs:
         run: |
           echo "L1: propose labels only. Do not apply labels, comment, or close."
           echo "See skills/issue-triage/SKILL.md"
+
+      # runner 文件系统是临时的：job 结束文件就消失，轮询 .loop/queue 的 agent
+      # 平台永远看不到任何东西。必须显式交付出去，事件脊才不会在 runner 边界终止。
+      - name: Upload work item
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-queue-${{ github.event.issue.number }}
+          path: .loop/queue/
+          retention-days: 7

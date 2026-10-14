@@ -20,6 +20,7 @@ concurrency:
 jobs:
   harvest:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,11 +32,44 @@ jobs:
       - name: Kill switch check
         id: pause
         run: |
-          if grep -q 'loop-pause-all' STATE.md 2>/dev/null; then
+          # 只认独占一行的标记；STATE.md 里任何对 loop-pause-all 的散文提及都不算生效，
+          # 否则一次说明性文字就把循环永久停死。
+          if grep -qE '^\s*loop-pause-all\s*$' STATE.md 2>/dev/null; then
             echo "paused=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::loop-pause-all active — skipping nightly review"
+            echo "::warning::loop-pause-all is active — skipping nightly review (STATE.md has an active marker)"
           else
             echo "paused=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Budget check
+        if: steps.pause.outputs.paused == 'false'
+        id: budget
+        run: |
+          PCT=$(node -e '
+            const fs = require("fs");
+            let pct = 0;
+            try {
+              const log = fs.readFileSync("loop-run-log.md", "utf8");
+              const today = new Date().toISOString().slice(0, 10);
+              const entries = [...log.matchAll(/\{.*\}/g)]
+                .map((m) => { try { return JSON.parse(m[0]); } catch { return null; } })
+                .filter(Boolean)
+                .filter((e) => String(e.run_id || "").startsWith(today));
+              const used = entries.reduce((s, e) => s + (Number(e.tokens_estimate) || 0), 0);
+              const budgetText = fs.readFileSync("loop-budget.md", "utf8");
+              const caps = [...budgetText.matchAll(/\|\s*(\d+)k\s*\|/g)].map((m) => Number(m[1]) * 1000);
+              const cap = caps.length ? Math.max(...caps) : 500000;
+              pct = Math.min(999, Math.round((used / cap) * 100));
+            } catch {}
+            process.stdout.write(String(pct));
+          ')
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          if [ "$PCT" -ge 100 ]; then
+            echo "::error::Budget at ${PCT}% — exiting"
+            exit 1
+          fi
+          if [ "$PCT" -ge 80 ]; then
+            echo "::warning::Budget at ${PCT}% — report-only mode"
           fi
 
       - name: Collect the day's commits
@@ -129,3 +163,12 @@ jobs:
           cat >> loop-run-log.md <<EOF
           {"run_id":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","pattern":"lesson-harvest","event":"schedule","item":"nightly","level":"L1","duration_s":0,"items_found":0,"actions_taken":0,"escalations":0,"tokens_estimate":40000,"outcome":"report-only"}
           EOF
+
+      # runner 文件系统是临时的：追加进 loop-run-log.md 的记录不上传就随 job 消失。
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-run-log-lesson-harvest
+          path: loop-run-log.md
+          retention-days: 7

@@ -146,17 +146,32 @@ export function readLocks(statePath) {
   const locks = [];
   const lines = text.split('\n');
   let inActive = false;
+  // 按表头名定位列，不按固定下标。旧实现先 filter(Boolean) 丢掉空单元格再按下标取值，
+  // 空单元格会把后面的列整体左移（acting_on 读成别的列）；部分填充的行则因长度不足被丢弃。
+  let colItem = 0;
+  let colActingOn = 3;
   for (const line of lines) {
     if (/^##\s+Active\b/i.test(line.trim())) { inActive = true; continue; }
     if (/^##\s+/.test(line) && inActive) { inActive = false; continue; }
     if (!inActive) continue;
     if (!line.trim().startsWith('|')) continue;
-    const cells = line.split('|').map((c) => c.trim()).filter(Boolean);
-    if (cells.length < 4) continue;
-    if (/^-+$/.test(cells[0])) continue;
-    if (/^work item$/i.test(cells[0])) continue;
-    const [item, , , actingOn] = cells;
-    if (actingOn && actingOn !== '—' && actingOn !== '-') {
+    // 保留空单元格，只去掉首尾管道产生的空串
+    const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+    if (cells.every((c) => /^-*$/.test(c))) continue;
+
+    // 表头行（可能是中文）——按名取列，之后都按名字而不是位置
+    const header = cells.map((c) => c.toLowerCase());
+    const iItem = header.findIndex((c) => /work\s*item|工作项|^item$/.test(c));
+    const iActing = header.findIndex((c) => /acting_on|作用对象/.test(c));
+    if (iItem >= 0 || iActing >= 0) {
+      if (iItem >= 0) colItem = iItem;
+      if (iActing >= 0) colActingOn = iActing;
+      continue;
+    }
+
+    const item = cells[colItem];
+    const actingOn = cells[colActingOn];
+    if (item && actingOn && actingOn !== '—' && actingOn !== '-') {
       locks.push({ item, acting_on: actingOn });
     }
   }
@@ -189,12 +204,19 @@ export function route(event, opts = {}) {
   };
 
   // 冲突检测
-  if (opts.locks && opts.item) {
-    const holder = opts.locks.find((l) => l.acting_on === opts.item && l.item !== opts.item);
-    if (holder) {
-      result.conflict = 'lock-held';
-      result.held_by = holder.item;
-      result.next = 'skip this run, log outcome=no-op (reason: lock-held)';
+  // 锁键必须是同一个命名空间。acting_on 是 branch/PR，item 是 work item id
+  // （pr-45 / ci-a1b2-main），两者用 === 比较意味着 lock-held 永远不会触发——
+  // 而"CI Sweeper 已在修某分支时 PR Review 不重复修"正是这条锁唯一该起作用的场景。
+  // 因此锁键统一为 acting_on（目标资源），调用方须传 --target；item 仅用于"同一条目"排除。
+  if (opts.locks) {
+    const target = opts.target || opts.actingOn || null;
+    if (target) {
+      const holder = opts.locks.find((l) => l.acting_on === target && l.item !== opts.item);
+      if (holder) {
+        result.conflict = 'lock-held';
+        result.held_by = holder.item;
+        result.next = 'skip this run, log outcome=no-op (reason: lock-held)';
+      }
     }
   }
   return result;
@@ -250,12 +272,15 @@ Exit codes:
 
   const result = route(event, {
     item: typeof args.item === 'string' ? args.item : null,
+    // 锁键 = 作用目标（branch / PR）。必须与 STATE.md 的 acting_on 列同一命名空间。
+    target: typeof args.target === 'string' ? args.target : null,
     locks,
   });
 
-  if (args.json || true) {
-    printJson(result);
-  }
+  // 输出恒为 JSON：workflow 直接把 stdout 重定向进 route.json 再用 jq 解析。
+  // 原来写的是 `if (args.json || true)`——恒真，--json 标志形同虚设。
+  // 现在显式说明：JSON 是唯一输出格式，--json 只是为了兼容既有调用。
+  printJson(result);
 
   process.exit(result.registered ? 0 : 1);
 }

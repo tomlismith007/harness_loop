@@ -233,15 +233,30 @@ section('5. 事件路由');
   eq('未注册事件 registered=false', r6.registered, false);
   ok('未注册事件不自创流程', /not registered/i.test(r6.next));
 
-  // 冲突检测
+  // 冲突检测：锁键是 acting_on（branch/PR），不是 work item id。
+  // 曾经拿 item（pr-123 / ci-a1b2-main）与 acting_on 比 ===——两个不同命名空间，
+  // 永远不相等，lock-held 触发不了；而"CI Sweeper 已在修某分支时 PR Review 不重复修"
+  // 正是这条锁唯一该起作用的场景。
   const r7 = route('check_suite.completed:failure', {
-    item: 'pr-123',
-    locks: [{ item: 'pr-review-triage', acting_on: 'pr-123' }],
+    item: 'ci-a1b2c3-main',
+    target: 'main',
+    locks: [{ item: 'pr-review-triage', acting_on: 'main' }],
   });
-  eq('锁冲突检测', r7.conflict, 'lock-held');
+  eq('锁冲突检测（同一 branch）', r7.conflict, 'lock-held');
+  eq('锁冲突时记录持有者', r7.held_by, 'pr-review-triage');
 
-  const r8 = route('check_suite.completed:failure', { item: 'pr-999', locks: [{ item: 'x', acting_on: 'pr-123' }] });
+  const r8 = route('check_suite.completed:failure', { item: 'pr-999', target: 'other', locks: [{ item: 'x', acting_on: 'pr-123' }] });
   eq('无冲突时不报 conflict', r8.conflict, undefined);
+
+  eq('不同 branch 不算冲突',
+    route('check_suite.completed:failure', { item: 'ci-1-main2', target: 'main2', locks: [{ item: 'x', acting_on: 'main' }] }).conflict,
+    undefined);
+  eq('同一条目自己的锁不算冲突',
+    route('check_suite.completed:failure', { item: 'pr-review-triage', target: 'main', locks: [{ item: 'pr-review-triage', acting_on: 'main' }] }).conflict,
+    undefined);
+  eq('未给 target 时不误判',
+    route('check_suite.completed:failure', { item: 'ci-a1b2c3-main', locks: [{ item: 'x', acting_on: 'main' }] }).conflict,
+    undefined);
 
   // 所有注册事件都结构完整
   let allValid = true;
@@ -1231,6 +1246,24 @@ section('17. registry 与路由一致性');
   ok(`registry 声明了事件（${eventsInRegistry.length} 个）`, eventsInRegistry.length > 0);
   for (const ev of eventsInRegistry) {
     ok(`registry 事件已注册路由: ${ev}`, Boolean(ROUTES[ev]));
+  }
+
+  // ---- LOOP.md ↔ ROUTES 双向一致 ----
+  // LOOP.md 自称"调度与路由的唯一真相源"，event-router 也自称"与 LOOP.md 保持一致"，
+  // 但这个一致性过去没有任何测试。方向很重要：只查 registry→ROUTES 会漏掉
+  // "LOOP.md 声明了一个无法路由的事件"。
+  const loopText = fs.readFileSync(path.join(PACK_ROOT, 'LOOP.md'), 'utf8');
+  const tableSection = loopText.split(/^\|\s*事件\s*\|/m)[1]?.split(/\n\s*\n/)[0] || '';
+  // 只取反引号包裹、且首段是小写的路径式标识——`push:tags` / `release.published`
+  // 这种合并写法要拆开，技能名（issue-triage）不含点所以天然被排除。
+  const splitLoopEvents = [...tableSection.matchAll(/`([^`]+)`/g)]
+    .flatMap((m) => m[1].split('/').map((s) => s.trim()))
+    .filter((e) => /^[a-z_]+(\.[a-z_]+)*(:[a-z-]+)?$/.test(e));
+  for (const ev of new Set(splitLoopEvents)) {
+    ok(`LOOP.md 声明的事件可路由: ${ev}`, Boolean(ROUTES[ev]));
+  }
+  for (const ev of Object.keys(ROUTES)) {
+    ok(`ROUTES 中的事件在 LOOP.md 有登记: ${ev}`, splitLoopEvents.includes(ev));
   }
   // 全局默认值存在
   ok('registry 有 defaults 段', /^defaults:/m.test(registryText));

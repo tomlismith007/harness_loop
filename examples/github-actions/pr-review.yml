@@ -22,6 +22,7 @@ concurrency:
 jobs:
   route:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # 跳过机器人自己的 PR，避免循环触发自己
     if: github.actor != 'loop-bot'
     steps:
@@ -90,3 +91,12 @@ jobs:
           echo "Isolation: git worktree add loop/${{ steps.ev.outputs.item }}-attempt1"
           echo "Attempt limit: 3. Append each attempt to loop-ledger.json."
           echo "Denylist paths escalate without editing. See loop-constraints.md"
+
+      # runner 文件系统是临时的：不上传的话 job 结束即消失，轮询 .loop/queue/ 永远看不到。
+      - name: Upload work item
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-queue-pr-${{ github.event.pull_request.number }}
+          path: .loop/queue/
+          retention-days: 7

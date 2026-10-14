@@ -28,15 +28,23 @@ node scripts/harness-stage.mjs . --upgrade    # 补齐下一阶段
 | 事件 | 来源 | 阶段 | 技能 | 等级 | 人工闸门 |
 |---|---|---|---|---|---|
 | `issues.opened` | issue | intake | `issue-triage` | L1 | 无（只提议） |
-| `issues.labeled:needs-info` | issue | intake | `issue-triage` | L1 | 无 |
+| `issues.reopened` | issue | intake | `issue-triage` | L1 | 无 |
+| `issues.labeled` | issue | intake | `issue-triage` | L1 | 无 |
 | `issues.closed` | issue | close | `post-merge-cleanup` | L1 | 关闭需人工确认 |
 | `pull_request.opened` | PR | review | `pr-review-triage` | L1 | 无 |
+| `pull_request.synchronize` | PR | review | `pr-review-triage` | L1 | 无 |
 | `pull_request_review.changes_requested` | PR | fix | `minimal-fix` → `loop-verifier` | L2 | 拒绝列表路径 |
-| `check_suite.completed:failure` | PR/main | fix | `ci-triage` → `minimal-fix` | L2 | infra/env 失败；3 次上限 |
+| `pull_request_review.approved` | PR | gate | `gate-check` | L2 | **合并始终人工** |
+| `check_suite.completed:failure` | PR/main | fix | `ci-triage` → `minimal-fix` → `loop-verifier` | L2 | infra/env 失败；3 次上限 |
+| `check_suite.completed:success` | PR/main | report | — | L1 | 无 |
+| `workflow_run.completed:failure` | PR/main | fix | `ci-triage` → `minimal-fix` | L2 | infra/env 失败；3 次上限 |
 | `pull_request.ready_for_review` | PR | gate | `gate-check` | L2 | **合并始终人工** |
 | `pull_request.closed:merged` | main | post-merge | `post-merge-cleanup` | L1 | 大范围清理 |
+| `pull_request.closed:unmerged` | PR | close | `post-merge-cleanup` | L1 | 关闭需人工确认 |
 | `push:tags` / `release.published` | main | release | `release-drafter` | L1 | 发布始终人工 |
-| `schedule:daily` | 定时 | triage | `issue-triage` + `pr-review-triage` | L1 | 无 |
+
+> 这张表与 `scripts/event-router.mjs` 的 `ROUTES` 由测试双向核对（`test.mjs` 第 17 节）。
+> 加事件时两处一起改，否则断言会挂。
 
 **路由规则**（由 `scripts/event-router.mjs` 机械执行）：
 

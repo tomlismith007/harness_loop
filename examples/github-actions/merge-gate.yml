@@ -19,6 +19,9 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # 跳过机器人自己触发的 PR，避免 gate 评论回灌循环
+    if: github.actor != 'loop-bot'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,7 +70,7 @@ jobs:
             --phase gate \
             --diff-files @changed.txt \
             --verdict none \
-            --budget-pct "${{ steps.budget.outputs.pct }}" > gate.json || true
+            --budget-pct "${{ steps.budget.outputs.pct }}" > gate.json
           cat gate.json
 
       - name: Report readiness
@@ -100,7 +103,8 @@ jobs:
         run: |
           DECISION=$(jq -r '.decision' gate.json)
           if [ "$DECISION" = "escalate" ]; then
-            echo "::warning::Gate escalated — human decision required"
+            echo "::error::Gate escalated — human decision required"
+            exit 1
           fi
           if [ "$DECISION" = "exit" ]; then
             echo "::error::Loop exited — kill switch or budget cap"

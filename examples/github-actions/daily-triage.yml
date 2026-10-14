@@ -20,6 +20,7 @@ concurrency:
 jobs:
   triage:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,9 +30,11 @@ jobs:
       - name: Kill switch check
         id: pause
         run: |
-          if grep -q 'loop-pause-all' STATE.md 2>/dev/null; then
+          # 只认独占一行的标记；STATE.md 里任何对 loop-pause-all 的散文提及都不算生效，
+          # 否则一次说明性文字就把循环永久停死。
+          if grep -qE '^\s*loop-pause-all\s*$' STATE.md 2>/dev/null; then
             echo "paused=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::loop-pause-all is active — exiting without doing anything"
+            echo "::warning::loop-pause-all is active — skipping today's triage (STATE.md has an active marker)"
           else
             echo "paused=false" >> "$GITHUB_OUTPUT"
           fi
@@ -61,6 +64,7 @@ jobs:
           echo "pct=$PCT" >> "$GITHUB_OUTPUT"
           if [ "$PCT" -ge 100 ]; then
             echo "::error::Budget at ${PCT}% — exiting"
+            exit 1
           fi
           if [ "$PCT" -ge 80 ]; then
             echo "::warning::Budget at ${PCT}% — report-only mode"
@@ -104,3 +108,12 @@ jobs:
           cat >> loop-run-log.md <<EOF
           {"run_id":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","pattern":"daily-triage","event":"schedule","item":"daily","level":"L1","duration_s":0,"items_found":0,"actions_taken":0,"escalations":0,"tokens_estimate":5000,"outcome":"report-only"}
           EOF
+
+      # runner 文件系统是临时的：追加进 loop-run-log.md 的记录不上传就随 job 消失。
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-run-log-daily-triage
+          path: loop-run-log.md
+          retention-days: 7

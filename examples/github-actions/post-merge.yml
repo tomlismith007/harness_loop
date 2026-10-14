@@ -19,6 +19,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.event.pull_request.merged == true
     steps:
       - uses: actions/checkout@v4
@@ -80,3 +81,12 @@ jobs:
             "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
+
+      # runner 文件系统是临时的：不上传的话 job 结束即消失，轮询 .loop/queue/ 永远看不到。
+      - name: Upload work item
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-queue-post-merge-pr-${{ github.event.pull_request.number }}
+          path: .loop/queue/
+          retention-days: 7

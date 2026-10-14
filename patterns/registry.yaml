@@ -1,5 +1,8 @@
 # Machine-readable pattern registry for loop-harness.
-# Consumed by scripts/loop-audit.mjs, docs, and tooling.
+#
+# defaults 段的阈值由 scripts/gate-check.mjs 与 scripts/ledger-check.mjs 读取
+# （见 scripts/lib/common.mjs 的 readRegistryDefaults）——改这里的数字会真的改变
+# 行为。CLI 参数可覆盖单项，--registry 可指向另一份文件。
 #
 # 每个 pattern 对应一条事件脊上的循环。新增循环时必须在此登记，
 # 并在 LOOP.md 的路由表中声明对应事件。

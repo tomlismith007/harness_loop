@@ -22,6 +22,7 @@ concurrency:
 jobs:
   route:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # 只在失败时处理
     if: |
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') ||
@@ -31,6 +32,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      # 事件不能写死：本 workflow 同时订阅 workflow_run 与 check_suite，
+      # 写死成 check_suite.* 会让 workflow_run.* 路由永远不可达，并套用错误的闸门集。
+      - name: Determine event
+        id: ev
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            EVENT="workflow_run.completed:failure"
+          else
+            EVENT="check_suite.completed:failure"
+          fi
+          echo "event=$EVENT" >> "$GITHUB_OUTPUT"
 
       - name: Resolve item
         id: item
@@ -44,7 +57,7 @@ jobs:
       - name: Route
         run: |
           node scripts/event-router.mjs \
-            --event check_suite.completed:failure \
+            --event "${{ steps.ev.outputs.event }}" \
             --item "${{ steps.item.outputs.item }}" \
             --state STATE.md > route.json
           cat route.json
@@ -70,7 +83,7 @@ jobs:
           cat > ".loop/queue/${ITEM}.json" <<EOF
           {
             "id": "${ITEM}",
-            "event": "check_suite.completed:failure",
+            "event": "${{ steps.ev.outputs.event }}",
             "phase": "fix",
             "branch": "${{ steps.item.outputs.branch }}",
             "sha": "${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}",
@@ -83,3 +96,12 @@ jobs:
           # 环境类失败的典型信号——命中即标记人工处理
           echo "If the failure mentions: runner, registry, secret, quota, network, timeout-of-infra"
           echo "→ label the work item needs-human and do not attempt a code fix."
+
+      # runner 文件系统是临时的：不上传的话 job 结束即消失，轮询 .loop/queue/ 永远看不到。
+      - name: Upload work item
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loop-queue-ci-${{ steps.item.outputs.item }}
+          path: .loop/queue/
+          retention-days: 7

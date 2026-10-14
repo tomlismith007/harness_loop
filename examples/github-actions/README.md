@@ -60,11 +60,19 @@ node scripts/event-router.mjs --event pull_request_review.changes_requested --it
 
 | 方式 | 说明 | 适用 |
 |---|---|---|
-| **Work item 文件** | workflow 写 `.loop/queue/<id>.json`，agent 平台轮询该目录 | 本地调度器、自定义运行框架 |
+| **Work item 文件** | workflow 写 `.loop/queue/<id>.json` 并用 `upload-artifact` 交付 | 本地调度器、自定义运行框架 |
 | **Issue 评论** | workflow 在 PR/issue 上发一条结构化评论，agent 平台监听评论事件 | Claude Code / Codex 的事件触发 |
 | **Repository dispatch** | workflow 发 `repository_dispatch`，agent 平台订阅 | 云端调度、跨仓库编排 |
 
 推荐从**方式一**开始：最简单、可离线调试、不依赖平台特性。
+
+> **文件必须交付出去。** GitHub Actions 的 runner 文件系统是临时的——job 一结束，
+> 写进 `.loop/queue/` 的文件就没了，轮询该目录的 agent 平台永远看不到任何东西。
+> 所以本目录下每个产生 work item 的 workflow 末尾都有 `actions/upload-artifact@v4`。
+>
+> 若需要跨 run 持久化并让仓库里的 agent 读得到（例如 `loop-run-log.md` 里的真实
+> 运行记录——L3 就要求这个），改用方式二（评论）或方式三（dispatch），或者直接
+> commit。artifact 有保留期，也不是 agent 默认会读的位置。
 
 ## 示例 workflow
 
