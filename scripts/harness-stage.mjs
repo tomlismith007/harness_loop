@@ -22,8 +22,8 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
-  PACK_ROOT, SKILLS_DIR, SKILL_DIRS, parseDenylistFrom, detectProject, verificationCommands,
-  initScriptFromCommands, textHas, structuredText, fail, hasEventWiring,
+  PACK_ROOT, SKILLS_DIR, SKILL_DIRS, SCRIPT_DIR, parseDenylistFrom, detectProject,
+  verificationCommands, initScriptFromCommands, textHas, structuredText, fail, hasEventWiring,
 } from './lib/common.mjs';
 import { scoreHarness } from './loop-audit.mjs';
 
@@ -592,6 +592,55 @@ function copySkillDir(name, target, results) {
   results.push({ status: 'written', path: dest });
 }
 
+/**
+ * 把运行层脚本复制进目标仓库。
+ *
+ * 曾经它们只留在技能包仓库里，而所有技能命令与 workflow 都写 `node scripts/xxx.mjs`
+ * 并隐含 cwd = 项目根。于是新装配的项目里每一条命令都是 ERR_MODULE_NOT_FOUND，
+ * 而阶段 3 判据只看 workflow 文件在不在——判据会给一个跑不起来的事件脊发 PASS。
+ *
+ * 排除项说明：
+ *  - `test.mjs` 是源仓库的自检套件，依赖仓库内的 templates/ 与 skills/，消费者跑不了；
+ *  - `install-skills.mjs` / `init-loop-harness.mjs` 是装配工具，在消费者里没有 pack 可读；
+ *  - `harness-stage.mjs` 需要 templates/ 才能真的 --upgrade（缺了会"报告成功但什么都没写"），
+ *    所以它同样不复制——消费者用 pack 仓库里的那份来跑装配。
+ *
+ * 复制的是运行时真正自洽的脚本：它们只依赖 lib/common.mjs 与目标仓库自身的文件。
+ */
+const RUNTIME_SCRIPTS = [
+  'event-router.mjs', 'gate-check.mjs', 'ledger-check.mjs', 'loop-audit.mjs',
+  'budget-check.mjs', 'queue-read.mjs', 'worktree.mjs',
+];
+
+function copyRuntimeScripts(root, force, results) {
+  // 源目录是 pack 的 scripts/，不是 SCRIPT_DIR（后者是 scripts/lib）。
+  const packScripts = path.join(PACK_ROOT, 'scripts');
+  const destDir = path.join(root, 'scripts');
+  const libDest = path.join(destDir, 'lib');
+  fs.mkdirSync(libDest, { recursive: true });
+  for (const f of RUNTIME_SCRIPTS) {
+    const src = path.join(packScripts, f);
+    if (!exists(src)) continue;
+    const dest = path.join(destDir, f);
+    if (!force && exists(dest)) {
+      results.push({ status: 'skipped', path: dest });
+      continue;
+    }
+    fs.copyFileSync(src, dest);
+    results.push({ status: 'written', path: dest });
+  }
+  const libSrc = path.join(packScripts, 'lib', 'common.mjs');
+  if (exists(libSrc)) {
+    const dest = path.join(libDest, 'common.mjs');
+    if (force || !exists(dest)) {
+      fs.copyFileSync(libSrc, dest);
+      results.push({ status: 'written', path: dest });
+    } else {
+      results.push({ status: 'skipped', path: dest });
+    }
+  }
+}
+
 function upgrade(root, targetStage, force, results, opts = {}) {
   const today = new Date().toISOString().slice(0, 10);
   // 显式覆盖优先于自动检测。自动检测在混合栈或 CI 环境里会猜错，
@@ -630,6 +679,8 @@ function upgrade(root, targetStage, force, results, opts = {}) {
     // 运行时编排：任何阶段都装。它的第 0 步会检查事件接线，
     // 没接线就退出并提示先跑阶段 3——所以"装了但跑不了"是有意状态。
     copySkillDir('harness-loop', root, results);
+    // 运行层脚本随装配进入目标仓库：技能命令与 workflow 都写 `node scripts/xxx.mjs`。
+    copyRuntimeScripts(root, force, results);
   }
 
   if (targetStage >= 2) {
@@ -774,6 +825,26 @@ Exit codes:
 
   if (args.upgrade) {
     const to = targetStage ?? Math.min(3, current + 1);
+
+    // 跳级保护。AGENTS.md 与 docs/11 都写"不要跳级"，但 --upgrade 一直允许
+    // 空仓库直冲 --stage 3 并写入事件接线——文档是约束，代码没有对应入口。
+    // 后果是"阶段 1 判据 7/8、阶段 2 判据 4/9、阶段 3 判据 4/8"的项目：
+    // 事件脊接上了，但 verifier、熔断器、本地化拒绝列表全都不在。
+    if (to > 1 && !args.force) {
+      const unmet = [];
+      for (let s = 1; s < to; s++) {
+        const checks = checksByStage[s] || [];
+        if (!checks.every((c) => c.ok || c.human)) unmet.push(s);
+      }
+      if (unmet.length) {
+        process.stderr.write(
+          `error: cannot upgrade to stage ${to}: stage ${unmet.join(', ')} not complete.\n`
+          + `       Run: node scripts/harness-stage.mjs ${root} --upgrade --stage ${unmet[0]}\n`
+          + `       Override (not recommended): add --force\n`);
+        process.exit(2);
+      }
+    }
+
     const results = [];
     upgrade(root, to, Boolean(args.force), results,
       { commands: explicitCommands, packageManager: explicitPm });

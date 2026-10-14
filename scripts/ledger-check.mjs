@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readJson, printJson, readRegistryDefaults, fail } from './lib/common.mjs';
+import { parseArgs, readJson, printJson, readRegistryDefaults, fail, rejectUnknownFlags } from './lib/common.mjs';
 
 export const DEFAULT_BREAKER = {
   maxIterations: 10,
@@ -55,8 +55,17 @@ export function normalizeError(raw) {
   // 行列号
   s = s.replace(/:\d+:\d+/g, ':<line>:<col>');
   s = s.replace(/:\d+\b/g, ':<line>');
-  // 其余数字
-  s = s.replace(/\b\d+\b/g, '<n>');
+  // 只归一化"明确是位置或时长"的裸数字。
+  //
+  // 这里曾经是 `\b\d+\b → <n>`，把退出码、HTTP 状态码、断言期望值全抹平了：
+  //   "exit code 1" vs "exit code 2"          → 同一签名
+  //   "HTTP 500" vs "HTTP 404"                → 同一签名
+  //   "expected 5 to equal 6" vs "...7 to 8"  → 同一签名
+  // 于是 agent 依次遇到"500 服务端错误"→"404 路由缺失"→"超时"三种根因完全不同的
+  // 失败时，会在第 3 次被判 stagnation 并熔断。失效方向是安全的（提前停止），
+  // 但会过早熔断本可自愈的循环——而"该停才停"正是这套框架的经济性来源。
+  s = s.replace(/\b(line|offset|column|col|char|pos)\s*[:=]?\s*\d+/gi, '$1 <n>');
+  s = s.replace(/\b\d+(ms|s)\b/g, '<duration>');
   // 空白折叠
   s = s.replace(/\s+/g, ' ').trim().toLowerCase();
   return s;
@@ -115,6 +124,32 @@ export function checkLedger(ledger, opts = {}) {
   }
 
   const attempts = ledger.attempts;
+
+  // 出厂账本与真实历史的区分。装配生成的账本 goal 写着 "Replace with the current
+  // loop goal"，模板示例写着 "Example loop ledger"——两者都不是本循环的真实目标，
+  // 但旧实现不看 goal，于是一个刚装配的项目和一个跑过 2 次尝试的项目
+  // 在熔断器眼里只差"有没有记录"，示例数据会被当成真实历史。
+  const goal = typeof ledger.goal === 'string' ? ledger.goal : '';
+  if (attempts.length && /^\s*(example\b|replace with)/i.test(goal)) {
+    return {
+      iterations: attempts.length,
+      consecutive_failures: 0,
+      tokens_used: 0,
+      last_error_signature: null,
+      thresholds: {
+        max_iterations: maxIterations,
+        stagnation: stagnationThreshold,
+        no_progress: noProgressThreshold,
+        token_budget: tokenBudget,
+      },
+      verdict: 'placeholder-ledger',
+      exit_code: 2,
+      next: 'STOP — loop-ledger.json still carries the shipped placeholder goal. '
+        + 'Replace `goal` with this loop\'s real objective and clear the example attempts '
+        + 'before trusting any breaker verdict.',
+    };
+  }
+
   const iterations = attempts.length;
   const tokensUsed = attempts.reduce((sum, a) => sum + (Number(a.tokensUsed) || 0), 0);
 
@@ -226,6 +261,12 @@ export function renderEscalation(ledger, result) {
       lines.push('so it stops rather than assuming progress. Do not retry blind — create or repair the');
       lines.push('ledger first (stage 2, `harness-loop-init`, produces it).');
       break;
+    case 'placeholder-ledger':
+      lines.push('The ledger still carries the shipped placeholder goal, so its attempts are example');
+      lines.push('data rather than this loop\'s history. A breaker reading example data would report');
+      lines.push('progress that never happened. Replace `goal` with the real objective and clear the');
+      lines.push('example attempts, then re-run.');
+      break;
     default:
       lines.push('(no blocking condition)');
   }
@@ -255,6 +296,10 @@ export function renderEscalation(ledger, result) {
 
 function main() {
   const args = parseArgs();
+  rejectUnknownFlags(args, [
+    'ledger', 'stagnation', 'noProgress', 'maxIterations', 'tokenBudget',
+    'escalation', 'json', 'registry', 'help',
+  ], 'ledger-check');
   if (args.help) {
     process.stdout.write(`ledger-check — loop circuit breaker
 

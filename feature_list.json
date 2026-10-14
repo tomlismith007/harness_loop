@@ -263,6 +263,26 @@
         "漂移检测第一次写成「禁掉 16/17/18 这几个数字」，结果把正确的 17 也判成漂移；改为「抽取总数并与磁盘实测比对」"
       ],
       "notes": "这条测试的价值不在新功能，在于它把「文档与代码脱节」这类一直靠人眼发现的漂移变成可执行检查。它自己写的时候也犯了两版无牙齿/过宽的错，都靠变异回退发现"
+    },
+    {
+      "id": "loop-003",
+      "priority": 1,
+      "area": "loop",
+      "title": "闸门要求证据，命令与接口一致，活动检测不虚高",
+      "user_visible_behavior": "按文档里的命令执行时闸门真的生效：approve 必须带 verifier 报告、拼错的标志被拒绝、close 阶段可路由、预算按该循环自己的上限算、审计只把事件驱动运行算作循环活动",
+      "status": "passing",
+      "verification": [
+        "node scripts/test.mjs —— 923 项断言全通过",
+        "对每个工作包做变异回退：改回错误写法，确认测试变红",
+        "node scripts/loop-audit.mjs . —— 活动检测不再把 manual 记录算作循环活动"
+      ],
+      "evidence": [
+        "node scripts/test.mjs → Passed: 923 / Failed: 0（本轮从 724 增至 923）",
+        "变异回退 13 次，捕获 2 条无牙齿断言 + 1 次变异未落地 + 3 处活动检测假阳性",
+        "bash init.sh → 退出码 0，全部 CLI 入口 OK（含 gate-check 证据路径、占位账本拒绝、未知标志拒绝）",
+        "node scripts/loop-audit.mjs . → 94/100 L2（原 98/L3 为虚高：把 manual 开发记录当成了循环活动）"
+      ],
+      "notes": "按 REVIEW-2026-10-14-remediation-spec.md 的 28 个工作包落地，修掉审查报告的 31 项缺陷（HL-01…HL-31）。新增三个脚本：budget-check（per-loop 上限真正生效）、queue-read（第 0 步的队列读取契约）、worktree（隔离要求首次有代码入口）。审计分数从 98/L3 降到 94/L2 是唯一正确的退步——它把虚高的就绪度还原成真实状态。"
     }
   ]
 }

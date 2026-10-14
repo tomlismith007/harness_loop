@@ -1,19 +1,13 @@
 # Loop State
 
-Last run: 2026-10-14 (stage-boundary rework, batch 1 of 3)
+Last run: 2026-10-14 (remediation spec — WP-01 … WP-28)
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表、本轮噪声。**每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
 
-- [x] **第二批已完成**：阶段 2 改名 `harness-loop-init`（14 处引用 + `test.mjs` 正向断言 + `staleNames` 扩词，REVIEW-*.md 属审查记录不改）；删掉重复装配技能、优点并入 `harness-init`（新增 `--commands` / `--package-manager`）；`init-loop-harness.mjs` 的 L1 文件清单改为 7 个、技能分级与 `harness-stage.mjs` 对齐；frontmatter 全部加 `stage:`（`harness-loop` 标 `runtime` 并改为任何阶段都装）。断言 624 → 686。
-- [x] **第三批已完成**：`checkLedger` 的 fail-open 修掉——账本缺失 / `attempts` 字段缺失 / 类型不是数组 / `ledger` 为 null，一律 `verdict: no-ledger` + 退出码 2（空 `attempts` 数组仍是 ok，那是"还没开始跑"）；`hasEventWiring` 提到 `lib/common.mjs` 共用，`harness-loop` 第 0 步加事件接线检查（第 4 条，未接线记 `no-wiring` 而非 `no-op`）。断言 686 → 721。
-- [ ] 仍未做（跟"越界"反方向，是"该触发没触发"）：`harness-loop` 技能第 6 步的命令示例仍缺 4 个硬约束入口（`--reviewed-sha`/`--head-sha`/`--red-check`/`--not-run`/`--constraints-root`）；`event-router` 把 3 个事件路由到 `phase: close` 但 `gate-check --phase` 枚举里没有 `close`。
-- [ ] `harness-loop` 的 4 个命令 bug（跟"越界"反方向，是"该触发没触发"）：
-  - `event-router` 把 `issues.closed` / `pull_request.closed:unmerged` / `release.published` 路由到 `phase: close`，但 `gate-check --phase` 枚举里**没有 `close`** → 照技能走必然 `exit 1`
-  - `--phase gate` 强制要求 `--reviewed-sha` + `--head-sha`（约束 7），但 `harness-loop/SKILL.md` 第 6 步的命令两个都没写 → merge-gate 循环必然 `exit 1`
-  - `--red-check`（约束 8 回退测试）与 `--not-run`（约束 9）这两个硬约束入口，编排层完全没提
-  - `--constraints-root` 没进编排 → 多项目/子目录场景拒绝列表读错文件
+- [x] **本轮已完成**：按 `REVIEW-2026-10-14-remediation-spec.md` 落地全部 28 个工作包，修掉三份审查里的 31 项缺陷（HL-01…HL-31）。断言 724 → 923，每个 WP 都做过变异回退（改回错误写法确认测试变红）。详见 `loop-run-log.md` 本轮条目。
+- [ ] **真机验证（硬约束 10）**：`WP-04` 的注入修复与 `WP-02`/`WP-07` 改变的装配/接线形态，目前只验证到"本地临时目录 + 本地模拟"。合并进任何项目前，必须在一个测试仓库上跑一次真实事件，确认 workflow 能执行 `event-router` 并把 work item 交付出来。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整（本仓库是技能源仓库，见 Post-Run Critique）。
 - [ ] 把三份审查里**未纳入本轮范围**的项排进下一轮（见下方「Watch List」）。
 
@@ -62,6 +56,77 @@ Last run: 2026-10-14 (stage-boundary rework, batch 1 of 3)
 —
 
 ## Post-Run Critique (from last run)
+
+### 2026-10-14 · remediation spec 全量落地（WP-01 … WP-28）
+
+- **本轮做了什么**：把 `REVIEW-2026-10-14-remediation-spec.md` 的 28 个工作包全部落地，
+  修掉审查报告里的 31 项缺陷。断言 724 → 923。
+
+- **三个 P0 都是同一类病**：文档写的命令与脚本实际接受的接口不一致。
+  `--diff-files changed-files.txt`（少 `@`）让拒绝列表闸门静默失效；
+  `--phase gate` 要求两个 sha 而 merge-gate 一个都没传（永远 escalate）；
+  `event-router` 路由到 `close` 而 `gate-check` 的枚举里没有它（必然退出 1）。
+  **共同的修法**：加一条通用断言——扫描所有文档里的 `node scripts/X.mjs --flag`，
+  逐一核对 `X` 是否认识 `flag`。这一条覆盖了 WP-01/06/07/16 四类问题。
+
+- **最重的一项不是 bug，是设计前提**：`--verdict approve` 此前不需要任何证据。
+  实测无 verifier、sha 是假串时仍 `proceed`，而 `gate-check` 全文只读 3 个文件
+  （其中 2 个是自己的源码与 diff 清单）。于是硬约束 1（独立验证者）与约束 7
+  （绑定审过的 commit）**都由被约束的一方自证**。WP-08 加了 `--evidence-file`，
+  格式复用 `loop-verifier` 既有的输出——那份格式早就是现成的接口，只是没人读它。
+
+- **两个"配置存在却无人读取"的实例**（约束 11 的同一类）：
+  `registry.yaml` 的 `stages:` 块写着 `mechanical_checks: 10` 而阶段 1 判据早已是 8 项，
+  没有任何消费者；`docs/10` 写"7 个顶层 .mjs"而实际是 8。**都在本轮加了断言后当场变红**
+  （WP-21 加消费者、WP-13 加脚本数比对），说明这类漂移只要没人读就会持续发生。
+
+- **归一化的双向失效**：`normalizeError` 的 `\b\d+\b → <n>` 把退出码、HTTP 状态码、
+  断言期望值全抹平了，于是"500 服务端错误"→"404 路由缺失"→"超时"三种根因完全不同的
+  失败会在第 3 次被判 `stagnation`。修法是只归一化"明确是位置或时长"的数字（WP-17）。
+  **断言必须双向**：既验"该合并的合并"（行号差异仍算同一签名），也验"不该合并的不合并"。
+
+- **变异回退发现了两条无牙齿的断言**（本轮共 10 次变异，2 次暴露问题）：
+  1. `close` 阶段的两条行为断言用 `checkGates()`（库函数），而 `PHASES` 只在 `main()`
+     里校验——变异删掉 `'close'` 后仍然全绿。改为走 CLI 子进程后当场变红。
+  2. `rejectUnknownFlags` 的第一次变异**没有落地**（多行正则没匹配上），
+     我却据此以为"验证过了"。这与 2026-10-14 第三批记的教训是同一个：
+     **变异之后必须确认变异真的落地（看一眼那行代码），再读测试结果。**
+
+- **一个自己引入的 bug 被断言当场抓住**：`--pause=false` 传进来是字符串 `"false"`，
+  而 `Boolean("false") === true`——"显式传假"反而打开了紧急刹车。
+  修法是加 `boolArg`。这条如果没写断言，会在真实运行里表现为"暂停开关自己打开"。
+
+- **两处审查结论被本轮证伪/修正**：
+  1. `skills/.mimosa/` 并未被 git 跟踪（HL-27）——`.gitignore` 的 `.mimosa/` 已覆盖它，
+     之前看到的只是磁盘上的文件。**静态判断不能替代 `git check-ignore`。**
+  2. `session-handoff.md` 不该删（spec 原建议是删）——它是阶段 2 的产出之一，
+     被 4 篇文档引用，删除会改动"5 个 loop 机制文档"这个在多处写死的数量。
+     真正的问题是**本仓库那份没填**，改为填写 + 加"模板必须仍带占位符"的双向断言。
+
+- **必须产出的具体调整**：本轮新增 6 类断言（通用 flag 一致性、事件 phase 双向比对、
+  registry 判据数比对、脚本数比对、文档断言数比对、handoff 无占位符）。
+  加上既有的四类（判据 2 双向断言、判据 5 真跑、子系统入口数、frontmatter↔清单一致），
+  共十类。**结论：这个仓库的漂移是"没人读就会发生"，所以每新增一个写进文档的数字，
+  都要配一条读它的断言——本轮 6 条里有 3 条第一次跑就抓到了真实漂移。**
+
+- **本轮最后发现的一个真问题（不是本轮引入的）**：`loop-audit.mjs` 的活动检测
+  一直把"手工开发记录"当成"循环活动"。它数 `loop-run-log.md` 里**任何**含 `run_id`
+  的 JSON，于是 6 条 `manual.*` 记录让审计认为"循环在跑"；同时 `Last run` 的判定
+  接受"2026-10-14 (stage-boundary rework)"这类**开发会话标签**（带日期就认），
+  而 Active 表的判定扫描**整个 STATE.md 的表格行**，把 Post-Run Critique 里的
+  数据表（"输入 | 修前 | 修后"）算成 25 个"活跃 work item"。
+
+  三条加起来的效果：**一个从未跑过任何事件驱动循环的仓库拿到 activity 分**，
+  而 `STATE.md:28` 自己写着"尚未跑过任何一轮真实事件"。这与硬约束 11 是同一类病
+  ——只不过这次的"装饰品"是审计自己。
+
+  修法是三处收窄：`manual` 记录只进 notes 不算证据；会话标签不算 Last run；
+  Active 表只在 `## Active` 章节内统计。**修完审计从 98/L3 变成 94/L2**，
+  理由行写着 "no real loop activity recorded yet. Structural readiness is not
+  the same as having run."
+
+  **这个分数下降是本轮唯一正确的"退步"**：它把一直虚高的就绪度还原成真实状态。
+  不要为了让它回到 L3 而放宽这三处判定——那正是这条检查要防的事。
 
 ### 2026-10-14 · 阶段边界重构 第三批（收尾）
 

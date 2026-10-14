@@ -33,26 +33,35 @@ jobs:
 
       - name: Determine event
         id: ev
+        env:
+          # 事件字段经 env 传入，绝不出现在 run: 的脚本正文里。
+          # `head.ref`（分支名）是攻击者可控的，它此前被直接拼进 run: 正文，
+          # 也会作为文件名写进 .loop/queue/。
+          GH_EVENT_NAME: ${{ github.event_name }}
+          GH_ACTION: ${{ github.event.action }}
+          GH_REVIEW_STATE: ${{ github.event.review.state }}
+          GH_MERGED: ${{ github.event.pull_request.merged }}
+          RAW_PR: ${{ github.event.pull_request.number }}
         run: |
-          PR="${{ github.event.pull_request.number }}"
-          if [ "${{ github.event_name }}" = "pull_request_review" ]; then
-            STATE="${{ github.event.review.state }}"
-            if [ "$STATE" = "changes_requested" ]; then
+          set -euo pipefail
+          PR="$(printf '%s' "$RAW_PR" | tr -c '0-9' '-' | cut -c1-20)"
+          if [ "$GH_EVENT_NAME" = "pull_request_review" ]; then
+            if [ "$GH_REVIEW_STATE" = "changes_requested" ]; then
               EVENT="pull_request_review.changes_requested"
-            elif [ "$STATE" = "approved" ]; then
+            elif [ "$GH_REVIEW_STATE" = "approved" ]; then
               EVENT="pull_request_review.approved"
             else
               EVENT="pull_request.opened"
             fi
-          elif [ "${{ github.event.action }}" = "closed" ]; then
-            if [ "${{ github.event.pull_request.merged }}" = "true" ]; then
+          elif [ "$GH_ACTION" = "closed" ]; then
+            if [ "$GH_MERGED" = "true" ]; then
               EVENT="pull_request.closed:merged"
             else
               EVENT="pull_request.closed:unmerged"
             fi
-          elif [ "${{ github.event.action }}" = "ready_for_review" ]; then
+          elif [ "$GH_ACTION" = "ready_for_review" ]; then
             EVENT="pull_request.ready_for_review"
-          elif [ "${{ github.event.action }}" = "synchronize" ]; then
+          elif [ "$GH_ACTION" = "synchronize" ]; then
             EVENT="pull_request.synchronize"
           else
             EVENT="pull_request.opened"
@@ -61,34 +70,46 @@ jobs:
           echo "item=pr-$PR" >> "$GITHUB_OUTPUT"
 
       - name: Route
+        env:
+          ROUTE_EVENT: ${{ steps.ev.outputs.event }}
+          ROUTE_ITEM: ${{ steps.ev.outputs.item }}
         run: |
           node scripts/event-router.mjs \
-            --event "${{ steps.ev.outputs.event }}" \
-            --item "${{ steps.ev.outputs.item }}" \
+            --event "$ROUTE_EVENT" \
+            --item "$ROUTE_ITEM" \
             --state STATE.md > route.json
           cat route.json
 
       - name: Record work item
+        env:
+          ITEM: ${{ steps.ev.outputs.item }}
+          EVENT: ${{ steps.ev.outputs.event }}
+          RAW_URL: ${{ github.event.pull_request.html_url }}
+          RAW_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
+          set -euo pipefail
           mkdir -p .loop/queue
-          ITEM="${{ steps.ev.outputs.item }}"
           PHASE=$(jq -r '.phase' route.json)
+          # 分支名只保留安全字符——它同时进文件名与 JSON。
+          BRANCH="$(printf '%s' "$RAW_BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-80)"
           cat > ".loop/queue/${ITEM}.json" <<EOF
           {
-            "id": "${ITEM}",
-            "event": "${{ steps.ev.outputs.event }}",
-            "phase": "${PHASE}",
-            "url": "${{ github.event.pull_request.html_url }}",
-            "branch": "${{ github.event.pull_request.head.ref }}",
+            "id": $(jq -Rn --arg v "$ITEM" '$v'),
+            "event": $(jq -Rn --arg v "$EVENT" '$v'),
+            "phase": $(jq -Rn --arg v "$PHASE" '$v'),
+            "url": $(jq -Rn --arg v "$RAW_URL" '$v'),
+            "branch": $(jq -Rn --arg v "$BRANCH" '$v'),
             "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
 
       - name: Flag fix phase
         if: steps.ev.outputs.event == 'pull_request_review.changes_requested'
+        env:
+          ITEM: ${{ steps.ev.outputs.item }}
         run: |
           echo "FIX PHASE — implementer and verifier must be separate agent instances."
-          echo "Isolation: git worktree add loop/${{ steps.ev.outputs.item }}-attempt1"
+          echo "Isolation: git worktree add loop/${ITEM}-attempt1"
           echo "Attempt limit: 3. Append each attempt to loop-ledger.json."
           echo "Denylist paths escalate without editing. See loop-constraints.md"
 

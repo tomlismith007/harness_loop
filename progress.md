@@ -14,7 +14,7 @@
 - [x] 17 个技能（`harness-init` / `harness-loop-init` / `harness-consolidate` 三阶段 + `harness-loop` 运行时 + 控制/感知/执行/验证/学习）
 - [x] 8 个脚本（7 个顶层 `.mjs` + `lib/common.mjs`），含 `harness-stage.mjs` 三阶段驱动器、`install-skills.mjs`
 - [x] 13 篇文档、13 个模板、8 个事件接线 workflow
-- [x] 724 项测试断言全通过
+- [x] 923 项测试断言全通过
 - [x] 修复审计盲区 — `SKILL_DIRS` 补 `.zcode/skills` 与 `.agents/skills`
 - [x] 修复审计 bug：verification 子系统只计 verifier，导致阶段 1 永远无法达成
 - [x] 修复假阳性：Promoted 表占位符被误判为已转正

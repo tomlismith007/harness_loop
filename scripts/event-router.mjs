@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, fail } from './lib/common.mjs';
+import { parseArgs, readText, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
 
 /**
  * 路由表。与 LOOP.md 保持一致——LOOP.md 是人类可读版本，这里是机械执行版本。
@@ -224,6 +224,7 @@ export function route(event, opts = {}) {
 
 function main() {
   const args = parseArgs();
+  rejectUnknownFlags(args, ['event', 'item', 'target', 'state', 'list', 'json', 'help'], 'event-router');
 
   if (args.help || (!args.event && !args.list)) {
     process.stdout.write(`event-router — map repository events to phase, skills, and gates

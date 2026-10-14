@@ -37,8 +37,14 @@ jobs:
       # 写死成 check_suite.* 会让 workflow_run.* 路由永远不可达，并套用错误的闸门集。
       - name: Determine event
         id: ev
+        env:
+          # 事件字段经 env 传入，绝不出现在 run: 的脚本正文里。
+          # 直接插值等于把攻击者可控的值拼进 shell——`github.event_name` 本身是
+          # 受控枚举，但同一条规则统一适用于所有事件字段，避免"这条安全那条不安全"。
+          GH_EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          set -euo pipefail
+          if [ "$GH_EVENT_NAME" = "workflow_run" ]; then
             EVENT="workflow_run.completed:failure"
           else
             EVENT="check_suite.completed:failure"
@@ -47,18 +53,29 @@ jobs:
 
       - name: Resolve item
         id: item
+        env:
+          # head_branch 是攻击者可控的分支名。它此前被直接拼进 run: 正文，
+          # 而分支名里的 `"; cmd; "` 会被真的执行（本地模拟已复现），
+          # 并会作为文件名写进 .loop/queue/（`../../` 可越权）。
+          RAW_BRANCH: ${{ github.event.workflow_run.head_branch || github.event.check_suite.head_branch }}
+          RAW_SHA: ${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}
         run: |
-          BRANCH="${{ github.event.workflow_run.head_branch || github.event.check_suite.head_branch }}"
-          SHA="${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}"
-          SHORT=$(echo "$SHA" | cut -c1-7)
+          set -euo pipefail
+          # 只保留安全字符；其余替换为 '-'。item 会进文件名与 $GITHUB_OUTPUT。
+          BRANCH="$(printf '%s' "$RAW_BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-80)"
+          SHORT="$(printf '%s' "$RAW_SHA" | tr -c '0-9a-fA-F' '-' | cut -c1-7)"
           echo "item=ci-${SHORT}-${BRANCH}" >> "$GITHUB_OUTPUT"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "sha=${RAW_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Route
+        env:
+          ROUTE_EVENT: ${{ steps.ev.outputs.event }}
+          ROUTE_ITEM: ${{ steps.item.outputs.item }}
         run: |
           node scripts/event-router.mjs \
-            --event "${{ steps.ev.outputs.event }}" \
-            --item "${{ steps.item.outputs.item }}" \
+            --event "$ROUTE_EVENT" \
+            --item "$ROUTE_ITEM" \
             --state STATE.md > route.json
           cat route.json
 
@@ -77,16 +94,22 @@ jobs:
           EOF
 
       - name: Record work item
+        env:
+          ITEM: ${{ steps.item.outputs.item }}
+          EVENT: ${{ steps.ev.outputs.event }}
+          BRANCH: ${{ steps.item.outputs.branch }}
+          SHA: ${{ steps.item.outputs.sha }}
         run: |
+          set -euo pipefail
           mkdir -p .loop/queue
-          ITEM="${{ steps.item.outputs.item }}"
+          # 全部经 jq 编码，绝不拼进 JSON 字面量。
           cat > ".loop/queue/${ITEM}.json" <<EOF
           {
-            "id": "${ITEM}",
-            "event": "${{ steps.ev.outputs.event }}",
+            "id": $(jq -Rn --arg v "$ITEM" '$v'),
+            "event": $(jq -Rn --arg v "$EVENT" '$v'),
             "phase": "fix",
-            "branch": "${{ steps.item.outputs.branch }}",
-            "sha": "${{ github.event.workflow_run.head_sha || github.event.check_suite.head_sha }}",
+            "branch": $(jq -Rn --arg v "$BRANCH" '$v'),
+            "sha": $(jq -Rn --arg v "$SHA" '$v'),
             "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF

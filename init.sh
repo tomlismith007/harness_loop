@@ -33,16 +33,41 @@ fi
 
 echo "=== CLI entry points ==="
 node scripts/event-router.mjs --list > /dev/null && echo "  event-router  OK"
-node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null && echo "  ledger-check  OK"
+# 账本用临时的一份：出厂的 loop-ledger.json 带占位 goal，熔断器会（正确地）判
+# placeholder-ledger 并退出 2。用仓库里那份测会得到一个与"脚本坏了"无法区分的失败。
+LEDGER_PROBE="$(mktemp)"
+printf '{"goal":"probe","pattern":"x","level":"L1","attempts":[]}\n' > "$LEDGER_PROBE"
+node scripts/ledger-check.mjs --ledger "$LEDGER_PROBE" > /dev/null && echo "  ledger-check  OK"
+rm -f "$LEDGER_PROBE"
+# 占位账本必须被拦下——这是熔断器"区分示例数据与真实历史"的那条判据。
+node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null 2>&1 \
+  && echo "  ledger-check  BROKEN (placeholder ledger should stop)" \
+  || echo "  ledger-check  OK (placeholder ledger rejected)"
+# gate 阶段的 approve 需要证据文件（verdict 是断言，不是证据）。
+EVIDENCE_PROBE="$(mktemp)"
+printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → PASS\n- Red check: PASS\n' > "$EVIDENCE_PROBE"
 node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-  --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null \
+  --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
+  --evidence-file "$EVIDENCE_PROBE" > /dev/null \
   && echo "  gate-check    OK (proceed path)"
+rm -f "$EVIDENCE_PROBE"
+# 无证据的 approve 必须被拦下
+node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
+  --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null 2>&1 \
+  && echo "  gate-check    BROKEN (approve without evidence should escalate)" \
+  || echo "  gate-check    OK (evidence required)"
 node scripts/gate-check.mjs --item pr-1 --phase gate --verdict none --diff-files a.ts > /dev/null \
   && echo "  gate-check    BROKEN (gate+no-verdict should escalate)" \
   || echo "  gate-check    OK (escalate path)"
 node scripts/gate-check.mjs --item pr-1 --phase gtae --verdict approve > /dev/null 2>&1 \
   && echo "  gate-check    BROKEN (bad phase should be rejected)" \
   || echo "  gate-check    OK (bad phase rejected)"
+# 未知标志必须被拒绝（拼错的标志曾经等价于"该闸门没启用"）
+node scripts/gate-check.mjs --item pr-1 --phase fix --diff-filesx a.ts > /dev/null 2>&1 \
+  && echo "  gate-check    BROKEN (unknown flag should be rejected)" \
+  || echo "  gate-check    OK (unknown flag rejected)"
+node scripts/budget-check.mjs --pattern ci-sweeper > /dev/null && echo "  budget-check  OK"
+node scripts/queue-read.mjs > /dev/null && echo "  queue-read    OK"
 node scripts/loop-audit.mjs . > /dev/null && echo "  loop-audit    OK"
 node scripts/harness-stage.mjs . > /dev/null && echo "  harness-stage OK"
 

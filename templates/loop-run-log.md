@@ -21,7 +21,10 @@
 }
 ```
 
-**`outcome` 枚举**：`no-op` | `report-only` | `fix-proposed` | `verified` | `escalated`
+**`outcome` 枚举**：`no-op` | `report-only` | `fix-proposed` | `verified` | `escalated` | `no-wiring` | `manual`
+
+`no-wiring` = 项目未接事件脊（不是问题，是还没到阶段 3）。
+`manual` = 非事件驱动的手工运行，**不计入循环统计**。
 
 ## Metrics to Watch
 

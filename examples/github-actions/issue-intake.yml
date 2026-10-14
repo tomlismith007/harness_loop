@@ -32,28 +32,41 @@ jobs:
 
       - name: Route the event
         id: route
+        env:
+          # 事件字段经 env 传入，绝不出现在 run: 的脚本正文里。
+          # 直接插值等于把攻击者可控的字段拼进 shell——`issue.title` 里的
+          # `"; cmd; "` 会被真的执行（本地模拟已复现）。
+          RAW_ACTION: ${{ github.event.action }}
+          RAW_NUMBER: ${{ github.event.issue.number }}
         run: |
-          EVENT="issues.${{ github.event.action }}"
-          ITEM="issue-${{ github.event.issue.number }}"
-          node scripts/event-router.mjs --event "$EVENT" --item "$ITEM" > route.json
+          set -euo pipefail
+          # action 与 number 都是枚举/数字，仍消毒一次：item 会进文件名与 $GITHUB_OUTPUT。
+          ACTION="$(printf '%s' "$RAW_ACTION" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+          ITEM="issue-$(printf '%s' "$RAW_NUMBER" | tr -c '0-9' '-' | cut -c1-20)"
+          echo "event=issues.${ACTION}" >> "$GITHUB_OUTPUT"
+          echo "item=${ITEM}" >> "$GITHUB_OUTPUT"
+          node scripts/event-router.mjs --event "issues.${ACTION}" --item "$ITEM" > route.json
           cat route.json
 
       - name: Record work item
+        env:
+          ITEM: ${{ steps.route.outputs.item }}
+          EVENT: ${{ steps.route.outputs.event }}
+          RAW_TITLE: ${{ github.event.issue.title }}
+          RAW_URL: ${{ github.event.issue.html_url }}
         run: |
+          set -euo pipefail
           mkdir -p .loop/queue
-          ITEM="issue-${{ github.event.issue.number }}"
+          # title 与 url 都是自由文本/任意 URL：一律经 jq 编码，绝不拼进 JSON 字面量。
           cat > ".loop/queue/${ITEM}.json" <<EOF
           {
-            "id": "${ITEM}",
-            "event": "issues.${{ github.event.action }}",
+            "id": $(jq -Rn --arg v "$ITEM" '$v'),
+            "event": $(jq -Rn --arg v "$EVENT" '$v'),
             "phase": "intake",
             "skills": ["issue-triage"],
             "level": "L1",
-            "title": $(jq -Rs . <<'TITLE'
-          ${{ github.event.issue.title }}
-          TITLE
-          ),
-            "url": "${{ github.event.issue.html_url }}",
+            "title": $(jq -Rn --arg v "$RAW_TITLE" '$v'),
+            "url": $(jq -Rn --arg v "$RAW_URL" '$v'),
             "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
@@ -70,6 +83,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: loop-queue-${{ github.event.issue.number }}
+          name: loop-queue-issue-${{ github.event.issue.number }}
           path: .loop/queue/
           retention-days: 7

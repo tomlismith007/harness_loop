@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, readRegistryDefaults, DENYLIST_PATTERNS, fail } from './lib/common.mjs';
+import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, readRegistryDefaults, DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg } from './lib/common.mjs';
 
 export const DEFAULTS = {
   maxFilesPerFix: 5,
@@ -39,7 +39,10 @@ function registryDefaults(registryPath) {
 
 // 白名单。未识别的值一律参数错误退出，绝不放行——
 // 拼错的 --verdict 等价于"批准"是这个闸门曾经最大的漏洞。
-const PHASES = ['intake', 'review', 'fix', 'verify', 'gate', 'post-merge', 'release'];
+// close 必须在列表里：event-router 把 issues.closed / pull_request.closed:unmerged /
+// release.published 路由到 phase='close'，而它此前不在枚举里——照技能走必然退出 1，
+// 而退出 1（参数错误）不属于 proceed/report-only/escalate/exit 四态，调用方没有规定动作。
+const PHASES = ['intake', 'review', 'fix', 'verify', 'gate', 'post-merge', 'release', 'close'];
 const VERDICTS = ['approve', 'reject', 'escalate-human', 'none'];
 const RED_CHECKS = ['pass', 'fail', 'not-run'];
 
@@ -55,6 +58,7 @@ const RED_CHECKS = ['pass', 'fail', 'not-run'];
  *   6. scope (files > max)
  *   7. head-commit (TOCTOU)
  *   8. red-check
+ *   8b. verification-evidence (approve 必须带可核对的 verifier 报告)
  *   9. verification
  */
 export function checkGates(input, opts = {}) {
@@ -71,6 +75,7 @@ export function checkGates(input, opts = {}) {
     reviewedSha = null,
     headSha = null,
     redCheck = 'not-run',
+    evidenceFile = null,
     notRun = [],
     // 拒绝列表由调用方从 loop-constraints.md 读入；不给则用 JS 常量兜底。
     denylist = DENYLIST_PATTERNS,
@@ -228,6 +233,67 @@ export function checkGates(input, opts = {}) {
     };
   }
 
+  // 8b. 证据：verdict 是断言，不是证据。
+  //     没有这一步时，调用方填 --verdict approve 即可通过，而"独立验证"与
+  //     "审查过的 commit"两条硬约束都由调用方自证——一个接受自证的闸门，
+  //     和一个不存在的闸门，在退出码上不可区分。
+  if (phase === 'gate' && verdict === 'approve') {
+    if (!evidenceFile) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: 'approve at the gate phase requires --evidence-file pointing at the verifier report',
+        allowed_actions: ['run loop-verifier, save its report, pass the path via --evidence-file'],
+        exit_code: 2,
+        next: 'a verdict without evidence is a claim. Save the verifier report to a file and pass --evidence-file <path>.',
+      };
+    }
+    if (!fs.existsSync(evidenceFile)) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `evidence file not found: ${evidenceFile}`,
+        allowed_actions: [],
+        exit_code: 2,
+        next: 'the named evidence file does not exist — do not approve on a missing report',
+      };
+    }
+    const report = readText(evidenceFile);
+    // 报告必须自带可核对的要素：verdict 行 + 至少一条命令输出行。
+    // 这两条正则与 loop-verifier/SKILL.md 的输出格式一致——那份格式早就是现成的接口，
+    // 只是此前没有任何东西读它。
+    const verdictLine = report.match(/^##\s*Verdict:\s*(APPROVE|REJECT|ESCALATE_HUMAN)/m);
+    const hasCommandEvidence = /^\s*-\s*(Tests|Red check|Real-use validation|Lint|Scope check|Denylist check):\s*`[^`]+`\s*→\s*(PASS|FAIL|NOT RUN)/m.test(report);
+    const missing = [];
+    if (!verdictLine) missing.push('a "## Verdict: APPROVE|REJECT|ESCALATE_HUMAN" line');
+    if (!hasCommandEvidence) missing.push('at least one "- Tests|Red check|Real-use validation: `<cmd>` → PASS|FAIL|NOT RUN" line');
+    if (missing.length) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `evidence file ${evidenceFile} is missing: ${missing.join('; ')}`,
+        allowed_actions: ['re-run loop-verifier and save its full report'],
+        exit_code: 2,
+        next: 'the report exists but carries no verifiable verdict/command lines. See loop-verifier SKILL.md output format.',
+      };
+    }
+    // 报告自称 REJECT / ESCALATE_HUMAN 时，命令行说 approve 不成立。
+    if (verdictLine[1] !== 'APPROVE') {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `--verdict approve contradicts the evidence file, which states ${verdictLine[1]}`,
+        allowed_actions: [],
+        exit_code: 2,
+        next: 'the report is the authoritative verdict; pass --verdict matching it',
+      };
+    }
+  }
+
   // 9. 验证
   if (verdict === 'reject') {
     return {
@@ -283,6 +349,11 @@ export function checkGates(input, opts = {}) {
 
 function main() {
   const args = parseArgs();
+  rejectUnknownFlags(args, [
+    'item', 'phase', 'attempts', 'diffFiles', 'verdict', 'budgetPct', 'pause', 'cleanup',
+    'reviewedSha', 'headSha', 'redCheck', 'constraintsRoot', 'notRun', 'registry',
+    'evidenceFile', 'json', 'help',
+  ], 'gate-check');
   if (args.help) {
     process.stdout.write(`gate-check — enforce loop gates before acting
 
@@ -291,7 +362,7 @@ Usage:
 
 Options:
   --item <id>            Work item id (e.g. pr-123)
-  --phase <phase>        intake|review|fix|verify|gate|post-merge|release
+  --phase <phase>        intake|review|fix|verify|gate|post-merge|release|close
   --attempts <n>         Attempts so far (default: 0)
   --diff-files <list>    A changed path, or @path to a file with one path per line
   --verdict <v>          approve | reject | escalate-human | none (default: none)
@@ -301,6 +372,9 @@ Options:
   --reviewed-sha <sha>   Commit SHA that was reviewed (required at --phase gate)
   --head-sha <sha>       Current head SHA of the branch (required at --phase gate)
   --red-check <state>    pass | fail | not-run — does the new test fail on pre-fix code? (default: not-run)
+  --evidence-file <p>    Verifier report. Required with --verdict approve at --phase gate:
+                         the gate reads it and checks it carries a verdict line and at
+                         least one command-output line. A verdict without evidence is a claim.
   --constraints-root <d> Directory holding loop-constraints.md (default: cwd). The denylist is
                          read from it so repo-specific paths are actually enforced.
   --not-run <list>       Comma-separated checks that were NOT run (listed, never omitted)
@@ -352,21 +426,29 @@ Exit codes:
     return n;
   };
 
+  // loop-verifier 的输出格式是 APPROVE / REJECT / ESCALATE_HUMAN，而这里的枚举是
+  // 小写连字符。两处各按自己的文档执行时必然得到"参数错误"，而参数错误不属于
+  // proceed/report-only/escalate/exit 四态——最重要的人工升级信号会在传递途中消失。
+  const normalizeVerdict = (v) => String(v).trim().toLowerCase().replace(/_/g, '-');
+
   const input = {
     item: typeof args.item === 'string' ? args.item : null,
     phase: enumArg(args.phase, PHASES, '--phase') ?? null,
     attempts: numArg(args.attempts, '--attempts', 0),
     diffFiles,
-    verdict: enumArg(args.verdict, VERDICTS, '--verdict') ?? 'none',
+    verdict: enumArg(
+      args.verdict === undefined ? undefined : normalizeVerdict(args.verdict),
+      VERDICTS, '--verdict') ?? 'none',
     budgetPct: numArg(args.budgetPct, '--budget-pct', 0),
-    pause: Boolean(args.pause),
-    isCleanup: Boolean(args.cleanup),
+    pause: boolArg(args.pause),
+    isCleanup: boolArg(args.cleanup),
     // 拒绝列表的真相源是本仓库的 loop-constraints.md，不是脚本里的常量。
     // 维护者按文档在 ## Repo-Specific 加的路径必须真的被强制执行。
     denylist: loadDenylist(typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd()),
     reviewedSha: typeof args.reviewedSha === 'string' ? args.reviewedSha : null,
     headSha: typeof args.headSha === 'string' ? args.headSha : null,
     redCheck: enumArg(args.redCheck, RED_CHECKS, '--red-check') ?? 'not-run',
+    evidenceFile: typeof args.evidenceFile === 'string' ? args.evidenceFile : null,
     notRun: typeof args.notRun === 'string'
       ? args.notRun.split(',').map((s) => s.trim()).filter(Boolean)
       : [],

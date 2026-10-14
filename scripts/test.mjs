@@ -15,10 +15,12 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { parseArgs, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText, hasEventWiring } from './lib/common.mjs';
+import { parseArgs, boolArg, readRegistryStages, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText, hasEventWiring } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { route, ROUTES, readLocks } from './event-router.mjs';
 import { checkGates } from './gate-check.mjs';
+import { parseBudgetCaps, capForPattern } from './budget-check.mjs';
+import { worktreeName } from './worktree.mjs';
 import { scoreHarness } from './loop-audit.mjs';
 
 const VERBOSE = process.argv.includes('--verbose');
@@ -86,6 +88,32 @@ section('1. CLI 参数解析');
   const c = parseArgs();
   process.argv = saved;
   eq('数值参数取值', c.stagnation, '3');
+
+  // ---- 布尔标志不得吞掉后随的裸值 ----
+  // `--pause false` 曾经被解析成 pause=true + 位置参数 false，而 docs/03 的示例
+  // 就写着 `--pause false`——照文档执行会得到永久紧急刹车。
+  {
+    const bad = parseArgs(['--pause', 'false']);
+    ok('--pause false 被拒绝', typeof bad._error === 'string' && bad._error.includes('--pause'),
+      JSON.stringify(bad));
+    ok('--pause false 的报错给出正确写法', /--pause=false/.test(bad._error || ''), bad._error);
+
+    const bare = parseArgs(['--pause']);
+    eq('--pause（裸）→ true', bare.pause, true);
+    eq('--pause（裸）无错误', bare._error, undefined);
+
+    const explicit = parseArgs(['--pause=false']);
+    eq('--pause=false 保留字符串值', explicit.pause, 'false');
+    eq('--pause=false 无错误', explicit._error, undefined);
+
+    // boolArg 才是把字符串转成布尔的正确方式（Boolean("false") === true 是陷阱）
+    eq('boolArg("false") → false', boolArg('false'), false);
+    eq('boolArg("true") → true', boolArg('true'), true);
+    eq('boolArg(undefined) → false', boolArg(undefined), false);
+    eq('boolArg(true) → true', boolArg(true), true);
+    // 非布尔标志仍正常取值
+    eq('非布尔标志仍取值', parseArgs(['--item', 'pr-1']).item, 'pr-1');
+  }
 }
 
 // ---------------------------------------------------------------- 2. 拒绝列表
@@ -122,6 +150,28 @@ const denyCases = [
 for (const [file, shouldMatch] of denyCases) {
   const hit = matchesDenylist(file) !== null;
   eq(`denylist ${file} → ${shouldMatch}`, hit, shouldMatch);
+}
+
+// ---- 大小写变体必须同样被拦 ----
+// macOS/Windows 的文件系统大小写不敏感：AUTH/login.ts 与 auth/login.ts 是同一个文件。
+// 拒绝列表若区分大小写，把目录改名成大写就能绕过它。
+{
+  const caseCases = [
+    ['AUTH/login.ts', 'auth/**'],
+    ['AUTH/LOGIN.TS', 'auth/**'],
+    ['Payments/x.ts', 'payments/**'],
+    ['Billing/y.ts', 'billing/**'],
+    ['.ENV', '.env'],
+    ['.Env.Local', '.env.*'],
+    ['CONFIG/SECRETS/x.json', '**/secrets/**'],
+    ['SRC/MONKEY_KEY.TS', '**/*_key*'],
+  ];
+  for (const [file, expect] of caseCases) {
+    eq(`大小写变体 ${file} → ${expect}`, matchesDenylist(file), expect);
+  }
+  // 不引入新的误拦
+  eq('大写不误拦测试文件', matchesDenylist('tests/AUTH.test.ts'), null);
+  eq('大写不误拦普通源码', matchesDenylist('SRC/APP.TS'), null);
 }
 
 // 拒绝列表的真相源是 loop-constraints.md，不是脚本里的常量。
@@ -162,6 +212,26 @@ section('3. 错误签名归一化');
   const e = normalizeError('Cannot find module lodash');
   const f = normalizeError('Cannot find module axios');
   ok('不同模块归一化后不同', e !== f);
+
+  // ---- 归一化不得把语义不同的错误折叠成同一个签名 ----
+  // 曾经是 `\b\d+\b → <n>`，把退出码、HTTP 状态码、断言期望值全抹平了。
+  // 后果：agent 依次遇到"500 服务端错误"→"404 路由缺失"→"超时"三种根因完全
+  // 不同的失败时，会在第 3 次被判 stagnation 并熔断。
+  eq('不同退出码不算同一签名',
+    normalizeError('Error: process exited with code 1') === normalizeError('Error: process exited with code 2'),
+    false);
+  eq('HTTP 500 与 404 不算同一签名',
+    normalizeError('fetch failed: status 500') === normalizeError('fetch failed: status 404'),
+    false);
+  eq('不同断言值不算同一签名',
+    normalizeError('AssertionError: expected 5 to equal 6') === normalizeError('AssertionError: expected 7 to equal 8'),
+    false);
+  // 但真正的位置噪声仍要折叠
+  eq('行号差异仍算同一签名',
+    normalizeError('TypeError: boom at profile.ts:42') === normalizeError('TypeError: boom at profile.ts:87'),
+    true);
+  eq('line N 形式的位置仍折叠',
+    normalizeError('error at line 42') === normalizeError('error at line 87'), true);
 }
 
 // ---------------------------------------------------------------- 4. 熔断器
@@ -199,6 +269,25 @@ section('4. 熔断器判定');
   // 边界：空 attempts 仍是 ok（"还没开始跑" ≠ "读不到"）
   eq('attempts 空数组仍是 ok', checkLedger({ attempts: [] }).verdict, 'ok');
   eq('attempts 空数组退出码 0', checkLedger({ attempts: [] }).exit_code, 0);
+
+  // ---- 出厂账本必须与真实历史区分开 ----
+  // 装配生成的 goal 是 "Replace with the current loop goal"，模板示例是
+  // "Example loop ledger"。旧实现不看 goal，于是示例数据会被当成真实历史。
+  {
+    const shipped = { goal: 'Replace with the current loop goal', pattern: 'pr-review-triage', level: 'L2', attempts: mk(2, 'failure', 'E1') };
+    eq('装配出的占位账本 → placeholder-ledger', checkLedger(shipped).verdict, 'placeholder-ledger');
+    eq('占位账本退出码 2', checkLedger(shipped).exit_code, 2);
+    const example = { goal: 'Example loop ledger — one entry per fix attempt.', attempts: mk(1, 'failure', 'E1') };
+    eq('模板示例账本 → placeholder-ledger', checkLedger(example).verdict, 'placeholder-ledger');
+    // 真实 goal 不受影响
+    eq('真实 goal 的账本正常判定', checkLedger({ goal: '修 CI 的 flake', attempts: mk(3, 'failure', 'E1') }).verdict, 'stagnation');
+    // 空 attempts 的占位账本仍走原路径（那是"还没开始跑"）
+    eq('占位账本 + 空 attempts 仍是 ok',
+      checkLedger({ goal: 'Replace with the current loop goal', attempts: [] }).verdict, 'ok');
+    ok('placeholder-ledger 给出可行动的 next', /Replace `goal`/.test(checkLedger(shipped).next),
+      checkLedger(shipped).next);
+  }
+
   // 真实账本不受影响
   eq('3 次同错仍停滞', checkLedger({ attempts: mk(3, 'failure', 'E1') }).verdict, 'stagnation');
   eq('1 次失败 → ok', checkLedger({ attempts: mk(1, 'failure', 'E1') }).verdict, 'ok');
@@ -335,8 +424,20 @@ section('5. 事件路由');
 
 section('6. 闸门判定');
 {
-  // gate 阶段现在要求 redCheck 明确通过 + 两个 sha 都给，否则一律 escalate（fail-closed）。
-  const GATE = { phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass', reviewedSha: 'abc123', headSha: 'abc123' };
+  // gate 阶段要求 redCheck 明确通过 + 两个 sha 都给 + approve 必须带证据文件，
+  // 否则一律 escalate（fail-closed）。
+  // 证据闸门的存在理由：verdict 是断言，不是证据。没有它时调用方填
+  // --verdict approve 即可通过，而"独立验证"与"审查过的版本"两条硬约束
+  // 都由调用方自证——一个接受自证的闸门和一个不存在的闸门，在退出码上不可区分。
+  const evTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-gate-ev-'));
+  const EV = path.join(evTmp, 'report.md');
+  fs.writeFileSync(EV, [
+    '## Verdict: APPROVE', '',
+    '### Evidence',
+    '- Tests: `npm test` → PASS',
+    '- Red check: PASS — 回退后新测试挂掉',
+  ].join('\n'));
+  const GATE = { phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass', reviewedSha: 'abc123', headSha: 'abc123', evidenceFile: EV };
   eq('干净通过', checkGates({ item: 'p', ...GATE, budgetPct: 10 }).decision, 'proceed');
   eq('pause → exit', checkGates({ item: 'p', pause: true }).decision, 'exit');
   eq('pause 退出码 3', checkGates({ item: 'p', pause: true }).exit_code, 3);
@@ -382,6 +483,43 @@ section('6. 闸门判定');
   eq('省略 redCheck 等同 not-run（忘传参数不得放行）', r5.decision, 'escalate');
   eq('省略 redCheck 时闸门名', r5.gate, 'red-check');
 
+  // ---- 证据闸门（approve 必须带可核对的 verifier 报告）----
+  {
+    const noEv = checkGates({ item: 'p', ...GATE, evidenceFile: null });
+    eq('gate+approve 无证据 → escalate', noEv.decision, 'escalate');
+    eq('证据闸门名', noEv.gate, 'verification-evidence');
+
+    eq('证据文件不存在 → escalate',
+      checkGates({ item: 'p', ...GATE, evidenceFile: path.join(evTmp, 'nope.md') }).decision, 'escalate');
+
+    const thinFile = path.join(evTmp, 'thin.md');
+    fs.writeFileSync(thinFile, 'LGTM\n');
+    eq('只有一句话的报告 → escalate',
+      checkGates({ item: 'p', ...GATE, evidenceFile: thinFile }).decision, 'escalate');
+
+    // 报告自称 REJECT 时，命令行说 approve 不成立
+    const rejFile = path.join(evTmp, 'rej.md');
+    fs.writeFileSync(rejFile, '## Verdict: REJECT\n\n### Evidence\n- Tests: `npm test` → FAIL\n');
+    const contrad = checkGates({ item: 'p', ...GATE, evidenceFile: rejFile });
+    eq('证据自称 REJECT → escalate', contrad.decision, 'escalate');
+    ok('矛盾被指出来', /contradicts/.test(contrad.reason), contrad.reason);
+
+    // 有 verdict 行但没有命令行证据 → 仍不算
+    const noCmd = path.join(evTmp, 'nocmd.md');
+    fs.writeFileSync(noCmd, '## Verdict: APPROVE\n\nLooks fine to me.\n');
+    eq('缺命令输出行 → escalate',
+      checkGates({ item: 'p', ...GATE, evidenceFile: noCmd }).decision, 'escalate');
+
+    // 非 gate 阶段不强制证据，否则 fix 阶段无法工作
+    eq('fix 阶段 approve 不需要证据',
+      checkGates({ item: 'p', phase: 'fix', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve' }).decision, 'proceed');
+    // reject 本来就在阻止，不需要证据
+    eq('gate 阶段 reject 不需要证据',
+      checkGates({ item: 'p', ...GATE, verdict: 'reject', evidenceFile: null }).decision, 'escalate');
+    eq('gate 阶段 reject 命中 verification 闸（而非 evidence 闸）',
+      checkGates({ item: 'p', ...GATE, verdict: 'reject', evidenceFile: null }).gate, 'verification');
+  }
+
   // ---- NOT RUN 声明 ----
   const n1 = checkGates({ item: 'p', ...GATE, notRun: ['real-device', 'load-test'] });
   eq('有未跑项仍可 proceed', n1.decision, 'proceed');
@@ -391,12 +529,42 @@ section('6. 闸门判定');
   // 优先级：pause 覆盖一切
   const p1 = checkGates({ item: 'p', pause: true, diffFiles: ['auth/x.ts'], attempts: 9 });
   eq('pause 优先于 denylist 与 attempts', p1.gate, 'pause');
+
+  // ---- 路由产出的每个 phase 都必须被闸门接受 ----
+  // event-router 把 issues.closed / pull_request.closed:unmerged / release.published
+  // 路由到 phase='close'，而 PHASES 里曾经没有它——三个已注册事件在闸门处必然退出 1，
+  // 而退出 1（参数错误）不属于 proceed/report-only/escalate/exit 四态，调用方没有规定动作。
+  {
+    const gateSrc = fs.readFileSync(path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'), 'utf8');
+    const phases = JSON.parse(gateSrc.match(/const PHASES = (\[[^\]]+\])/)[1].replace(/'/g, '"'));
+    const unroutable = Object.entries(ROUTES)
+      .filter(([, spec]) => spec.phase && !phases.includes(spec.phase))
+      .map(([ev, spec]) => `${ev} → ${spec.phase}`);
+    ok('ROUTES 的每个 phase 都在 gate-check 的 PHASES 里', unroutable.length === 0, unroutable.join('; '));
+
+    // 行为断言必须走 CLI——PHASES 只在 main() 里被校验，checkGates() 库函数不查它。
+    // 第一次写这条断言时用的是 checkGates()，变异测试立刻暴露它无牙齿：
+    // 把 'close' 从 PHASES 删掉后它仍然全绿。
+    const runGate = (args) => {
+      try {
+        const o = execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'), ...args],
+          { encoding: 'utf8' });
+        return { code: 0, out: o };
+      } catch (e) { return { code: e.status, out: e.stdout || '' }; }
+    };
+    eq('close 阶段被 CLI 接受',
+      runGate(['--item', 'issue-1', '--phase', 'close', '--verdict', 'none', '--diff-files', 'a.ts']).code, 0);
+    eq('close 阶段仍执行拒绝列表检查',
+      runGate(['--item', 'issue-1', '--phase', 'close', '--verdict', 'none', '--diff-files', 'auth/x.ts']).code, 2);
+  }
   // 优先级：denylist 优先于 attempts
   const p2 = checkGates({ item: 'p', attempts: 9, diffFiles: ['auth/x.ts'] });
   eq('denylist 优先于 attempts', p2.gate, 'denylist');
   // 优先级：budget 100 优先于 denylist
   const p3 = checkGates({ item: 'p', budgetPct: 100, diffFiles: ['auth/x.ts'] });
   eq('预算 100% 优先于 denylist', p3.gate, 'budget');
+
+  fs.rmSync(evTmp, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------- 7. 文本匹配
@@ -591,12 +759,55 @@ section('12. 根 harness 文件');
   const ledger = JSON.parse(fs.readFileSync(path.join(PACK_ROOT, 'loop-ledger.json'), 'utf8'));
   ok('ledger 有 attempts 数组', Array.isArray(ledger.attempts));
 
+  // ---- run-log 的 outcome 必须在声明的枚举内 ----
+  // 这张表里的值会被 Metrics to Watch 用来算空转率、升级率、平均尝试次数。
+  // 曾经实际写入的值是 `fixed`，不在任何声明的枚举里，也没有任何东西校验——
+  // 于是所有统计口径静默失效。声明与实现脱节正是这个仓库反复出的同一类病。
+  {
+    const runLog = fs.readFileSync(path.join(PACK_ROOT, 'loop-run-log.md'), 'utf8');
+    const ENUM = ['no-op', 'report-only', 'fix-proposed', 'verified', 'escalated', 'no-wiring', 'manual'];
+    const declared = (runLog.match(/\*\*`outcome` 枚举\*\*：(.+)/) || [])[1] || '';
+    for (const v of ENUM) {
+      ok(`outcome 枚举声明含 ${v}`, declared.includes('`' + v + '`'), declared.slice(0, 140));
+    }
+    const rows = [...runLog.matchAll(/^\{"run_id".*\}$/gm)]
+      .map((m) => { try { return JSON.parse(m[0]); } catch { return null; } })
+      .filter(Boolean);
+    ok(`run-log 有可解析的记录（${rows.length} 条）`, rows.length > 0);
+    const bad = [...new Set(rows.filter((r) => !ENUM.includes(r.outcome)).map((r) => r.outcome))];
+    ok('每条 run-log 的 outcome 都在枚举内', bad.length === 0, `非法值: ${bad.join(', ')}`);
+    // 模板里的枚举必须与仓库这份一致，否则新项目继承一个错的枚举
+    const tplLog = fs.readFileSync(path.join(TEMPLATE_DIR, 'loop-run-log.md'), 'utf8');
+    const tplDeclared = (tplLog.match(/\*\*`outcome` 枚举\*\*：(.+)/) || [])[1] || '';
+    for (const v of ENUM) {
+      ok(`模板 outcome 枚举含 ${v}`, tplDeclared.includes('`' + v + '`'), tplDeclared.slice(0, 140));
+    }
+  }
+
   // LESSONS.md 模板含棘轮机制
   const lessons = fs.readFileSync(path.join(PACK_ROOT, 'templates', 'LESSONS.md'), 'utf8');
   ok('LESSONS 模板含 Seen N× 格式说明', /Seen N×/.test(lessons));
   ok('LESSONS 模板含转正规则', /3 个不同日期/.test(lessons));
   ok('LESSONS 模板有 Rules 区', /## Rules/.test(lessons));
   ok('LESSONS 模板有 Done right 区', /## Done right/.test(lessons));
+
+  // ---- 本仓库自己的 session-handoff.md 必须已填写 ----
+  // 它是阶段 2 的产出之一，所以"文件存在"会让判据通过——但一份全是 [待填] 的
+  // handoff 等于没有 handoff。出厂模板带占位符是对的（新项目必须自己填），
+  // 源仓库这份不该留着占位。
+  {
+    const handoff = fs.readFileSync(path.join(PACK_ROOT, 'session-handoff.md'), 'utf8');
+    const placeholders = ['[本次会话要达成什么]', '[做到哪了]', '[分支名]', '[commit hash]',
+      '[完成项]', '[决策]', '[理由]', '[阻塞/风险]', '[描述与影响]', '[feature id 与名称]'];
+    const found = placeholders.filter((p) => handoff.includes(p));
+    ok('session-handoff.md 无模板占位符', found.length === 0, found.join(', '));
+    ok('session-handoff.md 记录了当前目标', /\*\*Goal:\*\*\s*\S/.test(handoff));
+    ok('session-handoff.md 有验证证据表', /## Verification Evidence/.test(handoff));
+    // 模板本身必须仍然带占位符——否则新项目会继承一份"看起来已填"的空文件
+    const tplHandoff = fs.readFileSync(path.join(TEMPLATE_DIR, 'session-handoff.md'), 'utf8');
+    ok('模板 session-handoff.md 仍带占位符（新项目必须自己填）',
+      tplHandoff.includes('[本次会话要达成什么]'));
+  }
   ok('LESSONS 模板有转正记录表', /## Promoted to hard rules/.test(lessons));
   ok('LESSONS 模板有夜审日志', /## Nightly review log/.test(lessons));
 
@@ -669,10 +880,26 @@ section('13. 文档完整性');
     eq('阶段 1 判据数（供文档比对）', stage1Checks, 8);
 
     // 扫描全部对外文档：出现旧数字就是漂移
+    // LOOP.md 必须在清单里——它自称"调度与路由的唯一真相源"，
+    // 却曾经独独留在"10 项（全机械）"上，而扫描清单漏了它，测试全绿。
     const docFiles = [
-      'README.md', 'AGENTS.md',
+      'README.md', 'AGENTS.md', 'LOOP.md',
       ...fs.readdirSync(path.join(PACK_ROOT, 'docs')).map((d) => path.join('docs', d)),
     ];
+    ok('漂移扫描覆盖 LOOP.md', docFiles.includes('LOOP.md'));
+    ok('漂移扫描覆盖 AGENTS.md', docFiles.includes('AGENTS.md'));
+
+    // 脚本数也必须被守住。docs/10 曾写"7 个顶层 .mjs"，实际是 8——
+    // 与阶段判据数同源：文档里的数字没有任何东西在校验。
+    {
+      const topLevel = fs.readdirSync(path.join(PACK_ROOT, 'scripts'))
+        .filter((f) => f.endsWith('.mjs')).length;
+      const doc10 = fs.readFileSync(path.join(PACK_ROOT, 'docs', '10-how-to-use.md'), 'utf8');
+      const m = doc10.match(/(\d+)\s*个顶层\s*`?\.mjs`?/);
+      ok('docs/10 的顶层脚本数与实际一致', m && Number(m[1]) === topLevel,
+        `文档=${m ? m[1] : '(未找到)'} / 实际=${topLevel}`);
+    }
+
     const drift = [];
     for (const rel of docFiles) {
       const f = path.join(PACK_ROOT, rel);
@@ -700,6 +927,54 @@ section('13. 文档完整性');
     ok('文档里的阶段判据数与技能数与代码一致', drift.length === 0, drift.join('; '));
     ok(`技能数实测 ${skillsOnDisk}（供文档比对）`, skillsOnDisk === 17, String(skillsOnDisk));
   }
+
+  // ---- 文档引用的每个 --flag 必须在脚本里真实存在 ----
+  // 这条断言一次覆盖三类问题：--diff-files 少了 @、--reviewed-sha 没传、
+  // --inject 根本不存在。它们的共同点是"文档说了、脚本没有"或"脚本要了、文档没给"，
+  // 而 agent 按文档执行时会静默走进一条不生效的路径。
+  {
+    const knownByScript = {
+      'gate-check.mjs': ['item', 'phase', 'attempts', 'diff-files', 'verdict', 'budget-pct', 'pause',
+        'cleanup', 'reviewed-sha', 'head-sha', 'red-check', 'constraints-root', 'not-run', 'registry',
+        'evidence-file', 'json', 'help'],
+      'ledger-check.mjs': ['ledger', 'stagnation', 'no-progress', 'max-iterations', 'token-budget',
+        'escalation', 'json', 'registry', 'help'],
+      'event-router.mjs': ['event', 'item', 'target', 'state', 'list', 'json', 'help'],
+    };
+    const unknown = [];
+    const scan = (d, depth) => {
+      if (depth > 3) return;
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (['.git', '.mimosa', 'node_modules'].includes(e.name)) continue;
+        const f = path.join(d, e.name);
+        if (e.isDirectory()) { scan(f, depth + 1); continue; }
+        if (!/\.md$/.test(e.name)) continue;
+        // REVIEW-*.md 是历史记录，记录的是"当时文档长什么样"，不参与漂移检查
+        if (/^REVIEW-\d{4}-\d{2}-\d{2}/.test(e.name)) continue;
+        const text = fs.readFileSync(f, 'utf8');
+        for (const m of text.matchAll(/node\s+scripts\/([a-z-]+\.mjs)([\s\S]{0,300}?)(?=\n\s*\n|```|$)/g)) {
+          const script = m[1];
+          const known = knownByScript[script];
+          if (!known) continue;
+          for (const fl of m[2].matchAll(/--([a-z][a-z-]+)/g)) {
+            // 允许 <占位符> 形态的取值，但不允许不存在的标志名
+            if (!known.includes(fl[1])) {
+              unknown.push(`${path.relative(PACK_ROOT, f)} → ${script} --${fl[1]}`);
+            }
+          }
+        }
+      }
+    };
+    scan(PACK_ROOT, 0);
+    ok('文档引用的每个 --flag 都在脚本中存在', unknown.length === 0, unknown.slice(0, 8).join('; '));
+
+    // 这条断言必须真的能抓到问题——用一个不存在的标志验证扫描逻辑本身。
+    // （若扫描正则写坏，unknown 会恒为空，断言就变成装饰品。）
+    const probe = 'node scripts/gate-check.mjs --item x --totally-fake-flag y';
+    const probeHits = [...probe.matchAll(/--([a-z][a-z-]+)/g)]
+      .map((x) => x[1]).filter((fl) => !knownByScript['gate-check.mjs'].includes(fl));
+    ok('扫描逻辑本身能识别未知标志', probeHits.includes('totally-fake-flag'), probeHits.join(','));
+  }
 }
 
 // ---------------------------------------------------------------- 14. 事件接线
@@ -721,6 +996,80 @@ section('14. GitHub Actions 接线');
     ok(`${f} 不含自动合并`, !/gh pr merge/.test(content));
     // 没有硬编码凭据
     ok(`${f} 无硬编码凭据`, !/(ghp_|github_pat_|sk-)[A-Za-z0-9]{10,}/.test(content));
+  }
+
+  // ---- run: 块内不得出现事件字段插值 ----
+  // 直接插值等于把攻击者可控的分支名拼进 shell——分支名里的 `"; cmd; "` 会被真的执行
+  // （本地模拟已复现）。允许出现在 env: 段（那是 GitHub 推荐的间接层）。
+  {
+    const offenders = [];
+    for (const f of expected.filter((x) => x.endsWith('.yml'))) {
+      const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n');
+      let inRun = false;
+      let runIndent = 0;
+      lines.forEach((line, i) => {
+        const m = line.match(/^(\s*)run:\s*[|>]?\s*$/);
+        if (m) { inRun = true; runIndent = m[1].length; return; }
+        if (inRun) {
+          const indent = line.match(/^\s*/)[0].length;
+          if (line.trim() && indent <= runIndent) inRun = false;
+        }
+        if (inRun && /\$\{\{\s*github\.event\./.test(line)) {
+          offenders.push(`${f}:${i + 1} → ${line.trim().slice(0, 70)}`);
+        }
+      });
+    }
+    ok('run: 块内无事件字段插值', offenders.length === 0, offenders.slice(0, 6).join('; '));
+  }
+
+  // ---- merge-gate 必须提供约束 7/8/9 要求的参数 ----
+  // 曾经它只传 4 个参数（缺 reviewed-sha / head-sha / red-check），
+  // 于是每个 ready_for_review 的 PR 都收到 "human decision required"——
+  // 持续假升级会训练人忽略它，最终闸门被关掉。
+  {
+    const mg = fs.readFileSync(path.join(dir, 'merge-gate.yml'), 'utf8');
+    for (const flag of ['--reviewed-sha', '--head-sha', '--red-check', '--diff-files', '--budget-pct']) {
+      ok(`merge-gate 传入 ${flag}`, mg.includes(flag));
+    }
+    ok('merge-gate 用 @ 前缀传清单（否则拒绝列表闸门失效）', /--diff-files\s+@/.test(mg), '未找到 --diff-files @');
+    ok('merge-gate 调用 budget-check 而不是内联算预算', /budget-check\.mjs/.test(mg));
+    // 注释里提到旧逻辑不算问题——要抓的是活的代码行。
+    const mgCode = mg.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    ok('merge-gate 不再有 Math.max 取全表上限的旧逻辑', !/Math\.max\(\.\.\.caps\)/.test(mgCode));
+
+    // 行为断言：用 workflow 里的参数形态（占位替换成具体值）必须能到非 escalate
+    const tmpMg = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-mg-'));
+    fs.writeFileSync(path.join(tmpMg, 'changed.txt'), 'src/app.ts\n');
+    const runMg = (extra) => {
+      try {
+        const o = execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'),
+          '--item', 'pr-1', '--phase', 'gate', '--diff-files', '@changed.txt',
+          '--verdict', 'none', '--budget-pct', '10',
+          '--reviewed-sha', 'abc', '--head-sha', 'abc', '--red-check', 'pass', ...extra],
+          { encoding: 'utf8', cwd: tmpMg });
+        return { code: 0, out: o };
+      } catch (e) { return { code: e.status, out: e.stdout || '' }; }
+    };
+    const mgOk = runMg([]);
+    ok('merge-gate 参数形态不再必然 escalate',
+      !/"gate": "head-commit"/.test(mgOk.out), mgOk.out.slice(0, 200));
+    // sha 不一致必须被拦住（审查后又 push）
+    ok('sha 不一致时命中 head-commit',
+      /"gate": "head-commit"/.test(runMg(['--head-sha', 'def']).out), '未拦住');
+    // red-check 未跑必须被拦住
+    ok('red-check 未跑时命中 red-check',
+      /"gate": "red-check"/.test(runMg(['--red-check', 'not-run']).out), '未拦住');
+    fs.rmSync(tmpMg, { recursive: true, force: true });
+  }
+
+  // ---- LOOP_BOT_TOKEN：文档声明与代码引用必须一致 ----
+  {
+    const anyToken = expected.filter((x) => x.endsWith('.yml'))
+      .some((f) => /LOOP_BOT_TOKEN/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+    const docsMention = /LOOP_BOT_TOKEN/.test(
+      fs.readFileSync(path.join(dir, 'README.md'), 'utf8'));
+    ok('LOOP_BOT_TOKEN 文档与代码一致（否则文档说"必须设置"而没人读它）',
+      anyToken === docsMention, `workflow 引用=${anyToken} / 文档声明=${docsMention}`);
   }
 }
 
@@ -940,6 +1289,68 @@ section('16b. 活动检测假阳性防护');
   const b = scoreHarness(tmp);
   ok('真实运行记录被识别', b.activity.present, `evidence: ${JSON.stringify(b.activity.evidence)}`);
 
+  // ---- 手工开发记录不得算作循环活动 ----
+  // `manual` 的语义是"不计入循环统计"（loop-run-log.md 的 outcome 枚举）。
+  // 审计若把它算成活动，就是在给"从没跑过循环"发绿灯——
+  // 而"一个从没跑过循环的仓库拿到 activity 分"正是这个检查存在的反面。
+  {
+    const m = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-activity-manual-'));
+    fs.writeFileSync(path.join(m, 'STATE.md'), '# State\n\nLast run: never\n\n## Active\n\n| Work item | 阶段 | acting_on |\n|---|---|---|\n| — | — | — |\n');
+    fs.writeFileSync(path.join(m, 'loop-run-log.md'), [
+      '# Run Log', '', '## Log', '',
+      '{"run_id":"2026-10-14T00:00:00Z","pattern":"review-remediation","event":"manual.audit","item":"x","outcome":"manual"}',
+      '{"run_id":"2026-10-14T00:00:00Z","pattern":"doc-drift","event":"manual.design","item":"y","outcome":"manual"}',
+      '',
+    ].join('\n'));
+    const ma = scoreHarness(m);
+    ok('只有 manual 记录时不算循环活动', !ma.activity.present,
+      `evidence: ${JSON.stringify(ma.activity.evidence)}`);
+    ok('manual 记录被记进 notes（可见但不计分）',
+      ma.activity.notes.some((n) => /manual/.test(n)), JSON.stringify(ma.activity.notes));
+
+    // 同一份日志里加一条事件驱动记录 → 立即算活动
+    fs.appendFileSync(path.join(m, 'loop-run-log.md'),
+      '{"run_id":"2026-10-14T01:00:00Z","pattern":"ci-sweeper","event":"check_suite.completed:failure","item":"ci-1","outcome":"escalated"}\n');
+    ok('混入一条事件驱动记录后算活动', scoreHarness(m).activity.present);
+
+    // ---- 开发会话标签不得算作 Last run ----
+    // "Last run: 2026-10-14 (stage-boundary rework)" 描述的是"我们改了什么"，
+    // 不是"循环跑过"。它带日期，所以旧判定会把它当证据。
+    fs.rmSync(path.join(m, 'loop-run-log.md'));
+    fs.writeFileSync(path.join(m, 'STATE.md'),
+      '# State\n\nLast run: 2026-10-14 (stage-boundary rework)\n\n## Active\n\n| Work item | 阶段 | acting_on |\n|---|---|---|\n| — | — | — |\n');
+    const sess = scoreHarness(m);
+    ok('会话标签不算 Last run 证据', !sess.activity.present,
+      `evidence: ${JSON.stringify(sess.activity.evidence)}`);
+    ok('会话标签被记进 notes', sess.activity.notes.some((n) => /session label/.test(n)),
+      JSON.stringify(sess.activity.notes));
+
+    // ---- 非 Active 章节的表格不得算作活跃 work item ----
+    // 旧实现扫描整个 STATE.md 的表格行，于是 Post-Run Critique 里的数据表
+    // 被当成 25 个"活跃 work item"，审计因此认为循环正在处理工作。
+    fs.writeFileSync(path.join(m, 'STATE.md'), [
+      '# State', '', 'Last run: never', '',
+      '## Active', '', '| Work item | 阶段 | acting_on |', '|---|---|---|', '| — | — | — |', '',
+      '## Post-Run Critique', '',
+      '| 输入 | 修前 | 修后 |', '|---|---|---|',
+      '| `{}` | ok / 0 | no-ledger / 2 |',
+      '| `{attempts: "nope"}` | ok / 0 | no-ledger / 2 |', '',
+    ].join('\n'));
+    const tbl = scoreHarness(m);
+    ok('非 Active 章节的表格不算活跃 work item', !tbl.activity.present,
+      `evidence: ${JSON.stringify(tbl.activity.evidence)}`);
+
+    // 真的往 Active 表里放一行 → 算活动
+    fs.writeFileSync(path.join(m, 'STATE.md'), [
+      '# State', '', 'Last run: never', '',
+      '## Active', '', '| Work item | 阶段 | acting_on |', '|---|---|---|',
+      '| ci-a1b2 | fix | main |', '',
+    ].join('\n'));
+    ok('Active 表里的真实 work item 算活动', scoreHarness(m).activity.present);
+
+    fs.rmSync(m, { recursive: true, force: true });
+  }
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -958,9 +1369,9 @@ section('18. gate-check CLI 文件列表');
       const out = execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'), ...args], {
         encoding: 'utf8', cwd: tmp,
       });
-      return { code: 0, out };
+      return { code: 0, out, err: '' };
     } catch (e) {
-      return { code: e.status, out: e.stdout || '' };
+      return { code: e.status, out: e.stdout || '', err: e.stderr || '' };
     }
   };
 
@@ -988,6 +1399,43 @@ section('18. gate-check CLI 文件列表');
   eq('非数字 budget-pct 退出 1', run(['--item', 'p', '--phase', 'fix', '--budget-pct', 'abc']).code, 1);
   eq('无参调用退出 1', run([]).code, 1);
 
+  // ---- 未知标志必须 fail-closed ----
+  // 标志名层面的静默丢弃与已经修掉的 NaN 阈值是同一个病：
+  // `--diff-filesx` 被 parseArgs 收进 args 后无人消费，files_changed 变成 0，
+  // 拒绝列表闸门整个失效，而工具照常输出 JSON、照常退出 0。
+  // 一个拼错的标志和一个不存在的闸门，在退出码上不可区分。
+  eq('拼错的 --diff-filesx 退出 1', run(['--item', 'p', '--phase', 'fix', '--diff-filesx', 'a.ts']).code, 1);
+  eq('拼错的 --attemptsx 退出 1', run(['--item', 'p', '--phase', 'fix', '--attemptsx', '9']).code, 1);
+  eq('拼错的 --reviewed-sh 退出 1', run(['--item', 'p', '--phase', 'gate', '--reviewed-sh', 'a']).code, 1);
+  {
+    const u = run(['--item', 'p', '--phase', 'fix', '--diff-filesx', 'a.ts']);
+    ok('未知标志的报错点名了那个标志', /diff-filesx/.test(u.err || ''), (u.err || '').slice(0, 120));
+  }
+  // 正确的写法仍工作——这条防的是"把校验写成一律拒绝"
+  eq('正确的 --diff-files 仍工作', run(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts',
+    '--verdict', 'approve']).code, 0);
+  eq('正确的 --attempts 仍工作', run(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts',
+    '--verdict', 'approve', '--attempts', '1']).code, 0);
+
+  // 同样的校验必须覆盖另外两个脚本
+  {
+    const runScript = (script, args) => {
+      try {
+        const out = execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', script), ...args],
+          { encoding: 'utf8', cwd: tmp });
+        return { code: 0, out, err: '' };
+      } catch (e) {
+        return { code: e.status, out: e.stdout || '', err: e.stderr || '' };
+      }
+    };
+    eq('ledger-check 拒绝未知标志',
+      runScript('ledger-check.mjs', ['--ledger', path.join(PACK_ROOT, 'loop-ledger.json'), '--inject', 'x']).code, 1);
+    eq('event-router 拒绝未知标志',
+      runScript('event-router.mjs', ['--event', 'issues.opened', '--targt', 'main']).code, 1);
+    eq('event-router 接受 --target',
+      runScript('event-router.mjs', ['--event', 'issues.opened', '--target', 'main']).code, 0);
+  }
+
   // 省略 --red-check 且处于 gate → 必须 escalate（忘传参数不得放行）
   const g1 = run(['--item', 'p', '--phase', 'gate', '--verdict', 'approve',
     '--reviewed-sha', 'abc123', '--head-sha', 'abc123']);
@@ -999,11 +1447,75 @@ section('18. gate-check CLI 文件列表');
   eq('gate 缺 sha 时退出 2', g2.code, 2);
   ok('gate 缺 sha 命中 head-commit 闸', g2.out.includes('"gate": "head-commit"'), g2.out.slice(0, 160));
 
-  // 完整合法调用 → proceed
+  // 完整合法调用 → proceed（gate 阶段还要证据文件，见证据闸门）
+  const evFile = path.join(tmp, 'verifier-report.md');
+  fs.writeFileSync(evFile, [
+    '## Verdict: APPROVE', '',
+    '### Evidence',
+    '- Tests: `npm test` → PASS',
+    '- Red check: PASS — 回退后新测试挂掉',
+  ].join('\n'));
   const g3 = run(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
-    '--reviewed-sha', 'abc123', '--head-sha', 'abc123', '--diff-files', 'a.ts']);
+    '--reviewed-sha', 'abc123', '--head-sha', 'abc123', '--diff-files', 'a.ts',
+    '--evidence-file', evFile]);
   eq('完整 gate 调用退出 0', g3.code, 0);
   ok('完整 gate 调用 proceed', g3.out.includes('"decision": "proceed"'), g3.out.slice(0, 120));
+
+  // ---- verdict 词汇归一化 ----
+  // loop-verifier 的输出格式是 APPROVE / REJECT / ESCALATE_HUMAN，而这里的枚举是
+  // 小写连字符。两处各按自己的文档执行时必然得到"参数错误"，而参数错误不属于
+  // proceed/report-only/escalate/exit 四态——最重要的人工升级信号会在传递途中消失。
+  {
+    const upper = run(['--item', 'p', '--phase', 'fix', '--verdict', 'ESCALATE_HUMAN', '--diff-files', 'a.ts']);
+    const lower = run(['--item', 'p', '--phase', 'fix', '--verdict', 'escalate-human', '--diff-files', 'a.ts']);
+    eq('ESCALATE_HUMAN 被接受（不再是参数错误）', upper.code, 2);
+    eq('两种写法退出码一致', upper.code, lower.code);
+    ok('两种写法 decision 一致',
+      upper.out.includes('"decision": "escalate"') && lower.out.includes('"decision": "escalate"'),
+      upper.out.slice(0, 120));
+    eq('REJECT 大写也被接受',
+      run(['--item', 'p', '--phase', 'fix', '--verdict', 'REJECT', '--diff-files', 'a.ts']).code, 2);
+    eq('APPROVE 大写被接受',
+      run(['--item', 'p', '--phase', 'fix', '--verdict', 'APPROVE', '--diff-files', 'a.ts']).code, 0);
+    // 归一化不能把垃圾值也放进来
+    eq('仍然拒绝真正的垃圾 verdict',
+      run(['--item', 'p', '--phase', 'fix', '--verdict', 'LGTM', '--diff-files', 'a.ts']).code, 1);
+  }
+
+  // ---- 证据闸门：verdict 是断言，不是证据 ----
+  // 没有这一步时，调用方填 --verdict approve 即可通过，而"独立验证"与
+  // "审查过的 commit"两条硬约束都由调用方自证——一个接受自证的闸门，
+  // 和一个不存在的闸门，在退出码上不可区分。
+  {
+    const bad = path.join(tmp, 'bad.md');
+    fs.writeFileSync(bad, '## Verdict: REJECT\n\n### Evidence\n- Tests: `npm test` → FAIL\n');
+    const thin = path.join(tmp, 'thin.md');
+    fs.writeFileSync(thin, 'LGTM, looks good to me.\n');
+
+    const G = ['--item', 'p', '--phase', 'gate', '--diff-files', 'a.ts', '--verdict', 'approve',
+      '--red-check', 'pass', '--reviewed-sha', 'abc', '--head-sha', 'abc'];
+
+    const noEv = run(G);
+    eq('gate+approve 无证据文件时退出 2', noEv.code, 2);
+    ok('命中 verification-evidence 闸',
+      noEv.out.includes('"gate": "verification-evidence"'), noEv.out.slice(0, 160));
+
+    eq('证据文件不存在时退出 2', run([...G, '--evidence-file', path.join(tmp, 'nope.md')]).code, 2);
+
+    const contrad = run([...G, '--evidence-file', bad]);
+    eq('证据自称 REJECT 时退出 2', contrad.code, 2);
+    ok('矛盾被明确指出来', /contradicts/.test(contrad.out), contrad.out.slice(0, 200));
+
+    eq('只有一句话的报告被拒', run([...G, '--evidence-file', thin]).code, 2);
+
+    const pass = run([...G, '--evidence-file', evFile]);
+    eq('合规报告可 proceed', pass.code, 0);
+    ok('合规报告时 decision=proceed', pass.out.includes('"decision": "proceed"'), pass.out.slice(0, 120));
+
+    // 非 gate 阶段不强制证据（否则每次 fix 都要先有 verifier 报告，无法工作）
+    eq('fix 阶段 approve 不需要证据',
+      run(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--verdict', 'approve']).code, 0);
+  }
 
   // 端到端：loop-constraints.md 里声明的仓库特定路径必须真的被 gate-check 强制执行。
   // 曾经只读脚本常量，文档说 A、代码做 B（且 B 是危险的那一侧）。
@@ -1073,6 +1585,30 @@ section('19. 技能安装（ZCode 发现路径）');
   // list
   const r3 = run(['--target', tmp, '--list']);
   ok('--list 报告已安装', new RegExp(`Installed by this pack: ${packSkills.length}`).test(r3.out), r3.out.slice(0, 200));
+
+  // ---- --check：宿主跑的是已安装副本，不是源码 ----
+  // 实测宿主里的 harness-loop 比源码旧一版（缺 stage: runtime 与第 0 步接线检查），
+  // 而所有断言都跑在源仓库内，测不到这件事。
+  {
+    const c1 = run(['--target', tmp, '--check']);
+    eq('刚装完 --check 干净（退出 0）', c1.code, 0);
+    ok('--check 报告比对数量', /Checked \d+ installed skill/.test(c1.out), c1.out.slice(0, 160));
+
+    // 制造漂移：改掉已安装副本的一个字节
+    const inst = path.join(dest, 'harness-loop', 'SKILL.md');
+    fs.appendFileSync(inst, '\n<!-- drift -->\n');
+    const c2 = run(['--target', tmp, '--check']);
+    eq('漂移时 --check 退出 1', c2.code, 1);
+    ok('漂移被点名（含完整路径）', /harness-loop\/SKILL\.md/.test(c2.out), c2.out.slice(0, 200));
+    // JSON 形式也要给出可机读的结论
+    const c3 = run(['--target', tmp, '--check', '--json']);
+    const cj = JSON.parse(c3.out);
+    eq('--json 报告 in_sync=false', cj.in_sync, false);
+    ok('--json 列出漂移项', Array.isArray(cj.drifted) && cj.drifted.length > 0, JSON.stringify(cj.drifted));
+    // 还原：重装后应恢复干净
+    run(['--target', tmp, '--force']);
+    eq('重装后 --check 恢复干净', run(['--target', tmp, '--check']).code, 0);
+  }
 
   // uninstall
   const r4 = run(['--target', tmp, '--uninstall']);
@@ -1209,6 +1745,56 @@ section('20. 三阶段驱动器');
   // 模板出厂带的是占位 feature（notes 自称"占位符"），判据 2 会拒绝它。
   // 这里换成真实 feature——这正是判据 2 存在的意义：逼人真的替换。
   writeRealFeatures(path.join(empty, 'feature_list.json'));
+
+  // ---- 运行层脚本必须随装配进入目标仓库 ----
+  // 曾经它们只留在技能包仓库里，而所有技能命令与 workflow 都写
+  // `node scripts/xxx.mjs` 并隐含 cwd = 项目根。于是新装配的项目里每条命令都是
+  // ERR_MODULE_NOT_FOUND，而阶段 3 判据只看 workflow 文件在不在——
+  // 判据会给一个跑不起来的事件脊发 PASS。
+  {
+    const scriptsDir = path.join(empty, 'scripts');
+    for (const f of ['event-router.mjs', 'gate-check.mjs', 'ledger-check.mjs', 'loop-audit.mjs',
+      'lib/common.mjs']) {
+      ok(`消费者项目有 scripts/${f}`, fs.existsSync(path.join(scriptsDir, f)));
+    }
+    // 源仓库自检套件与装配工具不复制：它们依赖 pack 内的 templates/ 与 skills/，
+    // 在消费者里跑不了（harness-stage 缺 templates 会"报告成功但什么都没写"）。
+    for (const f of ['test.mjs', 'harness-stage.mjs', 'install-skills.mjs', 'init-loop-harness.mjs']) {
+      ok(`消费者项目不含 scripts/${f}`, !fs.existsSync(path.join(scriptsDir, f)));
+    }
+
+    // 行为断言：在消费者目录内真的跑一次（cwd 是消费者，不是技能包）
+    const runInConsumer = (rel, args) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(scriptsDir, rel), ...args], { encoding: 'utf8', cwd: empty }) };
+      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    };
+    eq('消费者内 event-router 可运行', runInConsumer('event-router.mjs', ['--list']).code, 0);
+    // 阶段 1 项目没有 loop-ledger.json（那是阶段 2 的产物），所以这里现造一个：
+    // 要验的是"脚本能在消费者里跑"，不是"阶段 1 有账本"。
+    const consumerLedger = path.join(empty, 'ledger-probe.json');
+    fs.writeFileSync(consumerLedger, JSON.stringify({ goal: 'probe', pattern: 'x', level: 'L1', attempts: [] }));
+    eq('消费者内 ledger-check 可运行',
+      runInConsumer('ledger-check.mjs', ['--ledger', consumerLedger]).code, 0);
+    // 缺账本时必须报错退出 1，而不是静默通过——这与库层的 no-ledger fail-closed 一致
+    eq('消费者内缺账本时 ledger-check 报错',
+      runInConsumer('ledger-check.mjs', ['--ledger', path.join(empty, 'nope.json')]).code, 1);
+    eq('消费者内 gate-check 可运行',
+      runInConsumer('gate-check.mjs', ['--item', 'x', '--phase', 'fix',
+        '--diff-files', 'a.ts', '--verdict', 'approve']).code, 0);
+
+    // harness-loop 第 0 步的接线检查命令（SKILL.md 原文形态）必须在消费者内可运行
+    const helper = (() => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          ['-e', 'import("./scripts/lib/common.mjs").then(m=>{const r=m.hasEventWiring(process.cwd());console.log(r.wired?"wired":"NOT wired");})'],
+          { encoding: 'utf8', cwd: empty }) };
+      } catch (e) { return { code: e.status, out: String(e.stdout || '') }; }
+    })();
+    eq('消费者内第 0 步 helper 可运行', helper.code, 0);
+    ok('helper 报告未接线（阶段 1 项目没有 workflow）', helper.out.includes('NOT wired'), helper.out);
+  }
   const r1 = runStage(empty, ['--json']);
   const j1 = JSON.parse(r1.out);
   eq('装配后达成阶段 1', j1.current_stage, 1);
@@ -1232,8 +1818,27 @@ section('20. 三阶段驱动器');
   ok('阶段 2 补上 minimal-fix', fs.existsSync(path.join(empty, '.agents', 'skills', 'minimal-fix', 'SKILL.md')));
   ok('阶段 2 补上 loop-guard', fs.existsSync(path.join(empty, '.agents', 'skills', 'loop-guard', 'SKILL.md')));
 
-  // 升级到阶段 3 应补上事件接线
-  runStage(empty, ['--upgrade', '--stage', '3']);
+  // ---- 跳级保护 ----
+  // AGENTS.md 与 docs/11 都写"不要跳级"，但 --upgrade 曾经允许空仓库直冲 --stage 3
+  // 并写入事件接线——结果是"阶段 1 判据 7/8、阶段 2 判据 4/9、阶段 3 判据 4/8"的项目：
+  // 事件脊接上了，但 verifier、熔断器、本地化拒绝列表全都不在。
+  {
+    const jump = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-skip-'));
+    fs.writeFileSync(path.join(jump, 'package.json'), JSON.stringify({ name: 's', scripts: { test: 'echo ok' } }));
+    const r = runStage(jump, ['--upgrade', '--stage', '3']);
+    eq('空仓库 --upgrade --stage 3 被拒', r.code, 2);
+    ok('拒绝时未写入事件接线', !fs.existsSync(path.join(jump, '.github', 'workflows')));
+    ok('拒绝时给出可执行的下一步', /--upgrade --stage 1/.test(r.out), r.out.slice(0, 200));
+    // --force 是显式覆盖，仍然允许
+    eq('--force 可显式覆盖', runStage(jump, ['--upgrade', '--stage', '3', '--force']).code, 0);
+    fs.rmSync(jump, { recursive: true, force: true });
+  }
+
+  // 升级到阶段 3 应补上事件接线。
+  // 用 --force：阶段 2 的两项判据（拒绝列表已本地化、账本有真实记录）需要人工动作，
+  // 测试无法替用户完成。这里验的是"阶段 3 该产出什么"，不是"阶段 2 是否达成"——
+  // 后者由上面那组判据断言覆盖。跳级保护本身另有一组断言（见"跳级保护"）。
+  runStage(empty, ['--upgrade', '--stage', '3', '--force']);
   const wfDir = path.join(empty, '.github', 'workflows');
   ok('阶段 3 补上事件接线目录', fs.existsSync(wfDir));
   ok('阶段 3 补上 lesson-harvest workflow', fs.existsSync(path.join(wfDir, 'lesson-harvest.yml')));
@@ -1481,10 +2086,31 @@ section('20. 三阶段驱动器');
     fs.writeFileSync(path.join(w0, '.github', 'workflows', 'ci.yml'), 'name: ci\n');
     const w1 = hasEventWiring(w0);
     eq('只有非 loop workflow 时仍未接线', w1.wired, false);
-    ok('区分"没目录"与"目录里没有 loop 文件"', /没有 loop/.test(w1.detail), w1.detail);
+    ok('区分"没目录"与"目录里没有 loop 文件"', /没有调用运行层脚本/.test(w1.detail), w1.detail);
 
-    // 放一个 loop workflow → 接线
-    fs.writeFileSync(path.join(w0, '.github', 'workflows', 'loop-intake.yml'), 'name: loop\n');
+    // ---- 假阳性防护：只有第三方 action 的 workflow 不算接线 ----
+    // 曾经判定的是文件名（/loop|triage|release-draft|.../），于是官方
+    // release-drafter action 或任何叫 triage.yml 的文件都算接线——
+    // harness-loop 会据此对着空队列跑完 8 步，把"没做事"记成一次正常运行。
+    {
+      const fp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wire-fp-'));
+      fs.mkdirSync(path.join(fp, '.github', 'workflows'), { recursive: true });
+      fs.writeFileSync(path.join(fp, '.github', 'workflows', 'release-drafter.yml'),
+        'name: Release Drafter\non:\n  push:\n    branches: [main]\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: release-drafter/release-drafter@v6\n');
+      eq('只有第三方 action 时未接线', hasEventWiring(fp).wired, false);
+
+      fs.writeFileSync(path.join(fp, '.github', 'workflows', 'triage.yml'), 'name: triage\non:\n  issues:\n');
+      eq('名字带 triage 但无脚本调用时未接线', hasEventWiring(fp).wired, false);
+
+      fs.writeFileSync(path.join(fp, '.github', 'workflows', 'loop-intake.yml'),
+        'name: loop\non:\n  issues:\n    types: [opened]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --item x\n');
+      eq('真实调用运行层脚本时算接线', hasEventWiring(fp).wired, true);
+      fs.rmSync(fp, { recursive: true, force: true });
+    }
+
+    // 放一个真实调用运行层脚本的 workflow → 接线
+    fs.writeFileSync(path.join(w0, '.github', 'workflows', 'loop-intake.yml'),
+      'name: loop\non:\n  issues:\n    types: [opened]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --item x\n');
     const w2 = hasEventWiring(w0);
     eq('有 loop workflow 时已接线', w2.wired, true);
     eq('接线方式标为 workflow', w2.via, 'workflow');
@@ -1509,6 +2135,23 @@ section('20. 三阶段驱动器');
     ok('harness-loop 第 0 步包含事件接线检查', /事件接线/.test(loopSkill));
     ok('harness-loop 声明 no-wiring 这个 outcome', /no-wiring/.test(loopSkill));
     ok('harness-loop 指向共用的 helper', /hasEventWiring/.test(loopSkill));
+
+    // ---- 手动调用边界必须在技能与文档之间一致 ----
+    // 曾经技能写 "Do NOT invoke by hand"，而 docs/10 两处推荐手动调用 `/harness-loop`，
+    // 且它是 17 个技能里唯一没有 user_invocable 的。文档与技能各说各话。
+    {
+      const doc10 = fs.readFileSync(path.join(PACK_ROOT, 'docs', '10-how-to-use.md'), 'utf8');
+      const forbids = /Do NOT invoke by hand/.test(loopSkill);
+      const recommends = /手动调用[^\n]*harness-loop/.test(doc10)
+        || /"我现在该做什么" \| `harness-loop`/.test(doc10);
+      ok('手动调用边界在技能与文档间一致', forbids !== recommends,
+        `技能禁止=${forbids} / 文档推荐=${recommends}`);
+      // 允许手动调用时必须真的可被调用，且 description 说明要带什么参数
+      if (!forbids) {
+        ok('harness-loop 可被手动调用（user_invocable）', /user_invocable:\s*true/.test(loopSkill));
+        ok('description 说明手动调用需要 --event', /--event/.test(loopSkill));
+      }
+    }
   }
 
   // 假阳性防护：Promoted 表只有占位符时不算转正
@@ -1602,7 +2245,9 @@ section('20. 三阶段驱动器');
   // ---- 核心回归：模板里的注释示例不得算作真实条目 ----
   const tpl = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-stage-tpl-'));
   fs.writeFileSync(path.join(tpl, 'package.json'), JSON.stringify({ name: 'x' }));
-  runStage(tpl, ['--upgrade', '--stage', '3']);
+  // 用 --force：阶段 2 的判据需要人工动作（本地化拒绝列表、账本有记录），
+  // 测试要验的是"阶段 3 产出什么"，跳级保护本身另有断言覆盖。
+  runStage(tpl, ['--upgrade', '--stage', '3', '--force']);
   const tplJson = JSON.parse(runStage(tpl, ['--json']).out);
   const lessonCheck = tplJson.stages[2].checks.filter((c) => !c.human)
     .find((c) => /LESSONS/.test(c.label));
@@ -1610,6 +2255,201 @@ section('20. 三阶段驱动器');
     'LESSONS.md 模板自带 <!-- 示例：Seen 1× --> 被误判为真实条目');
   fs.rmSync(tpl, { recursive: true, force: true });
 }
+
+// ---------------------------------------------------------------- 21. 预算与 kill switch
+
+section('21. 预算与 kill switch（budget-check）');
+{
+  // 这两件事此前都没有代码入口：预算百分比只存在于 merge-gate.yml 的内联片段
+  // （且用 Math.max 取全表最大上限），kill switch 由调用方用 --pause 传入而没人传。
+  // 约束 11：被文档描述为"机械判定"的机制必须有真正读它的代码入口。
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-budget-'));
+  fs.copyFileSync(path.join(PACK_ROOT, 'loop-budget.md'), path.join(tmp, 'loop-budget.md'));
+  const today = new Date().toISOString().slice(0, 10);
+
+  // ---- 按 pattern 取上限，不是取全表最大值 ----
+  {
+    const caps = parseBudgetCaps(fs.readFileSync(path.join(PACK_ROOT, 'loop-budget.md'), 'utf8'));
+    eq('CI Sweeper 上限 500k', capForPattern(caps, 'ci-sweeper'), 500000);
+    eq('PR Review Triage 上限 300k（不是全表最大值）', capForPattern(caps, 'pr-review-triage'), 300000);
+    eq('Merge Gate 上限 100k', capForPattern(caps, 'merge-gate'), 100000);
+    eq('Post-Merge Cleanup 上限 200k', capForPattern(caps, 'post-merge-cleanup'), 200000);
+    ok('每个循环的上限互不相同（否则 per-loop 上限是装饰品）',
+      new Set(Object.values(caps)).size >= 4, JSON.stringify(caps));
+  }
+
+  // ---- 行为断言：250k 花在 pr-review-triage 上是 83% ----
+  fs.writeFileSync(path.join(tmp, 'loop-run-log.md'),
+    `# Log\n\n{"run_id":"${today}T00:00:00Z","pattern":"pr-review-triage","tokens_estimate":250000}\n`);
+  const runB = (extra) => {
+    try {
+      const o = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'budget-check.mjs'), '--pattern', 'pr-review-triage', '--json', ...extra],
+        { encoding: 'utf8', cwd: tmp });
+      return { code: 0, json: JSON.parse(o) };
+    } catch (e) { return { code: e.status, json: JSON.parse(e.stdout || '{}') }; }
+  };
+  const r = runB([]);
+  eq('per-loop 上限生效（300k 而非 500k）', r.json.cap, 300000);
+  eq('83% 时降级 report-only', r.json.mode, 'report-only');
+  eq('report-only 不退出（退出码 0）', r.code, 0);
+
+  // ---- 上限改动必须改变行为 ----
+  const budgetPath = path.join(tmp, 'loop-budget.md');
+  fs.writeFileSync(budgetPath, fs.readFileSync(budgetPath, 'utf8')
+    .replace('| PR Review Triage | 96 | 300k |', '| PR Review Triage | 96 | 1k |'));
+  const r2 = runB([]);
+  eq('上限改成 1k 后同一输入退出', r2.json.mode, 'exit');
+  eq('退出模式退出码 3', r2.code, 3);
+
+  // ---- kill switch：独占一行的标记生效，散文提及不生效 ----
+  fs.writeFileSync(path.join(tmp, 'STATE.md'), '# State\n\nloop-pause-all\n');
+  const paused = runB([]);
+  eq('kill switch 生效（mode=exit）', paused.json.mode, 'exit');
+  eq('kill switch 被标记为 paused', paused.json.paused, true);
+  ok('kill switch 指明来源文件', /STATE\.md/.test(String(paused.json.paused_where)), paused.json.paused_where);
+
+  fs.writeFileSync(path.join(tmp, 'STATE.md'), '# State\n\n我们不使用 loop-pause-all 这个开关。\n');
+  eq('散文提及不触发暂停', runB([]).json.paused, false);
+
+  // 只在 loop-constraints.md 里声明也要生效
+  fs.writeFileSync(path.join(tmp, 'STATE.md'), '# State\n\n—\n');
+  fs.writeFileSync(path.join(tmp, 'loop-constraints.md'), '# C\n\nloop-pause-all\n');
+  const fromConstraints = runB([]);
+  eq('loop-constraints.md 的标记同样生效', fromConstraints.json.paused, true);
+  ok('来源指向 loop-constraints.md', /loop-constraints/.test(String(fromConstraints.json.paused_where)));
+
+  // ---- 没有上限时必须退出，不能静默放行 ----
+  fs.writeFileSync(path.join(tmp, 'loop-constraints.md'), '# C\n');
+  fs.writeFileSync(budgetPath, '# Budget\n\n（没有 Daily Limits 表）\n');
+  const noCap = runB([]);
+  eq('没有 per-loop 上限时退出', noCap.json.mode, 'exit');
+  eq('没有上限时退出码 3', noCap.code, 3);
+
+  // ---- 未知标志 fail-closed（与其它脚本一致）----
+  {
+    const bad = (() => {
+      try {
+        execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'budget-check.mjs'),
+          '--pattern', 'x', '--bogus', 'y'], { encoding: 'utf8', cwd: tmp });
+        return 0;
+      } catch (e) { return e.status; }
+    })();
+    eq('budget-check 拒绝未知标志', bad, 1);
+  }
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------- 22. worktree 与队列
+
+section('22. worktree 隔离与队列读取');
+{
+  // ---- worktree：隔离要求的代码入口 ----
+  // loop-constraints.md 写着"无人值守的代码改动必须在独立 worktree 中进行"
+  // "verifier REJECT 后丢弃，不留残留分支"，但此前没有任何代码创建或清理它。
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wt-'));
+    const runWt = (args) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'worktree.mjs'), ...args], { encoding: 'utf8', cwd: tmp }) };
+      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    };
+    execFileSync('git', ['init', '-q'], { cwd: tmp });
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: tmp });
+
+    const c = runWt(['create', '--event', 'ci', '--item', 'ci-1', '--attempt', '1']);
+    eq('worktree create 退出 0', c.code, 0);
+    ok('worktree 目录已创建', fs.existsSync(path.join(tmp, 'loop', 'ci-ci-1-attempt1')));
+    const branches = execFileSync('git', ['branch', '--list'], { encoding: 'utf8', cwd: tmp });
+    ok('分支名遵循 minimal-fix 约定', branches.includes('ci-ci-1-attempt1'), branches);
+
+    ok('list 报告该 worktree', runWt(['list']).out.includes('loop/ci-ci-1-attempt1'));
+
+    const d = runWt(['discard', '--event', 'ci', '--item', 'ci-1', '--attempt', '1']);
+    eq('worktree discard 退出 0', d.code, 0);
+    ok('worktree 目录已清理', !fs.existsSync(path.join(tmp, 'loop', 'ci-ci-1-attempt1')));
+    const after = execFileSync('git', ['branch', '--list'], { encoding: 'utf8', cwd: tmp });
+    ok('分支已清理（不留残留分支）', !after.includes('ci-ci-1-attempt1'), after);
+
+    // 命名消毒：item 里的路径字符不得逃出预期位置
+    eq('worktreeName 消毒路径穿越', worktreeName('ci', '../../etc', 1), 'loop/ci-etc-attempt1');
+    // 参数缺失必须报错
+    eq('缺 --item 时报错', runWt(['create', '--event', 'ci']).code, 1);
+    eq('未知 action 报错', runWt(['frobnicate']).code, 1);
+
+    // ---- git hook 环境下也必须能工作 ----
+    // pre-commit 钩子里 git 会设 GIT_DIR / GIT_INDEX_FILE 指向**外层仓库**，
+    // 子进程继承后即使 cwd 是另一个仓库也会去操作外层索引，表现为
+    // "Unable to create '.../.git/index.lock': No such file or directory"。
+    // 这条断言是在 commit 时被 pre-commit 钩子当场抓出来的。
+    {
+      const h = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wt-hook-'));
+      execFileSync('git', ['init', '-q'], { cwd: h });
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: h });
+      const hookEnv = { ...process.env, GIT_DIR: path.join(PACK_ROOT, '.git'), GIT_INDEX_FILE: path.join(PACK_ROOT, '.git', 'index') };
+      const r = (() => {
+        try {
+          return { code: 0, out: execFileSync(process.execPath,
+            [path.join(PACK_ROOT, 'scripts', 'worktree.mjs'), 'create', '--event', 'ci', '--item', 'ci-h', '--attempt', '1'],
+            { encoding: 'utf8', cwd: h, env: hookEnv }) };
+        } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+      })();
+      eq('git hook 环境下 worktree create 成功', r.code, 0);
+      ok('git hook 环境下 worktree 目录已创建', fs.existsSync(path.join(h, 'loop', 'ci-ci-h-attempt1')), r.out.slice(0, 200));
+      fs.rmSync(h, { recursive: true, force: true });
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // ---- queue-read：第 0 步第 3 条的读取契约 ----
+  // harness-loop 第 0 步要求判断"队列为空"，但此前没有任何东西定义过队列是什么。
+  {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-qr-'));
+    const runQ = (args) => {
+      try {
+        const o = execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'queue-read.mjs'), ...args], { encoding: 'utf8', cwd: tmp });
+        return { code: 0, out: o, json: (() => { try { return JSON.parse(o); } catch { return null; } })() };
+      } catch (e) { return { code: e.status, out: (e.stdout || ''), json: null }; }
+    };
+
+    // 空仓库：必须明确说"读了哪些来源都没东西"，而不是静默空
+    const empty = runQ(['--json']);
+    eq('空仓库 items 为空', empty.json.items.length, 0);
+    ok('空仓库说明读了哪些来源', typeof empty.json.note === 'string' && empty.json.note.length > 0, empty.json.note);
+
+    // .loop/queue/ 优先
+    fs.mkdirSync(path.join(tmp, '.loop', 'queue'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.loop', 'queue', 'pr-1.json'),
+      JSON.stringify({ id: 'pr-1', event: 'pull_request.opened', phase: 'review' }));
+    const q1 = runQ(['--json']);
+    eq('读到 1 条', q1.json.items.length, 1);
+    eq('来源标为 .loop/queue', q1.json.source, '.loop/queue');
+    eq('未回落', q1.json.fell_back, false);
+    eq('--show 取到该条', runQ(['--show', 'pr-1', '--json']).json.id, 'pr-1');
+    eq('--show 不存在的 id 退出 1', runQ(['--show', 'nope']).code, 1);
+
+    // 坏 JSON 必须报出来，不能静默丢掉（"有东西但读不了" ≠ "没有东西"）
+    fs.writeFileSync(path.join(tmp, '.loop', 'queue', 'broken.json'), '{not json');
+    const q2 = runQ(['--json']);
+    ok('坏文件被标为 malformed 而不是丢弃',
+      q2.json.items.some((i) => i._malformed === true), JSON.stringify(q2.json.items));
+
+    // 队列不存在时回落到 STATE.md 的未勾选条目
+    fs.rmSync(path.join(tmp, '.loop'), { recursive: true, force: true });
+    fs.writeFileSync(path.join(tmp, 'STATE.md'),
+      '# State\n\n## High Priority (loop is acting)\n\n- [ ] 修 CI 的 flake\n- [x] 已完成\n\n## Active\n\n—\n');
+    const q3 = runQ(['--json']);
+    eq('回落到 STATE.md', q3.json.source, 'STATE.md#High Priority');
+    eq('回落被标记', q3.json.fell_back, true);
+    eq('只取未勾选的条目', q3.json.items.length, 1);
+    ok('未勾选条目的标题正确', /修 CI 的 flake/.test(q3.json.items[0].title), JSON.stringify(q3.json.items));
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 section('17. registry 与路由一致性');
 {
   const registryText = fs.readFileSync(path.join(PACK_ROOT, 'patterns', 'registry.yaml'), 'utf8');
@@ -1635,6 +2475,28 @@ section('17. registry 与路由一致性');
   for (const ev of new Set(splitLoopEvents)) {
     ok(`LOOP.md 声明的事件可路由: ${ev}`, Boolean(ROUTES[ev]));
   }
+
+  // ---- 事件名一致不等于路由一致 ----
+  // 曾经只比对名字，于是两个事件的 phase 在文档与代码之间漂移了很久而无人发现：
+  // check_suite.completed:success 文档写 report、代码做 verify；
+  // release.published 文档写 release、代码做 close。
+  {
+    const phaseDrift = [];
+    for (const line of tableSection.split('\n')) {
+      if (!line.trim().startsWith('|')) continue;
+      const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+      if (cells.length < 3) continue;
+      const evs = [...cells[0].matchAll(/`([^`]+)`/g)]
+        .flatMap((m) => m[1].split('/').map((s) => s.trim()))
+        .filter((e) => /^[a-z_]+(\.[a-z_]+)*(:[a-z-]+)?$/.test(e));
+      for (const ev of evs) {
+        if (ROUTES[ev] && ROUTES[ev].phase !== cells[2]) {
+          phaseDrift.push(`${ev}: LOOP.md=${cells[2]} / ROUTES=${ROUTES[ev].phase}`);
+        }
+      }
+    }
+    ok('LOOP.md 的事件 phase 与 ROUTES 一致', phaseDrift.length === 0, phaseDrift.join('; '));
+  }
   for (const ev of Object.keys(ROUTES)) {
     ok(`ROUTES 中的事件在 LOOP.md 有登记: ${ev}`, splitLoopEvents.includes(ev));
   }
@@ -1645,6 +2507,36 @@ section('17. registry 与路由一致性');
   // 非事件驱动循环已登记
   ok('registry 登记 lesson-harvest', /id:\s*lesson-harvest/.test(registryText));
   ok('registry 登记 signal-gatekeeper', /id:\s*signal-gatekeeper/.test(registryText));
+
+  // ---- registry 的 stages: 块必须与代码的判据数一致 ----
+  // 这个块此前没有任何消费者，于是"mechanical_checks: 10"在阶段 1 判据
+  // 改成 8 项之后继续留着——同一份文件里的第二个真相源静默漂移。
+  // 约束 11：写着值却没人读的配置是装饰品；改它必须改变行为（或至少被发现）。
+  {
+    const regStages = readRegistryStages(path.join(PACK_ROOT, 'patterns', 'registry.yaml'));
+    ok('能从 registry 解析出 stages', Array.isArray(regStages) && regStages.length === 3,
+      JSON.stringify(regStages));
+
+    const emptyRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-regstage-'));
+    fs.writeFileSync(path.join(emptyRepo, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    // 本节的 runStage 定义在另一段作用域里，这里自带一个
+    const runStageHere = (target, extra = []) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), target, ...extra], { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    };
+    const sj = JSON.parse(runStageHere(emptyRepo, ['--json']).out);
+    for (const st of regStages) {
+      const actual = sj.stages[st.id - 1];
+      const mech = actual.checks.filter((c) => !c.human).length;
+      const human = actual.checks.filter((c) => c.human).length;
+      eq(`registry 阶段 ${st.id} 的 mechanical_checks 与代码一致`, st.mechanical, mech);
+      eq(`registry 阶段 ${st.id} 的 human_checks 与代码一致`, st.human, human);
+    }
+    fs.rmSync(emptyRepo, { recursive: true, force: true });
+  }
 
   // ---- registry 的值必须真的改变行为 ----
   // 过去只断言 YAML 里写着某个数字，不管有没有代码读它——那证明"文字被抄下来了"，

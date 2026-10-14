@@ -202,6 +202,73 @@ function uninstall(args) {
   process.stdout.write(`\nSkills not listed in the manifest were left untouched.\n`);
 }
 
+/**
+ * --check：比较已安装副本与源码，列出漂移并以非零退出码报告。
+ *
+ * 存在原因：宿主加载的是已安装副本，而所有测试都跑在源仓库内。
+ * 实测宿主里的 harness-loop 比源码旧一版（缺 stage: runtime 与第 0 步的接线检查），
+ * 于是"文档/测试描述的能力"与"agent 实际行为"静默不一致。
+ * docs/10 自己写着"改完技能要重跑安装脚本推送更新"——但那是纪律，不是机制。
+ */
+function checkInstalled(args) {
+  const dest = resolveDestinations(args);
+  const srcDir = path.join(PACK_ROOT, 'skills');
+  const drifted = [];
+  const missing = [];
+  let checked = 0;
+
+  for (const target of dest.dirs) {
+    if (!exists(target.dir)) {
+      missing.push(target.dir);
+      continue;
+    }
+    const manifestPath = path.join(target.dir, MANIFEST_NAME);
+    let manifest = null;
+    if (exists(manifestPath)) {
+      try { manifest = JSON.parse(readText(manifestPath)); } catch { manifest = null; }
+    }
+    // 已安装副本 = 清单里记的（这份包装的）+ 目录里实际存在的
+    const present = fs.readdirSync(target.dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && exists(path.join(target.dir, e.name, 'SKILL.md')))
+      .map((e) => e.name);
+    const installed = [...new Set([...(manifest?.skills || []), ...present])];
+
+    for (const name of installed) {
+      const src = path.join(srcDir, name, 'SKILL.md');
+      const dst = path.join(target.dir, name, 'SKILL.md');
+      // 标签用相对路径，方便直接 cd 过去看——只写 dot 会丢掉 /skills 那一层。
+      const label = path.relative(process.cwd(), dst).split(path.sep).join('/');
+      if (!exists(src)) {
+        drifted.push(`${label} — 源码里已不存在（清单残留）`);
+        continue;
+      }
+      if (!exists(dst)) continue;
+      checked++;
+      if (readText(src) !== readText(dst)) {
+        drifted.push(`${label} — 已安装副本与源码不同`);
+      }
+    }
+  }
+
+  if (args.json) {
+    printJson({ checked, drifted, missing, in_sync: drifted.length === 0 });
+  } else {
+    process.stdout.write(`Checked ${checked} installed skill(s)\n`);
+    if (missing.length) {
+      process.stdout.write(`\nNo install directory at: ${missing.join(', ')}\n`);
+    }
+    if (drifted.length) {
+      process.stdout.write(`\nDRIFT — the host runs the installed copy, not the source:\n`);
+      for (const d of drifted) process.stdout.write(`  ${d}\n`);
+      process.stdout.write(`\nRe-run without --check to push updates.\n`);
+    } else if (checked) {
+      process.stdout.write(`\nAll installed skills match the source.\n`);
+    }
+  }
+
+  process.exit(drifted.length ? 1 : 0);
+}
+
 function listInstalled(args) {
   const dest = resolveDestinations(args);
   const out = {
@@ -275,6 +342,7 @@ Usage:
   node scripts/install-skills.mjs --target /path/to/repo
   node scripts/install-skills.mjs --target /path/to/repo --layout both
   node scripts/install-skills.mjs --target /path/to/repo --list
+  node scripts/install-skills.mjs --target /path/to/repo --check
   node scripts/install-skills.mjs --target /path/to/repo --uninstall
 
 Options:
@@ -285,10 +353,17 @@ Options:
                           zcode   → .zcode/skills   (ZCode only — to shadow a same-named skill)
                           both    → install to both
   --list                Show what is installed at the destination
+  --check               Compare installed copies against the source; exit 1 on drift.
+                        The host loads the INSTALLED copy, so a stale install means the
+                        skill the agent runs is not the skill this repo tests.
   --uninstall           Remove skills listed in the install manifest
   --force               Overwrite existing skills of the same name
-  --json                JSON output (with --list)
+  --json                JSON output (with --list / --check)
   --help                Show this help
+
+Exit codes:
+  0  ok (or --check found no drift)
+  1  --check found drift, or invalid arguments
 
 Note: user scope outranks workspace scope. A workspace install of a name that
 also exists at user scope is discovered but shadowed by the user-level copy.
@@ -297,6 +372,7 @@ also exists at user scope is discovered but shadowed by the user-level copy.
   }
 
   if (args.uninstall) return uninstall(args);
+  if (args.check) return checkInstalled(args);
   if (args.list) return listInstalled(args);
   return install(args);
 }

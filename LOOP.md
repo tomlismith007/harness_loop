@@ -8,7 +8,7 @@
 
 | 阶段 | 目标 | 判据 | 等级 |
 |---|---|---|---|
-| 1 初始化 | 创建必要的 md 文件 | 10 项（全机械） | L1 |
+| 1 初始化 | 创建必要的 md 文件 | 8 项（全机械） | L1 |
 | 2 强化 | 验证真的有效、约束真的被强制执行 | 6 机械 + 3 人工 | L2 |
 | 3 巩固 | 事件接上、经验积累、规则转正 | 7 机械 + 1 人工 | L3 |
 
@@ -36,12 +36,13 @@ node scripts/harness-stage.mjs . --upgrade    # 补齐下一阶段
 | `pull_request_review.changes_requested` | PR | fix | `minimal-fix` → `loop-verifier` | L2 | 拒绝列表路径 |
 | `pull_request_review.approved` | PR | gate | `gate-check`（脚本，非技能目录） | L2 | **合并始终人工** |
 | `check_suite.completed:failure` | PR/main | fix | `ci-triage` → `minimal-fix` → `loop-verifier` | L2 | infra/env 失败；3 次上限 |
-| `check_suite.completed:success` | PR/main | report | — | L1 | 无 |
+| `check_suite.completed:success` | PR/main | verify | — | L1 | 无 |
 | `workflow_run.completed:failure` | PR/main | fix | `ci-triage` → `minimal-fix` | L2 | infra/env 失败；3 次上限 |
 | `pull_request.ready_for_review` | PR | gate | `gate-check`（脚本，非技能目录） | L2 | **合并始终人工** |
 | `pull_request.closed:merged` | main | post-merge | `post-merge-cleanup` | L1 | 大范围清理 |
 | `pull_request.closed:unmerged` | PR | close | `post-merge-cleanup` | L1 | 关闭需人工确认 |
-| `push:tags` / `release.published` | main | release | `release-drafter` | L1 | 发布始终人工 |
+| `push:tags` | main | release | `release-drafter` | L1 | 发布始终人工 |
+| `release.published` | main | close | — | L1 | 归档相关 work item |
 
 > 这张表与 `scripts/event-router.mjs` 的 `ROUTES` 由测试双向核对（`test.mjs` 第 17 节）。
 > 加事件时两处一起改，否则断言会挂。

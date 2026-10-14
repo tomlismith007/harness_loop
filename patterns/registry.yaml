@@ -194,7 +194,7 @@ stages:
     goal: 创建必要的 md 文件，让 harness 结构完整、下一会话可重启
     level: L1
     skill: harness-init
-    mechanical_checks: 10
+    mechanical_checks: 8
     human_checks: 0
     exit: 8 项判据全过，且启动脚本真的能跑通（退出码 0）
     grounding:

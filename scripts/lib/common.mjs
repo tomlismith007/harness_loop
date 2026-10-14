@@ -83,8 +83,11 @@ const IGNORE_DIRS = new Set([
  */
 const BOOLEAN_FLAGS = new Set([
   'help', 'json', 'suggest', 'force', 'pause', 'cleanup', 'escalation',
-  'list', 'verbose', 'quiet', 'fix', 'md', 'badge',
+  'list', 'verbose', 'quiet', 'fix', 'md', 'badge', 'check',
 ]);
+
+/** 布尔字面量：跟在布尔标志后面时说明用户以为在传值（`--pause false`）。 */
+const BOOLEAN_LITERALS = new Set(['true', 'false', '0', '1', 'yes', 'no']);
 
 /**
  * 解析 CLI 参数。
@@ -92,6 +95,16 @@ const BOOLEAN_FLAGS = new Set([
  * --foo bar → args.foo = 'bar'（下一 token 不以 -- 开头且 foo 不是布尔标志时）
  * --foo     → args.foo = true
  * 非 -- 开头 → args._ 数组
+ *
+ * 布尔标志后跟一个布尔字面量时**报错**而不是静默吞掉：
+ * `--pause false` 曾经被解析成 pause=true + 位置参数 false，而 docs/03 的示例
+ * 就写着 `--pause false`——照文档执行会得到永久紧急刹车。
+ *
+ * 只拦布尔字面量（true/false/0/1/yes/no），不拦任意裸值——因为
+ * `--json positional` 是合法用法（位置参数跟在布尔标志后面），
+ * 而 `--pause false` 是"用户以为在传值"。二者的区别就在这个字面量上。
+ *
+ * 出错时写入 args._error（不直接 process.exit），让调用方与测试都能处理。
  */
 export function parseArgs(argv = process.argv.slice(2)) {
   const args = { _: [] };
@@ -110,9 +123,16 @@ export function parseArgs(argv = process.argv.slice(2)) {
     }
     const key = camel(body);
     const next = argv[i + 1];
-    const takesValue = !BOOLEAN_FLAGS.has(key)
-      && next !== undefined
-      && !next.startsWith('--');
+    if (BOOLEAN_FLAGS.has(key)) {
+      if (next !== undefined && BOOLEAN_LITERALS.has(next.trim().toLowerCase())) {
+        args._error = `--${body} is a boolean flag and does not take a value. `
+          + `Use --${body} (true) or --${body}=${next.trim().toLowerCase()}. Got: --${body} ${next}`;
+        return args;
+      }
+      args[key] = true;
+      continue;
+    }
+    const takesValue = next !== undefined && !next.startsWith('--');
     if (takesValue) {
       args[key] = next;
       i++;
@@ -399,8 +419,24 @@ export function hasEventWiring(root = '.') {
   if (exists(wfDir)) {
     let files = [];
     try { files = fs.readdirSync(wfDir); } catch { /* 权限或竞态 */ }
-    if (files.some((f) => /loop|triage|ci-sweeper|merge-gate|post-merge|release-draft|lesson-harvest|issue-intake/i.test(f))) {
-      return { wired: true, via: 'workflow', detail: `.github/workflows/ 下的 ${files.length} 个文件` };
+    // 判定"接线"看的是内容，不是文件名。
+    // 曾经用 /loop|triage|.../ 匹配文件名，于是任何官方 release-drafter action、
+    // 任何叫 triage.yml 的文件都算接线——而 harness-loop 会据此认为项目已接事件脊，
+    // 对着空队列跑完 8 步，把"没做事"记成一次正常运行；阶段 3 判据也会给一个
+    // 不存在事件脊的项目发 PASS。
+    const wired = files.filter((f) => {
+      if (!/\.ya?ml$/.test(f)) return false;
+      const text = readText(path.join(wfDir, f));
+      if (!/^on:/m.test(text)) return false;
+      // 真的调用了本框架的运行层脚本，才算"接上了这条脊"
+      return /node\s+scripts\/(event-router|gate-check|ledger-check|budget-check)\.mjs/.test(text);
+    });
+    if (wired.length) {
+      return {
+        wired: true,
+        via: 'workflow',
+        detail: `${wired.length} 个 workflow 调用了运行层脚本（${wired.slice(0, 3).join(', ')}）`,
+      };
     }
   }
   // 非 GitHub 平台：LOOP.md 里声明了调度也算
@@ -412,7 +448,7 @@ export function hasEventWiring(root = '.') {
     wired: false,
     via: null,
     detail: wfDir && exists(wfDir)
-      ? '存在 .github/workflows/，但里面没有 loop 类 workflow'
+      ? '存在 .github/workflows/，但里面没有调用运行层脚本的 workflow'
       : '没有 .github/workflows/，LOOP.md 也未声明调度',
   };
 }
@@ -451,6 +487,37 @@ export function readRegistryDefaults(registryPath) {
   };
 }
 
+/**
+ * 从 patterns/registry.yaml 读 `stages:` 块里的每阶段判据数。
+ *
+ * 这个块此前**没有任何消费者**——文件里写着 mechanical_checks: 10，而阶段 1
+ * 的判据早已改成 8 项。同一份文件里的 `defaults:` 有消费者，`stages:` 没有，
+ * 于是它成了第二个真相源并静默漂移。约束 11：写着值却没人读的配置是装饰品。
+ *
+ * 返回 [{ id, mechanical, human }]。解析不到返回 null，调用方回落。
+ */
+export function readRegistryStages(registryPath) {
+  const p = registryPath || path.join(PACK_ROOT, 'patterns', 'registry.yaml');
+  if (!exists(p)) return null;
+  const text = readText(p);
+  const block = text.split(/^stages:/m)[1];
+  if (!block) return null;
+  const out = [];
+  // 以 "- id: N" 切段，逐段取标量
+  for (const chunk of block.split(/^\s*-\s*id:/m).slice(1)) {
+    const id = Number((chunk.match(/^\s*(\d+)/) || [])[1]);
+    if (!Number.isFinite(id)) continue;
+    const mech = chunk.match(/mechanical_checks:\s*(\d+)/);
+    const human = chunk.match(/human_checks:\s*(\d+)/);
+    out.push({
+      id,
+      mechanical: mech ? Number(mech[1]) : undefined,
+      human: human ? Number(human[1]) : undefined,
+    });
+  }
+  return out.length ? out : null;
+}
+
 /** 判断路径是否命中拒绝列表 */
 export function matchesDenylist(filePath, patterns = DENYLIST_PATTERNS) {
   const p = filePath.split(path.sep).join('/').replace(/^\.\//, '');
@@ -463,12 +530,15 @@ export function matchesDenylist(filePath, patterns = DENYLIST_PATTERNS) {
 }
 
 function globMatch(p, pattern, base) {
-  // .env 与 .env.* —— 匹配任意层级的 .env 文件
+  // .env 与 .env.* —— 匹配任意层级的 .env 文件。
+  // 比较用 lower：在大小写不敏感的文件系统上 .ENV 与 .env 是同一个文件，
+  // 若这里区分大小写，把文件重命名成 .ENV 就能绕过拒绝列表。
+  const lowerBase = base.toLowerCase();
   if (pattern === '.env') {
-    return base === '.env';
+    return lowerBase === '.env';
   }
   if (pattern === '.env.*') {
-    return base.startsWith('.env.') && base !== '.env';
+    return lowerBase.startsWith('.env.') && lowerBase !== '.env';
   }
 
   return globToRegex(pattern).test(p);
@@ -490,9 +560,11 @@ function globToRegex(pattern) {
 
   if (dirTail) {
     const fileForm = anyDepth ? '(?:\\.[A-Za-z0-9]+)?' : '';
-    return new RegExp(`^(?:.*/)?${body}(?:$|/|${fileForm}$)`);
+    // i 标志：macOS/Windows 的文件系统大小写不敏感，AUTH/login.ts 与 auth/login.ts
+    // 是同一个文件。拒绝列表若区分大小写，一个改名的目录就能绕过它。
+    return new RegExp(`^(?:.*/)?${body}(?:$|/|${fileForm}$)`, 'i');
   }
-  return new RegExp(`^(?:.*/)?${body}$`);
+  return new RegExp(`^(?:.*/)?${body}$`, 'i');
 }
 
 // ---------------------------------------------------------------- 输出
@@ -504,4 +576,42 @@ export function printJson(obj) {
 export function fail(msg, code = 1) {
   process.stderr.write(`error: ${msg}\n`);
   process.exit(code);
+}
+
+/**
+ * 把 CLI 布尔值转成真正的布尔。
+ *
+ * `--pause=false` 的值是字符串 "false"，而 `Boolean("false") === true`——
+ * 于是"显式传假"反而打开了紧急刹车。`--flag` 得到 true，`--flag=true|false`
+ * 得到对应布尔，其他字符串按 true（未知值不放行，由调用方决定是否校验）。
+ */
+export function boolArg(value) {
+  if (value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  const s = String(value).trim().toLowerCase();
+  if (s === 'false' || s === '0' || s === 'no') return false;
+  return true;
+}
+
+/**
+ * 未知标志 fail-closed。
+ *
+ * 没有这个检查时，`--diff-filesx` 与 `--diff-files` 在退出码上不可区分：
+ * 前者被静默丢弃，`files_changed` 变成 0，拒绝列表闸门整个失效，而工具报告成功。
+ * 这与已经修掉的 `Number('abc')` → NaN 是同一个病，只是发生在标志名而不是标志值上。
+ *
+ * known 用 camelCase（parseArgs 转换后的形态）；`_` 是位置参数数组，必须豁免。
+ */
+export function rejectUnknownFlags(args, known, scriptName) {
+  // parseArgs 在布尔标志被喂了值时把原因放在 _error 里（不直接退出，
+  // 否则测试无法覆盖这条路径）。
+  if (args._error) fail(`${scriptName}: ${args._error}`, 1);
+  // parseArgs 已把 --diff-files 转成 diffFiles；报错必须还原成用户敲的形态，
+  // 否则 "unknown flag: --diffFilesx" 指的不是命令行里的那个字符串。
+  const toFlag = (k) => '--' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  const unknown = Object.keys(args).filter((k) => k !== '_' && k !== '_error' && !known.includes(k));
+  if (unknown.length) {
+    fail(`${scriptName}: unknown flag(s): ${unknown.map(toFlag).join(', ')}. `
+      + `Run with --help to see the accepted flags.`, 1);
+  }
 }

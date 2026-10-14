@@ -31,56 +31,101 @@ jobs:
       - name: Collect changed files
         id: files
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.LOOP_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh pr diff ${{ github.event.pull_request.number }} --name-only > changed.txt
+          gh pr diff "$PR_NUMBER" --name-only > changed.txt
           echo "count=$(wc -l < changed.txt)" >> "$GITHUB_OUTPUT"
           cat changed.txt
 
-      - name: Check budget
+      - name: Resolve reviewed commit
+        id: rev
+        env:
+          GH_TOKEN: ${{ secrets.LOOP_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # 约束 7：合并必须绑定审查过的 commit。
+          # 取 PR 当前 head 与最近一次 APPROVED review 绑定的 commit；
+          # 两者不一致时闸门会 escalate（审查后又 push 了）。
+          HEAD_SHA="$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)"
+          REVIEWED_SHA="$(gh pr view "$PR_NUMBER" \
+            --json reviews -q '[.reviews[] | select(.state=="APPROVED")] | last | .commit.oid // empty')"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "reviewed=${REVIEWED_SHA:-$HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve red-check state
+        id: red
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # 约束 8：回退测试。只认独占一行的标记；散文里提到不算。
+          # 读不到就显式传 not-run——让"未跑"出现在输出里，而不是被静默省略。
+          if printf '%s' "$PR_BODY" | grep -qE '^[[:space:]]*red-check:[[:space:]]*pass[[:space:]]*$'; then
+            echo "state=pass" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$PR_BODY" | grep -qE '^[[:space:]]*red-check:[[:space:]]*fail[[:space:]]*$'; then
+            echo "state=fail" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=not-run" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check budget and kill switch
         id: budget
         run: |
-          # 从运行日志估算今日花费占上限的比例
-          PCT=$(node -e '
-            const fs = require("fs");
-            let pct = 0;
-            try {
-              const log = fs.readFileSync("loop-run-log.md", "utf8");
-              const today = new Date().toISOString().slice(0, 10);
-              const entries = [...log.matchAll(/\{.*\}/g)]
-                .map((m) => { try { return JSON.parse(m[0]); } catch { return null; } })
-                .filter(Boolean)
-                .filter((e) => String(e.run_id || "").startsWith(today));
-              const used = entries.reduce((s, e) => s + (Number(e.tokens_estimate) || 0), 0);
-              const budgetText = fs.readFileSync("loop-budget.md", "utf8");
-              const caps = [...budgetText.matchAll(/\|\s*(\d+)k\s*\|/g)].map((m) => Number(m[1]) * 1000);
-              const cap = caps.length ? Math.max(...caps) : 500000;
-              pct = Math.min(999, Math.round((used / cap) * 100));
-            } catch {}
-            process.stdout.write(String(pct));
-          ')
+          # 预算与 kill switch 的唯一入口。曾经这里是一段内联 node -e，
+          # 用 Math.max(...caps) 取全表最大上限——于是所有循环共用 CI Sweeper 的
+          # 500k，本循环花掉自身 83% 时被算成 50%，判定"正常"。
+          node scripts/budget-check.mjs --pattern merge-gate --json > budget.json || true
+          cat budget.json
+          PCT=$(jq -r '.budget_pct' budget.json)
+          MODE=$(jq -r '.mode' budget.json)
+          REASON=$(jq -r '.reason' budget.json)
           echo "pct=$PCT" >> "$GITHUB_OUTPUT"
-          echo "Today's spend: ${PCT}% of daily cap"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Today's spend: ${PCT}% of this loop's cap — ${REASON}"
+          if [ "$MODE" = "exit" ]; then
+            echo "::error::loop exited: ${REASON}"
+            exit 1
+          fi
 
       - name: Run gate check
         id: gate
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BUDGET_PCT: ${{ steps.budget.outputs.pct }}
+          REVIEWED_SHA: ${{ steps.rev.outputs.reviewed }}
+          HEAD_SHA: ${{ steps.rev.outputs.head }}
+          RED_CHECK: ${{ steps.red.outputs.state }}
         run: |
+          # 四个参数不可省，省掉会让对应闸门失效或必然升级：
+          #   --reviewed-sha/--head-sha → 约束 7（TOCTOU）
+          #   --red-check               → 约束 8（回退测试）
+          #   --evidence-file           → verdict 是断言，不是证据
+          # 此前的调用只传了 4 个参数，于是每个 ready_for_review 的 PR 都收到
+          # "human decision required"——持续假升级会训练人忽略它。
+          EVIDENCE=""
+          if [ -f verifier-report.md ]; then EVIDENCE="--evidence-file verifier-report.md"; fi
           node scripts/gate-check.mjs \
-            --item pr-${{ github.event.pull_request.number }} \
+            --item "pr-${PR_NUMBER}" \
             --phase gate \
             --diff-files @changed.txt \
             --verdict none \
-            --budget-pct "${{ steps.budget.outputs.pct }}" > gate.json
+            --budget-pct "$BUDGET_PCT" \
+            --reviewed-sha "$REVIEWED_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --red-check "$RED_CHECK" \
+            $EVIDENCE > gate.json
           cat gate.json
 
       - name: Report readiness
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.LOOP_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BUDGET_PCT: ${{ steps.budget.outputs.pct }}
+          FILES_COUNT: ${{ steps.files.outputs.count }}
         run: |
           DECISION=$(jq -r '.decision' gate.json)
           REASON=$(jq -r '.reason' gate.json)
           GATE=$(jq -r '.gate // "none"' gate.json)
-          FILES="${{ steps.files.outputs.count }}"
 
           BODY=$(cat <<EOF
           ## 🤖 Loop Harness — Merge Gate
@@ -89,15 +134,15 @@ jobs:
           |---|---|
           | Decision | \`${DECISION}\` |
           | Gate | \`${GATE}\` |
-          | Files changed | ${FILES} |
-          | Budget today | ${{ steps.budget.outputs.pct }}% |
+          | Files changed | ${FILES_COUNT} |
+          | Budget today | ${BUDGET_PCT}% |
 
           **Reason:** ${REASON}
 
           > Merge is a human decision. This bot does not merge.
           EOF
           )
-          gh pr comment ${{ github.event.pull_request.number }} --body "$BODY"
+          gh pr comment "$PR_NUMBER" --body "$BODY"
 
       - name: Fail if escalated
         run: |

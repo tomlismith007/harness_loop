@@ -114,17 +114,41 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 闸门按以下顺序检查，**先命中者决定结果**：
 
 ```
-1. loop-pause-all 生效？          → exit（不检查其他）
-2. 预算 >= 100%？                 → exit
-3. 触及拒绝列表？                  → escalated（不执行编辑）
-4. attempts >= 3？                → escalated
-5. 预算 >= 80%？                  → report-only
-6. 改动 > 5 文件或范围蔓延？        → escalated
-7. verifier 未 APPROVE？          → 回 fix 或 escalated
-8. 合并闸门（默认关闭）            → 人工
+1.  loop-pause-all 生效？          → exit（不检查其他）
+2.  预算 >= 100%？                 → exit
+3.  触及拒绝列表？                  → escalated（不执行编辑）
+4.  attempts >= 3？                → escalated
+5.  预算 >= 80%？                  → report-only
+6.  改动 > 5 文件（清理类 > 10）？   → escalated
+7.  head-commit 不一致？            → escalated（约束 7：合并绑定审过的 commit）
+8.  回退测试未通过 / 未跑？          → escalated（约束 8）
+9.  verifier 未 APPROVE？          → 回 fix 或 escalated
+10. 合并闸门（默认关闭）            → 人工
 ```
 
 顺序有讲究：**退出类判定在最前**（避免在应该停的时候还在分析），**拒绝列表在尝试上限之前**（安全优先于效率）。
+
+第 7、8 条对应 `loop-constraints.md` 的两条硬约束，此前本文档完全没有列出——
+读者按这份清单理解闸门会漏掉它们。第 9 条在 `--phase gate` 且 verdict 为 `approve` 时
+还要求提供 `--evidence-file`：**verdict 是断言，不是证据**，闸门会读那份报告并核对
+它是否带有 verdict 行与命令行证据。
+
+### 机械判定 vs 人工判定
+
+本文档描述的部分判定**无法机械执行**，应当标为人工项而不是假装能自动检查——
+这与 `docs/11-three-stages.md` 处理阶段 2 判据的原则一致（"判断力无法被 grep 替代，
+把它标成人工项比让它假绿诚实"）。
+
+| 判定 | 类型 | 说明 |
+|---|---|---|
+| 拒绝列表命中 | **机械** | `gate-check.mjs` 读 `loop-constraints.md` 的 `## Paths` |
+| 文件数超限 | **机械** | `gate-check.mjs` 数 diff 清单 |
+| head-commit 一致 | **机械** | 字符串比对两个 sha |
+| 回退测试结论 | **机械** | 读 `--red-check` 的值 |
+| 预算比例 | **机械** | `budget-check.mjs` 按 pattern 读 per-loop 上限 |
+| kill switch | **机械** | 读 `STATE.md` / `loop-constraints.md` 的独占行标记 |
+| **改动是否与 work item 相关** | **人工** | 脚本不知道 work item 的目标，无法判定"范围蔓延" |
+| **verdict 是否诚实** | **半机械** | 闸门能核对报告格式与自相矛盾，但无法验证测试真的跑过 |
 
 ---
 
@@ -135,10 +159,28 @@ node scripts/gate-check.mjs \
   --item pr-123 \
   --phase gate \
   --attempts 1 \
-  --diff-files changed.txt \
+  --diff-files @changed.txt \
   --verdict approve \
   --budget-pct 45 \
-  --pause false
+  --reviewed-sha "$(git rev-parse HEAD)" \
+  --head-sha "$(git rev-parse HEAD)" \
+  --red-check pass \
+  --evidence-file verifier-report.md
+```
+
+三个容易写错的地方：
+
+| 写法 | 后果 |
+|---|---|
+| `--diff-files changed.txt`（少了 `@`） | 裸路径被当成"单个改动文件"，**拒绝列表闸门静默失效** |
+| `--pause false` | `--pause` 是布尔标志，`false` 会被当成位置参数 → `pause=true` → **永久紧急刹车**。要显式传假用 `--pause=false`，或干脆省略（省略即假） |
+| `--verdict ESCALATE_HUMAN` | 大小写与连字符会被归一化，两种写法都接受（`loop-verifier` 的输出格式是大写下划线） |
+
+预算比例与 kill switch 由 `scripts/budget-check.mjs` 提供（按 pattern 读该循环自己的上限）：
+
+```bash
+node scripts/budget-check.mjs --pattern merge-gate --json
+# exit 0 = normal/report-only；exit 3 = 立即退出
 ```
 
 输出：
@@ -146,17 +188,32 @@ node scripts/gate-check.mjs \
 ```json
 {
   "item": "pr-123",
+  "phase": "gate",
+  "attempts": 1,
+  "files_changed": 1,
+  "budget_pct": 45,
+  "verdict": "approve",
   "decision": "escalate",
   "gate": "denylist",
   "reason": "changed file 'auth/session.ts' matches denylist pattern 'auth/**'",
+  "denylist_hits": [
+    { "file": "auth/session.ts", "pattern": "auth/**" }
+  ],
   "allowed_actions": [],
+  "exit_code": 2,
   "next": "write escalation entry to STATE.md, notify human, do not edit"
 }
 ```
 
+上面这段输出是上面那条命令**实际产生**的（`changed.txt` 含 `auth/session.ts`）。
+此前文档里的示例输出不可能由文档里的命令产生——说明那个示例从未被执行过，
+而这正是"文档说 A、代码做 B"这类漂移最容易藏身的地方。
+
 `decision` 枚举：`proceed` | `report-only` | `escalate` | `exit`
 
 **退出码**：`0` = `proceed` 或 `report-only`；`2` = `escalate`；`3` = `exit`。
+**参数错误（未知标志、非法枚举值、非数字阈值）退出 `1`**——它不属于上面四态，
+所以调用方必须把它当"我没问对问题"处理，而不是当"闸门通过了"。
 
 ---
 

@@ -30,18 +30,22 @@ jobs:
           node-version: '20'
 
       - name: Route
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           node scripts/event-router.mjs \
             --event pull_request.closed:merged \
-            --item pr-${{ github.event.pull_request.number }} > route.json
+            --item "pr-${PR_NUMBER}" > route.json
           cat route.json
 
       - name: Scan merged diff for follow-up work
         id: scan
+        env:
+          # sha 是十六进制串，但仍走 env：统一规则比逐个字段判断安全性可靠。
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           # 用 API 的合并列表而不是仅本地 git log，避免遗漏
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.merge_commit_sha }}"
           git diff --name-only "$BASE" "$HEAD" > merged-files.txt || true
           echo "files=$(wc -l < merged-files.txt)" >> "$GITHUB_OUTPUT"
 
@@ -67,17 +71,23 @@ jobs:
           EOF
 
       - name: Record work item
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MARKERS: ${{ steps.scan.outputs.markers }}
         run: |
+          set -euo pipefail
           mkdir -p .loop/queue
-          ITEM="post-merge-pr-${{ github.event.pull_request.number }}"
+          ITEM="post-merge-pr-${PR_NUMBER}"
+          # 全部经 jq 编码，绝不拼进 JSON 字面量。
           cat > ".loop/queue/${ITEM}.json" <<EOF
           {
-            "id": "${ITEM}",
+            "id": $(jq -Rn --arg v "$ITEM" '$v'),
             "event": "pull_request.closed:merged",
             "phase": "post-merge",
             "skills": ["post-merge-cleanup"],
-            "merged_sha": "${{ github.event.pull_request.merge_commit_sha }}",
-            "new_markers": ${{ steps.scan.outputs.markers }},
+            "merged_sha": $(jq -Rn --arg v "$MERGED_SHA" '$v'),
+            "new_markers": ${MARKERS:-0},
             "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF

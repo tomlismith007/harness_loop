@@ -9,11 +9,11 @@
 | 项 | 状态 |
 |---|---|
 | 技能 | 17 个，全部带 frontmatter（含 `stage:`）与触发描述 |
-| 脚本 | 8 个（`scripts/` 下 7 个顶层 `.mjs` + `lib/common.mjs`），零依赖 Node |
+| 脚本 | 12 个（`scripts/` 下 11 个顶层 `.mjs` + `lib/common.mjs`），零依赖 Node |
 | 文档 | 13 篇 |
 | 模板 | 13 个 |
 | 事件接线 | 8 个 GitHub Actions workflow |
-| 测试 | 724 项断言全通过 |
+| 测试 | 923 项断言全通过 |
 | 自审计 | 94/100，L2 |
 | 技能已安装 | ✅ `~/.zcode/skills/` + `~/.agents/skills/` |
 

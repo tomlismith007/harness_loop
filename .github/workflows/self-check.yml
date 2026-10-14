@@ -39,19 +39,43 @@ jobs:
         run: |
           set -e
           node scripts/event-router.mjs --list > /dev/null
-          node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null
+          # 账本用临时的一份：出厂的 loop-ledger.json 带占位 goal，熔断器会（正确地）
+          # 判 placeholder-ledger 并退出 2。用仓库里那份测会得到一个与"脚本坏了"
+          # 无法区分的失败。
+          printf '{"goal":"probe","pattern":"x","level":"L1","attempts":[]}\n' > /tmp/ledger-probe.json
+          node scripts/ledger-check.mjs --ledger /tmp/ledger-probe.json > /dev/null
+          # 占位账本必须被拦下——熔断器要能区分示例数据与真实历史
+          if node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null 2>&1; then
+            echo "::error::placeholder ledger must be rejected"
+            exit 1
+          fi
+          node scripts/budget-check.mjs --pattern ci-sweeper > /dev/null
+          node scripts/queue-read.mjs > /dev/null
           node scripts/loop-audit.mjs . > /dev/null
           node scripts/harness-stage.mjs . > /dev/null
           # gate-check 的冒烟测试必须覆盖 gate 路径，且同时断言 escalate 分支——
           # 只跑 --verdict approve 会落在"闸门全关"的路径上，等于什么都没验。
+          printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → PASS\n- Red check: PASS\n' > /tmp/evidence-probe.md
           node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null
+            --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
+            --evidence-file /tmp/evidence-probe.md > /dev/null
+          # approve 不带证据必须升级（verdict 是断言，不是证据）
+          if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
+            --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null 2>&1; then
+            echo "::error::approve without evidence must escalate"
+            exit 1
+          fi
           if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict none --diff-files a.ts > /dev/null 2>&1; then
             echo "::error::gate+no-verdict must escalate"
             exit 1
           fi
           if node scripts/gate-check.mjs --item pr-1 --phase gtae --verdict approve > /dev/null 2>&1; then
             echo "::error::unknown --phase must be rejected"
+            exit 1
+          fi
+          # 拼错的标志曾经等价于"该闸门没启用"
+          if node scripts/gate-check.mjs --item pr-1 --phase fix --diff-filesx a.ts > /dev/null 2>&1; then
+            echo "::error::unknown flag must be rejected"
             exit 1
           fi
           echo "All CLI entry points respond."

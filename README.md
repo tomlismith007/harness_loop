@@ -69,6 +69,14 @@ node scripts/harness-stage.mjs /path/to/repo          # 我现在在哪一阶段
 node scripts/harness-stage.mjs /path/to/repo --upgrade # 补齐下一阶段缺失的产物
 ```
 
+装配会把**运行层脚本**（`event-router.mjs`、`gate-check.mjs`、`ledger-check.mjs`、`loop-audit.mjs`
++ `lib/common.mjs`）一起复制进目标仓库的 `scripts/`。技能命令与事件接线都写
+`node scripts/xxx.mjs` 并隐含 cwd = 项目根，所以这一步不是可选的——少了它，新项目里每条命令
+都是 `ERR_MODULE_NOT_FOUND`，而阶段 3 的接线判据仍会发 PASS。
+
+`test.mjs`（源仓库自检套件）与三个装配工具不复制：它们依赖 pack 内的 `templates/` 与 `skills/`，
+在消费者仓库里跑不起来。装配动作本身仍由 pack 仓库里的 `harness-stage.mjs` 执行。
+
 | 阶段 | 目标 | 判据 | 等级 | 技能 |
 |---|---|---|---|---|
 | **1 初始化** | 创建 7 个文件（**不含 loop 机制文档**），让结构完整、下一会话可重启 | 8 项（全机械） | L1 | `harness-init` |
@@ -161,7 +169,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 框架自带测试套件，覆盖闸门判定、熔断逻辑、拒绝列表匹配、事件路由、模板与技能完整性、端到端装配：
 
 ```bash
-node scripts/test.mjs           # 724 项断言
+node scripts/test.mjs           # 923 项断言
 node scripts/test.mjs --verbose # 显示每一项
 ```
 

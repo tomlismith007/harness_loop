@@ -6,11 +6,14 @@ description: >-
   persist state. Use this as the top-level entry when an event arrives (issue opened,
   PR review requested changes, CI failed, PR merged, tag pushed) and something needs to
   happen. Reach for it whenever you need to decide "what should happen next" rather than
-  executing one specific action. Do NOT invoke by hand — step 2 needs an --event name
-  only the event source knows. Requires event wiring (.github/workflows/loop-*.yml or a
-  schedule declared in LOOP.md); without it, step 0 exits and asks for stage 3.
+  executing one specific action. Can be invoked by hand, but then the caller must supply
+  the event name and target (e.g. --event pull_request_review.changes_requested
+  --target pr-123) — step 2 has nothing to route without them. Requires event wiring
+  (.github/workflows/ with a script call, or a schedule declared in LOOP.md); without it,
+  step 0 exits with outcome "no-wiring" and asks for stage 3.
 license: MIT
 stage: runtime
+user_invocable: true
 ---
 
 <!-- stage: runtime = 不属于任何建设阶段，任何阶段都安装。
@@ -29,12 +32,29 @@ stage: runtime
 
 按顺序检查，任一命中即退出，不继续：
 
-1. `loop-pause-all` 是否生效（`loop-constraints.md`、`STATE.md`、issue 标签）→ **立即退出**
-2. 预算是否 ≥ 100% 日上限（读 `loop-budget.md` + `loop-run-log.md` 近 24h）→ **立即退出**
-3. **事件接线是否存在** → **未接线即退出**，记 `outcome: "no-wiring"`，提示"本项目未接事件，请先跑阶段 3（`/harness-consolidate`）"
-4. 是否无待办（本事件对应的队列为空）→ **在 <5k token 内退出**，记录 `outcome: "no-op"`
+1. **暂停与预算**（一个命令给出两个答案）→ 任一命中即 **立即退出**：
 
-第 3 条是本技能**自己执行的边界**，不依赖任何人记住项目到了哪个阶段：
+   ```bash
+   node scripts/budget-check.mjs --pattern <pattern-id> --json
+   ```
+
+   退出码 `3` = 立即退出（`loop-pause-all` 生效，或预算 ≥ 100%）；`report-only` = 不派发执行子智能体。
+   kill switch 只认 `STATE.md` / `loop-constraints.md` 里**独占一行**的 `loop-pause-all`——
+   散文里提到不算，否则一次说明性文字就把循环永久停死。
+   预算按**该循环自己的上限**算，不是全表最大值。
+
+2. **事件接线是否存在** → **未接线即退出**，记 `outcome: "no-wiring"`，提示"本项目未接事件，请先跑阶段 3（`/harness-consolidate`）"
+3. **是否有待办** → 无待办则 **在 <5k token 内退出**，记 `outcome: "no-op"`：
+
+   ```bash
+   node scripts/queue-read.mjs --json
+   ```
+
+   它按顺序读 `.loop/queue/`（事件接线写的位置），为空则回落到 `STATE.md` 的
+   High Priority 区（本地手动用法）。输出里始终写明读的是哪个来源——
+   **"队列为空"与"没读到"必须可区分**，否则空转会伪装成"跑过了"。
+
+第 2 条是本技能**自己执行的边界**，不依赖任何人记住项目到了哪个阶段：
 
 ```bash
 node -e "import('./scripts/lib/common.mjs').then(m=>{
@@ -70,10 +90,14 @@ Constraints loaded from loop-constraints.md: N rules active.
 ### 第 2 步：路由事件
 
 ```bash
-node scripts/event-router.mjs --event <事件名> --item <item-id>
+node scripts/event-router.mjs --event <事件名> --item <item-id> --target <branch|pr-id>
 ```
 
-拿到：`phase`、`skills`、`level`、`gates`、`next`。
+`--target` **不可省**：它是锁键（`acting_on`，即分支名或 PR 号），不是 work item id。
+省略它时 `event-router` 不做冲突检测，直接返回路由结果——第 3 步会读不到任何锁，
+"同一分支每小时最多一个循环修改"就静默失效了。
+
+拿到：`phase`、`skills`、`level`、`gates`、`next`，以及可能的 `conflict: "lock-held"` 与 `held_by`。
 
 路由表在 `LOOP.md` 中声明。若事件不在表中 → 记入 `STATE.md` 的 Watch List，不要自创流程。
 
@@ -117,10 +141,29 @@ node scripts/gate-check.mjs \
   --item <item-id> \
   --phase <phase> \
   --attempts <n> \
-  --diff-files <changed-files.txt> \
-  --verdict <approve|reject|none> \
+  --diff-files @changed-files.txt \
+  --verdict <approve|reject|escalate-human|none> \
   --budget-pct <n>
 ```
+
+六个**不可省**的参数，省掉会让对应闸门失效或必然升级：
+
+| 参数 | 何时必须 | 省掉的后果 |
+|---|---|---|
+| `@` 前缀 | 永远 | 裸路径被当成"单个改动文件"，**拒绝列表闸门静默失效**（`.env` 会被判为"无命中"） |
+| `--reviewed-sha` + `--head-sha` | `--phase gate` | 必然 `escalate`（约束 7：合并绑定审过的 commit） |
+| `--red-check <pass\|fail\|not-run>` | `--phase gate` | `not-run` 时必然 `escalate`（约束 8：回退测试） |
+| `--evidence-file <path>` | `--phase gate` 且 verdict 为 `approve` | 必然 `escalate`（verdict 是断言，不是证据） |
+| `--not-run <list>` | 有未跑的检查时 | 未跑项不出现在输出里（约束 9） |
+| `--constraints-root <dir>` | 目标不在 cwd 时 | 拒绝列表读错文件 |
+
+verdict 词汇映射（`loop-verifier` 的输出 → 本脚本的枚举）：
+
+| loop-verifier | gate-check |
+|---|---|
+| `APPROVE` | `approve` |
+| `REJECT` | `reject` |
+| `ESCALATE_HUMAN` | `escalate-human` |
 
 `decision` 为 `proceed` 才继续；`escalate` → 写升级条目；`exit` → 立即停止。
 

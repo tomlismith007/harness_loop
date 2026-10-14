@@ -111,37 +111,71 @@ function hasVerifier(root, skills) {
  * 只认**真实运行痕迹**，不认"文件存在"——文件存在是结构性就绪，
  * 已由其他检查项计分。这里的目的是回答"它真的跑过吗"。
  */
-function detectLoopActivity(root, stateText, files, loopText) {
+export function detectLoopActivity(root, stateText, files, loopText) {
+  // evidence 只放**正面**证据；notes 放"查了但不算"的说明。
+  // 两者必须分开：把"不是循环运行"这类否定结论塞进 evidence 数组，
+  // 而 present 又用 evidence.length > 0 判定，等于让"没有活动"变成"有活动"。
   const evidence = [];
+  const notes = [];
 
   // 1. 状态文件里有真实的 Last run 时间戳（占位符不算）
+  //
+  // 注意这里的语义边界：`Last run` 必须是一次**循环运行**的时间。
+  // 开发会话的标签（如 "2026-10-14 (stage-boundary rework)"）也带日期，
+  // 但它描述的是"我们改了什么"，不是"循环跑过"。区分方法：要求时间戳之外
+  // 还带时间或明确的 run 语义，否则不算证据——一个从没跑过循环的仓库
+  // 不该因为改了一天代码就拿到 activity 分。
   const lastRunMatch = stateText && stateText.match(/last\s*run\s*[:：]\s*(.+)/i);
   if (lastRunMatch) {
     const value = lastRunMatch[1].trim();
     const isPlaceholder = /^(never|—|-|none|n\/a|tbd|todo)$/i.test(value);
     const looksLikeTime = /\d{4}-\d{2}-\d{2}|\d{2}:\d{2}/.test(value);
-    if (!isPlaceholder && looksLikeTime) {
+    // 纯日期 + 括号里的自由文本 = 开发会话标签，不是循环运行
+    const isSessionLabel = /^\d{4}-\d{2}-\d{2}\s*\([^)]*\)\s*$/.test(value);
+    if (!isPlaceholder && looksLikeTime && !isSessionLabel) {
       evidence.push('state file records a real Last run timestamp');
+    } else if (!isPlaceholder && looksLikeTime && isSessionLabel) {
+      notes.push('state file "Last run" is a session label, not a loop run');
     }
   }
 
-  // 2. 运行日志里有真实的运行条目（JSON 对象含 run_id），不只是模板
+  // 2. 运行日志里有真实的**事件驱动**运行条目（不只是模板，也不只是手工开发记录）
+  //
+  // 这里曾经只数"含 run_id 的 JSON 对象"，于是 `manual.audit` / `manual.design`
+  // 这类开发记录也算"真实循环活动"——一个从未跑过任何事件驱动循环的仓库
+  // 因此能拿到 activity 分。而 `manual` 的语义是"不计入循环统计"（见 loop-run-log.md
+  // 的 outcome 枚举说明）。审计若把它算成活动，就是在给"从没跑过循环"发绿灯。
   for (const name of ['loop-run-log.md', 'run-log.md']) {
     const p = path.join(root, name);
     if (!exists(p)) continue;
     const text = readText(p);
     // 只看 "## Log" 章节——格式说明里的示例 JSON 不是真实运行
     const logSection = text.split(/^##\s+Log\s*$/m)[1] ?? '';
-    const entries = [...logSection.matchAll(/\{[^{}]*"run_id"[^{}]*\}/g)];
-    if (entries.length > 0) {
-      evidence.push(`${name} contains ${entries.length} run record(s)`);
+    const records = [...logSection.matchAll(/\{[^{}]*"run_id"[^{}]*\}/g)]
+      .map((m) => { try { return JSON.parse(m[0]); } catch { return null; } })
+      .filter(Boolean);
+    const manual = records.filter((r) => r.outcome === 'manual' || /^manual\./.test(String(r.event || '')));
+    const real = records.filter((r) => !(r.outcome === 'manual' || /^manual\./.test(String(r.event || ''))));
+    if (real.length > 0) {
+      evidence.push(`${name} contains ${real.length} event-driven run record(s)`);
+      break;
+    }
+    if (manual.length > 0) {
+      // 只记进 notes，不算证据——读者能看到"有记录但都是手工的"，
+      // 而不是笼统的"没有活动"
+      notes.push(`${name}: ${manual.length} record(s), all manual (not loop activity)`);
       break;
     }
   }
 
-  // 3. 状态文件的 Active 表里有真实 work item（不是占位行）
+  // 3. 状态文件的 **## Active 表**里有真实 work item（不是占位行）
+  //
+  // 这里曾经扫描整个 STATE.md 的所有表格行，于是 Post-Run Critique 里的数据表
+  // （"输入 | 修前 | 修后"）被当成 25 个"活跃 work item"。审计因此认为
+  // "循环正在处理工作"，而实际上 Active 表是空的。必须限定在 Active 章节内。
   if (stateText) {
-    const activeRows = stateText
+    const activeSection = stateText.split(/^##\s+Active\b.*$/m)[1]?.split(/^##\s+/m)[0] ?? '';
+    const activeRows = activeSection
       .split('\n')
       .filter((l) => l.trim().startsWith('|'))
       .map((l) => l.split('|').map((c) => c.trim()).filter(Boolean))
@@ -164,7 +198,11 @@ function detectLoopActivity(root, stateText, files, loopText) {
     }
   } catch { /* 非 git 仓库或超时，忽略 */ }
 
-  return { present: evidence.length > 0, evidence: [...new Set(evidence)].slice(0, 4) };
+  return {
+    present: evidence.length > 0,
+    evidence: [...new Set(evidence)].slice(0, 4),
+    notes: [...new Set(notes)].slice(0, 4),
+  };
 }
 
 /** 主评分函数 */
