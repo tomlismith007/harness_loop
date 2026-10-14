@@ -32,10 +32,18 @@ Last run: 2026-10-14 (three-review remediation pass)
   - `loop-audit.mjs` 的 `hasVerifier` / triage 检测仍是裸子串匹配，写一句"我们是 maker/checker"
     即可满足。
   - `detectLoopActivity` 的 git 历史分支匹配 commit message 子串，在本仓库几乎必然命中。
-  - `**/*_key*` 会误命中 `src/monkey_key.ts`。**有意保留**：拒绝列表宁可多拦。
+  - `**/*_key*` 会误命中 `src/monkey_key.ts`。**有意保留**：拒绝列表宁可多拦不可漏拦。
   - `loop-budget.md` 的 per-loop 上限没被真正使用（`Math.max(...caps)` 取全表最大值 500k）。
   - `loop-verifier` 判据里"verifier 与执行者共享上下文则升级"依赖模型自觉，建议改成结构性保证
     （在调用者侧强制新上下文）。
+  - `schedule:daily` / `issue_comment.created` / `check_run.completed` 等路由仍缺。本轮只把
+    LOOP.md 里**不可路由**的声明移除以对齐代码，补路由属新功能，另轮。
+  - 低严重级打磨项（`loop-audit.mjs:316` 的 `Math.max(1,…)` 0 项误报为 `1/5`、`:216`
+    单技能记满双技能权重、`detectLoopActivity` 死参数、`test.mjs` 临时目录 `try/finally`）
+    均未做——不影响任何判定或门禁。逐条理由见 `REVIEW-2026-10-14-consolidated-plan.md` §6.2。
+
+**有意遗留项的权威清单是 `REVIEW-2026-10-14-consolidated-plan.md` §6.2**，本节只作摘要。
+两者不一致时以 plan 为准——它有测试守着（每个 WP 必须有状态行、每个未做项必须有理由）。
 
 ## Human Inbox (ambiguous / cross-loop)
 

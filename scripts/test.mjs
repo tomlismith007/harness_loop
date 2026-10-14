@@ -1311,6 +1311,28 @@ section('17. registry 与路由一致性');
   fs.writeFileSync(regFile, registryText.replace(/max_attempts:\s*\d+/, 'max_attempts: 1'));
   eq('registry 把 max_attempts 改成 1 后同一输入被拦', runGate(['--registry', regFile]), 'escalate');
   fs.rmSync(rtmp, { recursive: true, force: true });
+
+  // ---- 修复计划的落地状态必须可核对 ----
+  // 计划里列了条目、但没人记录哪些真的做了，"已完成"就不可验证——
+  // 这正是硬约束 11 的同一个毛病：配置存在却不产生行为差异。
+  // 因此每个 WP 都必须在计划文件的状态表里有一行，且状态是已做或有意未做之一。
+  const planPath = path.join(PACK_ROOT, 'REVIEW-2026-10-14-consolidated-plan.md');
+  if (fs.existsSync(planPath)) {
+    const plan = fs.readFileSync(planPath, 'utf8');
+    const wps = [...new Set([...plan.matchAll(/^### (WP-\d)/gm)].map((m) => m[1]))];
+    ok(`计划里有 ${wps.length} 个工作包`, wps.length >= 8);
+    for (const wp of wps) {
+      ok(`${wp} 在状态表中有落地记录`,
+        new RegExp(`\\|\\s*${wp}[^\\n]*\\|\\s*(✅|未做|有意跳过)`).test(plan));
+    }
+    ok('计划标注了执行状态', /\*\*执行状态\*\*/.test(plan));
+    ok('计划有「有意未做」清单', /### 6\.2 有意未做/.test(plan));
+    // 每个未做项都必须说明理由——只有状态没有理由的条目无法复核
+    const skippedRows = (plan.split('### 6.2')[1] || '').split('\n').filter((l) => /^\|\s*[^|]*\|/.test(l) && /未做|有意跳过/.test(l));
+    ok(`有意未做清单非空（${skippedRows.length} 项）`, skippedRows.length > 0);
+    const noReason = skippedRows.filter((l) => l.split('|').filter((c) => c.trim()).length < 4);
+    ok('每个未做项都写了理由', noReason.length === 0, `${noReason.length} 项缺理由`);
+  }
 }
 
 // ---------------------------------------------------------------- 汇总
@@ -1318,7 +1340,7 @@ section('17. registry 与路由一致性');
 // 文档里声称的断言数必须与实测一致，否则"验证已完成"这句话本身就是不可信的。
 // 本仓库曾有四个互相矛盾的数字（323 / 409 / 451 / 498），实测是第三个值。
 // 断言总数依赖配置（如 registry 的事件数），所以用固定偏移量而不是硬编码。
-const DOC_OFFSET = 3; // 本节自增 3 条
+const DOC_OFFSET = 3; // 本节自身的三条断言尚未计入，故补 3
 const docChecks = [
   ['README.md', /\b(\d{3})\s*项断言/],
   ['progress.md', /\b(\d{3})\s*项测试断言/],
