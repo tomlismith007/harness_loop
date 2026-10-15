@@ -330,6 +330,29 @@
         "实测：传 --target main → conflict=lock-held；不传 → conflict 字段不存在"
       ],
       "notes": "WP-11 只改了技能文档，而 spec 状态表声称『断言已加并通过变异回退』——实际 test.mjs 里不存在针对 harness-loop/SKILL.md 的 --target 断言（grep '第 2 步' 命中 0 次）。本轮把断言补在规则层：落盘 work item 的 workflow 必须传 --target、必须真的读 conflict、写队列那一步必须有 if: 守卫；不落盘的不得传 --target。release-draft 有意排除（LOOP.md 列为可安全并发），并加注释说明是设计选择而非漏改。本轮工作曾被外部进程一次性还原，重做后立即提交（f36301b）。"
+    },
+    {
+      "id": "loop-006",
+      "priority": 1,
+      "area": "loop",
+      "title": "每个 workflow 都有预算与 kill switch 入口，且接线是 fail-closed",
+      "user_visible_behavior": "8 个 workflow 全部调用 budget-check.mjs 并各传自己的 pattern id；删掉任一 workflow 的调用、删掉 fail-closed 守卫、或把 LOOP_BOT_TOKEN 退回裸 GITHUB_TOKEN，测试立刻变红并指名该文件",
+      "status": "passing",
+      "verification": [
+        "node scripts/test.mjs → 954 项断言全通过",
+        "逐条变异回退：删 budget-check 调用 / 删 fail-closed 守卫 / 退回裸 GITHUB_TOKEN，三次都必须变红",
+        "bash init.sh → 退出码 0",
+        "python yaml.safe_load 解析全部 8 个 workflow，确认结构有效且都含预算步骤"
+      ],
+      "evidence": [
+        "node scripts/test.mjs → Passed: 954 / Failed: 0（本轮新增 9 条断言）",
+        "变异 1 删 release-draft 的 budget-check 调用 → 2 条 FAIL",
+        "变异 2 删 fail-closed 守卫 → FAIL 'budget-check 失败时 fail-closed'",
+        "变异 3 release-draft 退回裸 GITHUB_TOKEN → FAIL '每个调用 gh 的 workflow 都用 LOOP_BOT_TOKEN'",
+        "bash init.sh → INIT_EXIT=0",
+        "YAML 解析：8/8 结构有效，8/8 含预算步骤"
+      ],
+      "notes": "WP-09 第二半 + WP-04 第二半。修复前只有 merge-gate 有预算与 kill switch。daily-triage / lesson-harvest 的内联预算恒为 0%（正则不带 s/m 标志，匹配不上跨多行的 run-log JSON），且用 Math.max 取全表最大上限。merge-gate 的接线本身 fail-open（|| true 吞掉退出码 → jq 得到 null → 无检查继续）。LOOP_BOT_TOKEN 的真实面是 3 个调 gh 的 workflow（不是 8 个）——另 5 个不调 gh，权限只来自 permissions: 声明，断言反向守住它们不得引用该 token。限制：新接线的 5 个 workflow 不写 loop-run-log.md（budget-check 的唯一数据源），所以 used 恒为 0，预算百分比要等真实花费写进 run-log 才有意义；立即生效的是 kill switch。已写进 workflow 注释与 STATE.md。"
     }
   ]
 }

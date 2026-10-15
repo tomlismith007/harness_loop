@@ -1,18 +1,17 @@
 # Loop State
 
-Last run: 2026-10-15 (acting_on 锁键接线 — 多循环协调唯一机制首次生效)
+Last run: 2026-10-15 (workflow 预算接线 + LOOP_BOT_TOKEN — WP-09/WP-04 第二半)
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表、本轮噪声。**每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
 
-- [x] **本轮已完成（2026-10-15 第二批）**：`acting_on` 锁键接线。**只加 `--target` 是半个修复**——`grep` 确认没有任何 workflow 读 `.conflict`，锁结果被直接丢弃，传了等于没传。按"传锁键 + 消费锁结果"两个条件一起修：4 个落盘 work item 的循环（`pr-review` / `ci-sweeper` / `issue-intake` / `post-merge`）传 `--target` 并在 `lock-held` 时跳过落盘；`release-draft` **有意不传**（`LOOP.md` 列为"只读为主，可安全并发"，且它不写队列）。断言按规则而非按文件、双向。断言 931 → 945。4 次变异全部确认落地后变红，其中 **2 次暴露了我自己写的无牙齿断言**（见 Post-Run Critique）。提交 `f36301b`。
-- [x] **已完成（2026-10-15 第一批）**：WP-09 的 A 类缺口第一半。**没有照原方案做**——原方案"给 8 个 workflow 加 `budget-check` 调用"实测会立刻炸：`daily-triage` 与 `lesson-harvest` 在 `loop-budget.md` 里根本没有行，`budget-check` 对无上限返回 `cap:null` → `mode:exit`，两个 workflow 会在自己的预算检查里直接死掉。先做前置：补 3 个循环的预算行（含同样注册为循环却无预算行的 `signal-gatekeeper`）、修 `parseBudgetCaps` 的静默回退与过宽别名、新增 `resolveCap` 暴露解析路径。断言 923 → 931。提交 `94a8f3d`。
-- [ ] **WP-09 第二半（workflow 预算接线）**：8 个 workflow 里只有 `merge-gate` 调用 `budget-check.mjs`。`daily-triage` / `lesson-harvest` 仍用 `Math.max(...caps)` 内联取全表最大上限，且其正则 `/\{.*\}/g` 不带 `s`/`m` 标志，**跨多行的 JSON 记录一条都匹配不上** → 预算恒为 0%；另 5 个完全没有预算与 kill switch。注意：这两个 workflow 恰好是唯二在写 `loop-run-log.md` 的，而 run-log 是 `budget-check` 的唯一数据源——真正活跃的循环贡献的花费在"今天花了多少"里是隐形的。规则应按**消耗 token / 调用 `gh`** 划，不是按"产不产 work item"（`release-draft` 不产 work item 但会 `gh pr list`，且 `on: push: tags` 可反复触发）。**前置已完成**（预算行齐了），可以安全接线了。
-- [ ] **WP-04 第二半（`LOOP_BOT_TOKEN`）**：8 个 workflow 里只有 `merge-gate` 用 `LOOP_BOT_TOKEN || GITHUB_TOKEN`；另 7 个是裸 `GITHUB_TOKEN`。断言用 `.some()`，1/8 也算通过——强度不足以守住它声称守住的东西。实测只有 3 个 workflow 真的调用 `gh`（`daily-triage` / `merge-gate` / `release-draft`），另 5 个不调 `gh`，所以 token 问题实际面是 3 个。**注意 `release-draft` 有 `gh pr list` 写路径且可被 `push: tags` 反复触发。**
-- [ ] **单个修复的文件数阈值自相矛盾**：`loop-constraints.md` 写"超过 5 个文件 → 停止并升级"，`LOOP.md` 写"超过 10 个文件 → 人工审批"。两处阈值不一致。本仓库实际的改动面（含被测试强制的文档数字同步）经常超过 5，需要先统一阈值或明确"同步类改动不计入"。
-- [ ] **并发写入事故（本轮真实发生）**：本轮全部未提交改动（5 个 workflow + `test.mjs`）曾被**外部进程一次性还原**（所有文件 mtime 落在同一秒 `17:11:33`），另一个 agent 留在仓库里的 `.audit-notes-mechanisms.md` 也一并消失。我的 commit 完好。重做后立即提交规避。**这正是 `acting_on` 锁该防的场景**——两个 agent 在同一工作区并发修改，而锁此前从未生效。教训：**未提交的工作在多 agent 环境下不算完成，改完立刻提交。**
-- [ ] **真机验证（硬约束 10）**：`WP-04` 的注入修复与 `WP-02`/`WP-07` 改变的装配/接线形态，以及本轮的锁接线，目前只验证到"本地临时目录 + 本地模拟"。合并进任何项目前，必须在一个测试仓库上跑一次真实事件，确认 workflow 能执行 `event-router` 并把 work item 交付出来。
+- [x] **本轮已完成（2026-10-15 第三批）**：WP-09 第二半 + WP-04 第二半。8 个 workflow 现在**全部**调用 `budget-check.mjs` 并各传自己的 pattern id；`merge-gate` 的 fail-open（`|| true` 吞掉退出码 → jq 得 null → 无检查继续）已修，8/8 都有 `jq -e '.mode'` 守卫。`LOOP_BOT_TOKEN` 落地到全部 3 个调用 `gh` 的 workflow。断言从单文件改成规则、双向。断言 945 → 954，3 次变异全部确认落地后变红。提交 `7fc0fe0`。
+- [x] **已完成（2026-10-15 第二批）**：`acting_on` 锁键接线。**只加 `--target` 是半个修复**——`grep` 确认没有任何 workflow 读 `.conflict`，锁结果被直接丢弃，传了等于没传。按"传锁键 + 消费锁结果"两个条件一起修：4 个落盘 work item 的循环（`pr-review` / `ci-sweeper` / `issue-intake` / `post-merge`）传 `--target` 并在 `lock-held` 时跳过落盘；`release-draft` **有意不传**（`LOOP.md` 列为"只读为主，可安全并发"）。断言 931 → 945。提交 `f36301b`。
+- [x] **已完成（2026-10-15 第一批）**：WP-09 的 A 类缺口第一半。补 3 个循环的预算行（含 `signal-gatekeeper`）、修 `parseBudgetCaps` 的静默回退与过宽别名、新增 `resolveCap` 暴露解析路径。断言 923 → 931。提交 `94a8f3d`。
+- [ ] **预算百分比目前对 5 个 workflow 恒为 0（已知限制，不是 bug）**：`budget-check` 从 `loop-run-log.md` 累加当日花费，而只有 `daily-triage` / `lesson-harvest` 在写它。新接线的 5 个（`ci-sweeper` / `issue-intake` / `post-merge` / `pr-review` / `release-draft`）不写 run-log，所以 `used` 恒为 0。**本次接线立即生效的是 kill switch**；预算百分比要等 agent 平台把真实花费写进 run-log 才有意义。让 workflow 自己写 run-log 有风险（runner 文件系统是临时的，写入不会持久化到仓库——见 `examples/github-actions/README.md` 的说明），需要先决定持久化方式（评论 / dispatch / 直接 commit）。
+- [ ] **`loop-constraints.md` 与 `LOOP.md` 的文件数阈值自相矛盾**：前者写"超过 5 个文件 → 停止并升级"，后者写"超过 10 个文件 → 人工审批"。本仓库的实际改动面经常超过 5（本轮 10 个文件，其中 3 个是被测试强制的文档数字同步）。需要先统一阈值，或明确"同步类改动不计入"。
+- [ ] **真机验证（硬约束 10）**：`WP-04` 的注入修复、`WP-02`/`WP-07` 的装配形态、本轮的锁接线与预算接线，全部只验证到"本地临时目录 + 本地模拟 + YAML 解析"。**8 个 workflow 从未在任何真实 GitHub 仓库上跑过。** 合并进任何项目前，必须在一个测试仓库上跑一次真实事件，确认 workflow 能执行 `event-router`、把 work item 交付出来、且 `budget-check` 在 runner 上真的读得到文件。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整（本仓库是技能源仓库，见 Post-Run Critique）。
 - [ ] 把三份审查里**未纳入本轮范围**的项排进下一轮（见下方「Watch List」）。
 
@@ -79,6 +78,55 @@ Last run: 2026-10-15 (acting_on 锁键接线 — 多循环协调唯一机制首�
 —
 
 ## Post-Run Critique (from last run)
+
+### 2026-10-15 · workflow 预算接线 + LOOP_BOT_TOKEN（WP-09/WP-04 第二半）
+
+- **本轮做了什么**：8 个 workflow 全部接上 `budget-check.mjs`（此前只有 1 个），
+  修掉 `merge-gate` 自身的 fail-open，`LOOP_BOT_TOKEN` 落地到全部 3 个调用 `gh`
+  的 workflow。断言 945 → 954。提交 `7fc0fe0`。
+
+- **两个"有保护"的 workflow 其实保护是坏的**。`daily-triage` / `lesson-harvest`
+  的内联预算有两个真问题，合起来让它们等于没有预算：
+  1. `Math.max(...caps)` 取全表最大上限（自身 83% 被算成 50%）；
+  2. 数 run-log 的正则是 `/\{.*\}/g`，**不带 `s`/`m` 标志**，而 run-log 的记录是
+     跨多行的 JSON——一条都匹配不上，`used` 恒为 0。
+  这两个恰好是**唯二在写 `loop-run-log.md`** 的 workflow，而 run-log 是
+  `budget-check` 的唯一数据源。**真正活跃的循环贡献的花费，在"今天花了多少"里是隐形的。**
+  内联版还只查 `STATE.md` 的 kill switch，`budget-check` 同时查两处。
+
+- **`merge-gate` 的接线本身是 fail-open**，且这是本轮最有代表性的一处：
+  `budget-check ... || true` 吞掉退出码 → 脚本崩溃时 `budget.json` 为空 →
+  `jq` 得到 `"null"` → `"null" != "exit"` → **闸门在没有预算检查的情况下继续跑，
+  而输出看起来完全正常**。一个失效的闸门和一个不存在的闸门在退出码上不可区分
+  （硬约束 11 的原文）。修法是显式守卫：`jq -e '.mode'` 读不到就 `exit 1`。
+
+- **`.some()` 型断言的又一次失效**。`LOOP_BOT_TOKEN` 的原断言是
+  "至少一个 workflow 引用它"——1/8 也算通过。它声称守住的是"用独立最小权限账号
+  限制注入影响面"，而 7/8 是裸 `GITHUB_TOKEN` 时它依然全绿。
+  **断言的范围必须等于它声称守护的范围**，这与上一轮 `/\.conflict/` 被注释骗过、
+  按文件搜 `if:` 被同文件其它步骤骗过是同一个病。
+
+- **修复面比报告的窄，这是好事**。报告说"8 个 workflow 的 token 问题"，
+  实测只有 3 个真的调用 `gh`（`daily-triage` 读 / `merge-gate` 读+写 /
+  `release-draft` 读），另 5 个的权限只来自 `permissions:` 声明。
+  断言因此是双向的：**调 `gh` 的必须用 `LOOP_BOT_TOKEN`，不调 `gh` 的不得引用它**。
+  反向那半守住了"规则只适用于该适用的地方"。
+
+- **一个必须说清楚的限制，不能让它看起来比实际更好**：新接线的 5 个 workflow
+  不写 `loop-run-log.md`，所以它们的 `used` 恒为 0——**预算百分比在结构上还算不出来**。
+  本次接线立即生效的部分是 **kill switch**。让 workflow 自己写 run-log 有风险：
+  runner 文件系统是临时的，写入不会持久化到仓库（`examples/github-actions/README.md`
+  已说明），需要先决定持久化方式。这一点写进了 workflow 注释、`STATE.md` 与提交信息。
+
+- **变异回退 3 次，全部确认落地后读结果**，其中一次又遇到"变异未落地导致的假绿灯"：
+  第一次删 fail-closed 守卫时，我的 Python 断言在改文件**之前**就拦下了
+  （块是 4 行不是 3 行），测试全绿——差点据此宣布"抓住了"。仓库已记录过这条教训
+  （2026-10-14 第三批、2026-10-15 第二批各一次）。**流程固定为：改完先 grep 那行代码，
+  再跑测试。**
+
+- **本轮新增的 4 条规则断言都是"防漏改"型**（每个 workflow 都要接线 / 传的 pattern
+  要能解析到上限 / fail-closed / 调 gh 必须用 bot token）。它们的价值不在当前状态，
+  而在**第九个 workflow 加进来时**：漏接线会立刻变红，而不是像这次一样要靠人工审计发现。
 
 ### 2026-10-15 · acting_on 锁键接线（多循环协调唯一机制首次生效）
 
