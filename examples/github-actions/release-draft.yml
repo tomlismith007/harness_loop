@@ -31,6 +31,11 @@ jobs:
 
       - name: Route
         run: |
+          # 本 workflow 有意**不传 --target**（不参与 acting_on 锁）。
+          # LOOP.md 的优先级表把 Release Drafter 列为"只读为主，可安全并发"，
+          # 且它不写队列、不改代码——锁在这里只会让它被别人挡住，
+          # 换不来任何保护。这是设计选择，不是漏改。
+          # 参与锁的是那 4 个会落盘 work item 的循环，test.mjs 第 14 节按这条规则断言。
           node scripts/event-router.mjs --event push:tags > route.json
           cat route.json
 

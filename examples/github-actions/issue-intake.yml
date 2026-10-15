@@ -43,12 +43,27 @@ jobs:
           # action 与 number 都是枚举/数字，仍消毒一次：item 会进文件名与 $GITHUB_OUTPUT。
           ACTION="$(printf '%s' "$RAW_ACTION" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
           ITEM="issue-$(printf '%s' "$RAW_NUMBER" | tr -c '0-9' '-' | cut -c1-20)"
+          # 锁键 = acting_on = 正在操作的目标资源。对 issue 循环来说就是 issue 号。
+          # 省略 --target 时 event-router 不做冲突检测，"同一分支每小时最多一个循环修改"
+          # 静默失效（实测：传 --target 得到 conflict=lock-held，不传则字段不存在）。
+          TARGET="$(printf '%s' "$RAW_NUMBER" | tr -c '0-9' '-' | cut -c1-20)"
           echo "event=issues.${ACTION}" >> "$GITHUB_OUTPUT"
           echo "item=${ITEM}" >> "$GITHUB_OUTPUT"
-          node scripts/event-router.mjs --event "issues.${ACTION}" --item "$ITEM" > route.json
+          node scripts/event-router.mjs \
+            --event "issues.${ACTION}" \
+            --item "$ITEM" \
+            --target "issue-${TARGET}" > route.json
           cat route.json
+          # 锁被别的循环持有 → 本轮 no-op，不落盘 work item。
+          CONFLICT="$(jq -r '.conflict // "none"' route.json)"
+          echo "conflict=$CONFLICT" >> "$GITHUB_OUTPUT"
+          if [ "$CONFLICT" = "lock-held" ]; then
+            echo "::warning::lock-held — skipping this run (outcome=no-op)"
+          fi
 
+      # 锁被别的循环持有 → 不落盘 work item，本轮是 no-op。
       - name: Record work item
+        if: steps.route.outputs.conflict != 'lock-held'
         env:
           ITEM: ${{ steps.route.outputs.item }}
           EVENT: ${{ steps.route.outputs.event }}
@@ -73,6 +88,7 @@ jobs:
           cat ".loop/queue/${ITEM}.json"
 
       - name: Note L1 report-only
+        if: steps.route.outputs.conflict != 'lock-held'
         run: |
           echo "L1: propose labels only. Do not apply labels, comment, or close."
           echo "See skills/issue-triage/SKILL.md"
@@ -80,7 +96,7 @@ jobs:
       # runner 文件系统是临时的：job 结束文件就消失，轮询 .loop/queue 的 agent
       # 平台永远看不到任何东西。必须显式交付出去，事件脊才不会在 runner 边界终止。
       - name: Upload work item
-        if: always()
+        if: always() && steps.route.outputs.conflict != 'lock-held'
         uses: actions/upload-artifact@v4
         with:
           name: loop-queue-issue-${{ github.event.issue.number }}

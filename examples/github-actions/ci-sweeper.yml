@@ -69,15 +69,29 @@ jobs:
           echo "sha=${RAW_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Route
+        id: route
         env:
           ROUTE_EVENT: ${{ steps.ev.outputs.event }}
           ROUTE_ITEM: ${{ steps.item.outputs.item }}
+          # 锁键 = acting_on = 正在操作的目标资源。对 CI 循环来说就是分支名。
+          # 用的是已消毒的 BRANCH（不是原始 RAW_BRANCH）——锁键会与 STATE.md 的
+          # acting_on 列做 === 比较，两边必须逐字一致。
+          ROUTE_TARGET: ${{ steps.item.outputs.branch }}
         run: |
+          set -euo pipefail
           node scripts/event-router.mjs \
             --event "$ROUTE_EVENT" \
             --item "$ROUTE_ITEM" \
+            --target "$ROUTE_TARGET" \
             --state STATE.md > route.json
           cat route.json
+          # "CI Sweeper 已在修某分支时 PR Review 不重复修"正是这条锁唯一该起作用的场景。
+          CONFLICT="$(jq -r '.conflict // "none"' route.json)"
+          echo "conflict=$CONFLICT" >> "$GITHUB_OUTPUT"
+          echo "held_by=$(jq -r '.held_by // "—"' route.json)" >> "$GITHUB_OUTPUT"
+          if [ "$CONFLICT" = "lock-held" ]; then
+            echo "::warning::lock-held — skipping this run (outcome=no-op)"
+          fi
 
       - name: Classify guidance
         run: |
@@ -93,7 +107,9 @@ jobs:
             exit code 2 → STOP, escalate to human
           EOF
 
+      # 锁被别的循环持有 → 不落盘 work item，本轮是 no-op。
       - name: Record work item
+        if: steps.route.outputs.conflict != 'lock-held'
         env:
           ITEM: ${{ steps.item.outputs.item }}
           EVENT: ${{ steps.ev.outputs.event }}
@@ -115,14 +131,16 @@ jobs:
           EOF
 
       - name: Escalate on environment failure signal
+        if: steps.route.outputs.conflict != 'lock-held'
         run: |
           # 环境类失败的典型信号——命中即标记人工处理
           echo "If the failure mentions: runner, registry, secret, quota, network, timeout-of-infra"
           echo "→ label the work item needs-human and do not attempt a code fix."
 
       # runner 文件系统是临时的：不上传的话 job 结束即消失，轮询 .loop/queue/ 永远看不到。
+      # lock-held 时跳过上传——队列是空的，上传一个空目录只会让人以为跑过。
       - name: Upload work item
-        if: always()
+        if: always() && steps.route.outputs.conflict != 'lock-held'
         uses: actions/upload-artifact@v4
         with:
           name: loop-queue-ci-${{ steps.item.outputs.item }}

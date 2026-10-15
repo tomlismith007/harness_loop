@@ -30,13 +30,25 @@ jobs:
           node-version: '20'
 
       - name: Route
+        id: route
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          set -euo pipefail
+          # 锁键 = acting_on = 正在操作的目标资源。对 post-merge 来说是被合并的那个 PR。
+          # 省略 --target 时 event-router 不做冲突检测，"同一分支每小时最多一个循环修改"
+          # 静默失效（实测：传 --target 得到 conflict=lock-held，不传则字段不存在）。
           node scripts/event-router.mjs \
             --event pull_request.closed:merged \
-            --item "pr-${PR_NUMBER}" > route.json
+            --item "pr-${PR_NUMBER}" \
+            --target "pr-${PR_NUMBER}" > route.json
           cat route.json
+          # 锁被别的循环持有 → 本轮 no-op，不落盘 work item。
+          CONFLICT="$(jq -r '.conflict // "none"' route.json)"
+          echo "conflict=$CONFLICT" >> "$GITHUB_OUTPUT"
+          if [ "$CONFLICT" = "lock-held" ]; then
+            echo "::warning::lock-held — skipping this run (outcome=no-op)"
+          fi
 
       - name: Scan merged diff for follow-up work
         id: scan
@@ -70,7 +82,9 @@ jobs:
           Run off-peak. Limit to <= 2 automatic PRs per day.
           EOF
 
+      # 锁被别的循环持有 → 不落盘 work item，本轮是 no-op。
       - name: Record work item
+        if: steps.route.outputs.conflict != 'lock-held'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
@@ -94,7 +108,7 @@ jobs:
 
       # runner 文件系统是临时的：不上传的话 job 结束即消失，轮询 .loop/queue/ 永远看不到。
       - name: Upload work item
-        if: always()
+        if: always() && steps.route.outputs.conflict != 'lock-held'
         uses: actions/upload-artifact@v4
         with:
           name: loop-queue-post-merge-pr-${{ github.event.pull_request.number }}

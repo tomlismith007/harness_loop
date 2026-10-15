@@ -952,7 +952,13 @@ section('13. 文档完整性');
         // REVIEW-*.md 是历史记录，记录的是"当时文档长什么样"，不参与漂移检查
         if (/^REVIEW-\d{4}-\d{2}-\d{2}/.test(e.name)) continue;
         const text = fs.readFileSync(f, 'utf8');
-        for (const m of text.matchAll(/node\s+scripts\/([a-z-]+\.mjs)([\s\S]{0,300}?)(?=\n\s*\n|```|$)/g)) {
+        // 命令可以反斜杠续行，所以捕获必须能跨行；但**只在反斜杠续行时**跨行。
+        // 曾经用 [\s\S]{0,300}? 一直捕获到下一个空行或围栏，于是文档里两条相邻的
+        // 命令被算成同一条：`node scripts/gate-check.mjs ...` 下一行的
+        // `--pattern` 被归给 gate-check，而它其实属于那行的 budget-check。
+        // 相邻命令是文档的常态（枚举探针时尤其常见），这个假阳性必然出现——
+        // 它报的是"gate-check 不认识 --pattern"，而真正的问题不存在。
+        for (const m of text.matchAll(/node\s+scripts\/([a-z-]+\.mjs)((?:[^\n]*\\\n)*[^\n]*)/g)) {
           const script = m[1];
           const known = knownByScript[script];
           if (!known) continue;
@@ -1070,6 +1076,115 @@ section('14. GitHub Actions 接线');
       fs.readFileSync(path.join(dir, 'README.md'), 'utf8'));
     ok('LOOP_BOT_TOKEN 文档与代码一致（否则文档说"必须设置"而没人读它）',
       anyToken === docsMention, `workflow 引用=${anyToken} / 文档声明=${docsMention}`);
+  }
+
+  // ---- 规则断言：落盘 work item 的 workflow 必须参与 acting_on 锁 ----
+  //
+  // 这条断言防的是一整类漏改，而不是某个文件。此前的形态是断言
+  // "harness-loop 的 SKILL.md 里写了 --target"——那只证明文档写了，
+  // 不证明任何生产路径传了它。实测：8 个 workflow 全都没传 --target，
+  // 而"同一分支每小时最多一个循环修改"是 LOOP.md 的多循环协调**唯一机制**。
+  //
+  // 更根本的一层：只加 --target 也不够。锁结果要有人读才有意义——
+  // 修之前没有任何 workflow 读 .conflict，加了 --target 也只是把结果丢掉。
+  // 所以这条断言是双向的：**传了锁键** 且 **消费了锁结果**。
+  {
+    const ymls = expected.filter((x) => x.endsWith('.yml'));
+    // 剥掉整行注释再匹配。注释里提到某个路径不等于真的写了它——
+    // 这条断言第一版就被自己的注释骗过：release-draft.yml 的说明文字里
+    // 写了 ".loop/queue" 来解释它为什么不参与锁，于是它被算成"落盘 workflow"。
+    // merge-gate 的断言早就用同样的手法剥注释（见上文 `mgCode`），这里是同一课。
+    const textOf = (f) => fs.readFileSync(path.join(dir, f), 'utf8')
+      .split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+    // 判据是"是否落盘 work item"，不是"是否调 event-router"。
+    // release-draft 会调 event-router 但不写队列，LOOP.md 明确把它列为
+    // "只读为主，可安全并发"——它不该被锁挡住。merge-gate / daily-triage /
+    // lesson-harvest 根本不路由事件。
+    const queueWriters = ymls.filter((f) => /\.loop\/queue/.test(textOf(f)));
+    eq('落盘 work item 的 workflow 恰好 4 个', queueWriters.length, 4);
+    ok('落盘名单符合预期',
+      ['ci-sweeper.yml', 'issue-intake.yml', 'post-merge.yml', 'pr-review.yml']
+        .every((f) => queueWriters.includes(f)),
+      queueWriters.join(', '));
+
+    const noTarget = queueWriters.filter((f) => !/--target/.test(textOf(f)));
+    ok('每个落盘 work item 的 workflow 都传 --target（否则锁静默失效）',
+      noTarget.length === 0, noTarget.join('; '));
+
+    // 必须**真的从 route.json 读** conflict，而不是文本里出现 ".conflict" 就算数。
+    // 这条断言的第一版是 /\.conflict/ ——注释里写一句 ".conflict" 就能骗过它，
+    // 变异回退当场证明了这点：把 jq 调用换成 CONFLICT="none" 后测试仍然全绿。
+    // 断言必须锚在真实调用形态上。
+    const noConflict = queueWriters.filter((f) => !/jq\s+-r\s+'\.conflict/.test(textOf(f)));
+    ok('每个落盘 workflow 都真的从 route.json 读 conflict',
+      noConflict.length === 0, noConflict.join('; '));
+
+    // lock-held 必须真的改变行为：光读 .conflict 而不据此跳过，
+    // 等于"读了个寂寞"——work item 照样落盘。
+    //
+    // 断言必须锚在**写队列那个步骤**上，不能只搜整个文件里有没有
+    // "conflict != 'lock-held'"。变异回退抓出过两版无牙齿的写法：
+    //   1. /\.conflict/ ——注释里写一句就骗过；
+    //   2. 按文件搜 `if:.*conflict != 'lock-held'` ——同一个文件里
+    //      `Upload work item` 与 `Flag fix phase` 的 if: 也含这个条件，
+    //      于是删掉 `Record work item` 的守卫仍然全绿。
+    // 只有"定位到写队列的那一步、再检查它自己的 if:"才是真的在测行为。
+    const unwatched = queueWriters.filter((f) => {
+      // 按步骤切分：每段从 `- name:` 或 `- uses:` 开始
+      const steps = textOf(f).split(/\n(?=\s*- (?:name|uses):)/);
+      const writer = steps.find((s) => /mkdir -p \.loop\/queue/.test(s));
+      if (!writer) return true;                       // 找不到写队列的步骤 → 失败
+      return !/^\s*if:.*conflict\s*!=\s*'lock-held'/m.test(writer);
+    });
+    ok('lock-held 时写队列的那一步被跳过（锁必须改变行为）',
+      unwatched.length === 0, unwatched.join('; '));
+
+    // 不落盘的 workflow 不得传 --target：它们不该参与锁。
+    // 反向守住"规则只适用于该适用的地方"。
+    const nonWriters = ymls.filter((f) => !queueWriters.includes(f) && /event-router\.mjs/.test(textOf(f)));
+    const wronglyLocked = nonWriters.filter((f) => /--target/.test(textOf(f)));
+    ok('不落盘的 workflow 不参与锁（release-draft 可安全并发）',
+      wronglyLocked.length === 0, wronglyLocked.join('; '));
+
+    // 锁键命名空间必须与 STATE.md 的 acting_on 一致：分支名或 PR 号。
+    // 曾经用 item（pr-45 / ci-a1b2-main）与 acting_on 比 ===，两个命名空间
+    // 永不相等，lock-held 触发不了。这里守住"锁键取自目标资源"这一形态。
+    ok('pr-review 的锁键是 PR 号', /ROUTE_TARGET:\s*pr-\$\{\{\s*github\.event\.pull_request\.number/.test(textOf('pr-review.yml')));
+    ok('post-merge 的锁键是 PR 号', /--target\s+"pr-\$\{PR_NUMBER\}"/.test(textOf('post-merge.yml')));
+    ok('ci-sweeper 的锁键是分支名', /ROUTE_TARGET:\s*\$\{\{\s*steps\.item\.outputs\.branch/.test(textOf('ci-sweeper.yml')));
+  }
+
+  // ---- 规则断言：LOOP.md 声明的锁约定必须有代码消费 ----
+  // LOOP.md 写着"派发前检查 acting_on，相同则跳过"——这是声明。
+  // 声明要成立，必须有人真的读 STATE.md 的 Active 表并产出 lock-held。
+  {
+    const loopMd = fs.readFileSync(path.join(PACK_ROOT, 'LOOP.md'), 'utf8');
+    ok('LOOP.md 声明了 acting_on 锁', /acting_on/.test(loopMd));
+    ok('LOOP.md 声明了跳过动作', /跳过/.test(loopMd));
+
+    // 行为断言：有锁 + 同目标 → lock-held（真跑 CLI，不走库函数）
+    const tmpLock = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-lock-wf-'));
+    fs.writeFileSync(path.join(tmpLock, 'STATE.md'), [
+      '# Loop State', '', '## Active', '',
+      '| Work item | 阶段 | 技能 | acting_on | 尝试 | 状态 |',
+      '|---|---|---|---|---|---|',
+      '| pr-42 | fix | minimal-fix | pr-42 | 1/3 | acting |', '',
+    ].join('\n'));
+    const routeWith = (extra) => (() => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'event-router.mjs'),
+            '--event', 'pull_request.opened', '--item', 'pr-99',
+            '--state', path.join(tmpLock, 'STATE.md'), ...extra], { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: e.stdout || '' }; }
+    })();
+    const held = routeWith(['--target', 'pr-42']);
+    ok('传 --target 时产出 lock-held', /"conflict":\s*"lock-held"/.test(held.out), held.out.slice(0, 160));
+    ok('lock-held 时给出持有者', /"held_by":\s*"pr-42"/.test(held.out), held.out.slice(0, 160));
+    const free = routeWith(['--target', 'pr-99']);
+    ok('目标不同时不报冲突', !/"conflict"/.test(free.out), free.out.slice(0, 160));
+    fs.rmSync(tmpLock, { recursive: true, force: true });
   }
 }
 
