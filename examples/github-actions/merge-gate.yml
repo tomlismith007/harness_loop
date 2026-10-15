@@ -76,6 +76,14 @@ jobs:
           # 500k，本循环花掉自身 83% 时被算成 50%，判定"正常"。
           node scripts/budget-check.mjs --pattern merge-gate --json > budget.json || true
           cat budget.json
+          # fail-closed：`|| true` 吞掉退出码之后，脚本崩溃会让 budget.json 为空，
+          # jq 得到 "null"，而 "null" != "exit" —— 闸门会在**没有预算检查**的情况下
+          # 继续跑，输出看起来完全正常。一个失效的闸门和一个不存在的闸门
+          # 在退出码上不可区分（硬约束 11）。所以这里显式拒绝。
+          if ! jq -e '.mode' budget.json > /dev/null 2>&1; then
+            echo "::error::budget-check produced no usable result — refusing to run unguarded"
+            exit 1
+          fi
           PCT=$(jq -r '.budget_pct' budget.json)
           MODE=$(jq -r '.mode' budget.json)
           REASON=$(jq -r '.reason' budget.json)

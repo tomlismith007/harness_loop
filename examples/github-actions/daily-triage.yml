@@ -27,53 +27,44 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Kill switch check
-        id: pause
-        run: |
-          # 只认独占一行的标记；STATE.md 里任何对 loop-pause-all 的散文提及都不算生效，
-          # 否则一次说明性文字就把循环永久停死。
-          if grep -qE '^\s*loop-pause-all\s*$' STATE.md 2>/dev/null; then
-            echo "paused=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::loop-pause-all is active — skipping today's triage (STATE.md has an active marker)"
-          else
-            echo "paused=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Budget check
-        if: steps.pause.outputs.paused == 'false'
+      - name: Budget & kill switch
         id: budget
         run: |
-          PCT=$(node -e '
-            const fs = require("fs");
-            let pct = 0;
-            try {
-              const log = fs.readFileSync("loop-run-log.md", "utf8");
-              const today = new Date().toISOString().slice(0, 10);
-              const entries = [...log.matchAll(/\{.*\}/g)]
-                .map((m) => { try { return JSON.parse(m[0]); } catch { return null; } })
-                .filter(Boolean)
-                .filter((e) => String(e.run_id || "").startsWith(today));
-              const used = entries.reduce((s, e) => s + (Number(e.tokens_estimate) || 0), 0);
-              const budgetText = fs.readFileSync("loop-budget.md", "utf8");
-              const caps = [...budgetText.matchAll(/\|\s*(\d+)k\s*\|/g)].map((m) => Number(m[1]) * 1000);
-              const cap = caps.length ? Math.max(...caps) : 500000;
-              pct = Math.min(999, Math.round((used / cap) * 100));
-            } catch {}
-            process.stdout.write(String(pct));
-          ')
-          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
-          if [ "$PCT" -ge 100 ]; then
-            echo "::error::Budget at ${PCT}% — exiting"
+          set -euo pipefail
+          # 预算与 kill switch 的唯一入口（scripts/budget-check.mjs）。
+          # 此前这里是两段内联逻辑，两个问题：
+          #   1. 预算用 Math.max(...caps) 取全表最大上限，于是本循环花掉自身
+          #      83% 时被算成 50%，判定"正常"。
+          #   2. 数 run-log 的正则是 /\{.*\}/g——不带 s/m 标志，而 run-log 的记录
+          #      是跨多行的 JSON，于是**一条都匹配不上**，预算恒为 0%。
+          # 另外内联版只查 STATE.md 的 kill switch；budget-check 同时查
+          # STATE.md 与 loop-constraints.md 两处。
+          node scripts/budget-check.mjs --pattern daily-triage --json > budget.json || true
+          cat budget.json
+          # fail-closed：脚本崩溃时 budget.json 是空的，jq 会得到 "null"，
+          # 而 "null" != "exit" —— 于是循环在没有预算检查的情况下继续跑。
+          # 一个失效的闸门和一个不存在的闸门在退出码上不可区分，所以这里必须显式拒绝。
+          if ! jq -e '.mode' budget.json > /dev/null 2>&1; then
+            echo "::error::budget-check produced no usable result — refusing to run unguarded"
             exit 1
           fi
-          if [ "$PCT" -ge 80 ]; then
-            echo "::warning::Budget at ${PCT}% — report-only mode"
+          PCT=$(jq -r '.budget_pct' budget.json)
+          MODE=$(jq -r '.mode' budget.json)
+          REASON=$(jq -r '.reason' budget.json)
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Today's spend: ${PCT}% of this loop's cap — ${REASON}"
+          if [ "$MODE" = "exit" ]; then
+            echo "::error::loop exited: ${REASON}"
+            exit 1
+          fi
+          if [ "$MODE" = "report-only" ]; then
+            echo "::warning::budget at ${PCT}% — report-only mode"
           fi
 
       - name: Gather signals
-        if: steps.pause.outputs.paused == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.LOOP_BOT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p .loop/daily
           gh issue list --state open --limit 50 --json number,title,labels,createdAt > .loop/daily/issues.json || echo '[]' > .loop/daily/issues.json
@@ -82,11 +73,10 @@ jobs:
           echo "Open PRs:    $(jq 'length' .loop/daily/prs.json)"
 
       - name: Emit triage skeleton
-        if: steps.pause.outputs.paused == 'false'
         run: |
           cat > .loop/daily/TRIAGE.md <<EOF
           Last run: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-          Mode: $([ "${{ steps.budget.outputs.pct }}" -ge 80 ] && echo "report-only" || echo "normal")
+          Mode: ${{ steps.budget.outputs.mode }}
 
           ## High-Priority Items (act on these)
           -
@@ -103,7 +93,6 @@ jobs:
           cat .loop/daily/TRIAGE.md
 
       - name: Append run log
-        if: steps.pause.outputs.paused == 'false'
         run: |
           cat >> loop-run-log.md <<EOF
           {"run_id":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","pattern":"daily-triage","event":"schedule","item":"daily","level":"L1","duration_s":0,"items_found":0,"actions_taken":0,"escalations":0,"tokens_estimate":5000,"outcome":"report-only"}

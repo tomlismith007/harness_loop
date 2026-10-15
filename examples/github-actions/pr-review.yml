@@ -31,6 +31,38 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Budget & kill switch
+        id: budget
+        run: |
+          set -euo pipefail
+          # 预算与 kill switch 的唯一入口（scripts/budget-check.mjs）。
+          # 每个循环有自己的上限（loop-budget.md），按 pattern 取——曾经用
+          # Math.max(...caps) 取全表最大值，于是所有循环共用 CI Sweeper 的 500k，
+          # 本循环花掉自身 83% 时被算成 50%，判定"正常"。
+          #
+          # 注意本 workflow 不写 loop-run-log.md，而那是 budget-check 的唯一数据源，
+          # 所以 used 目前恒为 0——预算百分比要等 agent 平台把真实花费写进 run-log
+          # 才有意义。这里接线的主要收益是 **kill switch**（那部分是立即生效的）。
+          node scripts/budget-check.mjs --pattern pr-review-triage --json > budget.json || true
+          cat budget.json
+          # fail-closed：脚本崩溃时 budget.json 是空的，jq 得到 "null"，
+          # 而 "null" != "exit" —— 循环会在没有预算检查的情况下继续跑。
+          # 一个失效的闸门和一个不存在的闸门在退出码上不可区分，所以显式拒绝。
+          if ! jq -e '.mode' budget.json > /dev/null 2>&1; then
+            echo "::error::budget-check produced no usable result — refusing to run unguarded"
+            exit 1
+          fi
+          MODE=$(jq -r '.mode' budget.json)
+          REASON=$(jq -r '.reason' budget.json)
+          PCT=$(jq -r '.budget_pct' budget.json)
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Today's spend: ${PCT}% of this loop's cap — ${REASON}"
+          if [ "$MODE" = "exit" ]; then
+            echo "::error::loop exited: ${REASON}"
+            exit 1
+          fi
+
       - name: Determine event
         id: ev
         env:

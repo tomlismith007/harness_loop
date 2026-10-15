@@ -1039,6 +1039,14 @@ section('14. GitHub Actions 接线');
     }
     ok('merge-gate 用 @ 前缀传清单（否则拒绝列表闸门失效）', /--diff-files\s+@/.test(mg), '未找到 --diff-files @');
     ok('merge-gate 调用 budget-check 而不是内联算预算', /budget-check\.mjs/.test(mg));
+    // 调用必须 fail-closed。`budget-check ... || true` 吞掉一切：脚本崩溃时
+    // budget.json 是空的，jq 得到 "null"，而 "null" != "exit" ——
+    // 循环会在**没有预算检查**的情况下继续跑，且输出看起来完全正常。
+    // 一个失效的闸门和一个不存在的闸门在退出码上不可区分（硬约束 11）。
+    ok('merge-gate 的预算检查是 fail-closed（不得 || true 后直接继续）',
+      !/budget-check\.mjs[^\n]*\|\|\s*true\s*$[\s\S]{0,400}?if \[ "\$MODE" = "exit" \]/.test(mg)
+      || /jq -e '\.mode'/.test(mg),
+      'budget-check 失败时没有拒绝运行的守卫');
     // 注释里提到旧逻辑不算问题——要抓的是活的代码行。
     const mgCode = mg.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     ok('merge-gate 不再有 Math.max 取全表上限的旧逻辑', !/Math\.max\(\.\.\.caps\)/.test(mgCode));
@@ -1069,13 +1077,96 @@ section('14. GitHub Actions 接线');
   }
 
   // ---- LOOP_BOT_TOKEN：文档声明与代码引用必须一致 ----
+  //
+  // 原断言是 `.some()`——1/8 个 workflow 引用它就算通过。那证明不了它
+  // 声称守住的东西："用独立最小权限账号限制注入影响面"。修复前只有
+  // merge-gate 用，另 7 个裸 GITHUB_TOKEN，断言依然全绿。
+  //
+  // 规则按"是否调用 gh"划：不用 gh 的 workflow 不需要这个 token
+  // （它们的权限只来自 permissions: 声明），调 gh 的必须用。
   {
-    const anyToken = expected.filter((x) => x.endsWith('.yml'))
-      .some((f) => /LOOP_BOT_TOKEN/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+    const ymls = expected.filter((x) => x.endsWith('.yml'));
+    const textOf = (f) => fs.readFileSync(path.join(dir, f), 'utf8')
+      .split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+    const ghUsers = ymls.filter((f) => /(^|[^a-zA-Z_/-])gh\s+[a-z]/.test(textOf(f)));
+    ok('识别出调用 gh 的 workflow', ghUsers.length === 3, ghUsers.join(', '));
+
+    const bare = ghUsers.filter((f) => {
+      const t = textOf(f);
+      // 有 GH_TOKEN 的地方必须都是 LOOP_BOT_TOKEN || GITHUB_TOKEN
+      const all = t.match(/GH_TOKEN:\s*\$\{\{[^}]*\}\}/g) || [];
+      if (all.length === 0) return true;
+      return all.some((line) => !/LOOP_BOT_TOKEN/.test(line));
+    });
+    ok('每个调用 gh 的 workflow 都用 LOOP_BOT_TOKEN（独立机器人账号）',
+      bare.length === 0, bare.join('; '));
+
+    // 不调 gh 的 workflow 不应引用该 token——它们的权限只来自 permissions:。
+    // 反向守住"规则只适用于该适用的地方"。
+    const nonGhWithToken = ymls
+      .filter((f) => !ghUsers.includes(f) && /LOOP_BOT_TOKEN/.test(textOf(f)));
+    ok('不调 gh 的 workflow 不引用 LOOP_BOT_TOKEN',
+      nonGhWithToken.length === 0, nonGhWithToken.join('; '));
+
     const docsMention = /LOOP_BOT_TOKEN/.test(
       fs.readFileSync(path.join(dir, 'README.md'), 'utf8'));
-    ok('LOOP_BOT_TOKEN 文档与代码一致（否则文档说"必须设置"而没人读它）',
-      anyToken === docsMention, `workflow 引用=${anyToken} / 文档声明=${docsMention}`);
+    ok('LOOP_BOT_TOKEN 文档声明与代码引用一致（否则文档说"必须设置"而没人读它）',
+      docsMention && ghUsers.length > 0, `文档声明=${docsMention}`);
+  }
+
+  // ---- 规则断言：每个 workflow 都必须有预算与 kill switch 入口 ----
+  //
+  // 原断言写在单个文件上（`/budget-check\.mjs/.test(merge-gate.yml)`），
+  // 于是"另外 7 个没接线"永远测不出来。这是 WP-09 的实际失效形态。
+  //
+  // 为什么每个 workflow 都要：预算是这套框架唯一的经济性来源，而
+  // `loop-budget.md` 的阈值表对"哪个循环"没有意义——每个循环有自己的上限。
+  // 内联算预算必然要挑一个上限，而挑全表最大值会让 per-loop 上限变成装饰品
+  // （实测：PR Review Triage 花掉自身 83% 时被算成 50%）。
+  {
+    const ymls = expected.filter((x) => x.endsWith('.yml'));
+    const textOf = (f) => fs.readFileSync(path.join(dir, f), 'utf8')
+      .split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+    const noBudget = ymls.filter((f) => !/budget-check\.mjs/.test(textOf(f)));
+    ok('每个 workflow 都调用 budget-check（预算与 kill switch 的唯一入口）',
+      noBudget.length === 0, noBudget.join('; '));
+
+    // 不得再有内联的取全表最大值逻辑——那是 per-loop 上限失效的根源。
+    const inlineMax = ymls.filter((f) => /Math\.max\(\.\.\.caps\)/.test(textOf(f)));
+    ok('没有 workflow 再用 Math.max(...caps) 取全表上限',
+      inlineMax.length === 0, inlineMax.join('; '));
+
+    // 每个 workflow 必须传自己的 pattern id，否则会解析不到上限。
+    // 从 budget-check 的调用行里抽出 --pattern 值，逐一验证能解析到 cap。
+    const caps = parseBudgetCaps(fs.readFileSync(path.join(PACK_ROOT, 'loop-budget.md'), 'utf8'));
+    const badPattern = [];
+    for (const f of ymls) {
+      const m = textOf(f).match(/budget-check\.mjs\s+--pattern\s+([A-Za-z0-9_-]+)/);
+      if (!m) { badPattern.push(`${f}（未传 --pattern）`); continue; }
+      if (resolveCap(caps, m[1]).cap === null) badPattern.push(`${f} → --pattern ${m[1]} 无对应上限`);
+    }
+    ok('每个 workflow 的 --pattern 都能解析到该循环自己的上限',
+      badPattern.length === 0, badPattern.join('; '));
+
+    // fail-closed：`|| true` 吞掉退出码之后必须有显式的"读不到就拒绝"守卫，
+    // 否则脚本崩溃会被静默当成"预算正常"。
+    const failOpen = ymls.filter((f) => {
+      const t = textOf(f);
+      if (!/\|\|\s*true/.test(t)) return false;
+      return !/jq -e '\.mode'/.test(t);
+    });
+    ok('budget-check 失败时 fail-closed（不得静默继续）',
+      failOpen.length === 0, failOpen.join('; '));
+
+    // 每个 workflow 的预算模式必须真的影响行为（report-only / exit 有对应动作），
+    // 而不是只把值写进 output 就完事。
+    const noAction = ymls.filter((f) => {
+      const t = textOf(f);
+      return !/MODE.*=.*"exit"|mode.*=.*exit/.test(t);
+    });
+    ok('每个 workflow 都对 exit 模式有动作', noAction.length === 0, noAction.join('; '));
   }
 
   // ---- 规则断言：落盘 work item 的 workflow 必须参与 acting_on 锁 ----
