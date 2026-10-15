@@ -50,7 +50,7 @@
 | 2 | 功能清单每条 feature 有**可判定的完成标准** | 非空 `verification` 数组 + 非空 `user_visible_behavior`；占位（`notes` 自称占位、步骤是元指令）不算 |
 | 3 | 状态文件存在 | `STATE.md` |
 | 4 | 会话进度日志存在 | `progress.md` |
-| 5 | **init.sh 真的能跑通** | 实际执行一次，退出码 0。含占位符或跑不通都 FAIL |
+| 5 | **init.sh 真的能跑通** | 实际执行一次（整棵进程树，超时 120s），退出码 0。含占位符、跑不通、**或未跑完（超时）** 都 FAIL；自引用（目标是 harness 包自身）记为 **NOT RUN** |
 | 6 | 指令文件声明了**工作规则** | `AGENTS.md` 正文含「一次一个 item / 不验证不宣称完成 / 完成定义」 |
 | 7 | 约束文件存在 | `loop-constraints.md` |
 | 8 | 核心子系统有最小工件 **且** 就绪度评分 ≥ 40 | instructions / state / verification / scope + `loop-audit.mjs` 评分 |
@@ -89,6 +89,11 @@ node scripts/harness-stage.mjs /path/to/repo --stage 1 --require
 ### 退出条件
 
 8 项判据全过。**但注意判据 5**——`init.sh` 必须真的能跑通（退出码 0），不是占位符、也不是格式对但命令跑不通。
+
+判据 5 会真的执行被审计仓库的 `init.sh`，所以有一个自引用边界：**目标就是 harness 包自身时**，
+其 `init.sh` 会回头调用 `harness-stage.mjs`，判据会无限递归（实测套到 9 层、69 次 120s 超时）。
+这种情况记为 **NOT RUN** 而不是 PASS/FAIL——判据在这种输入下无法给出结论，把它算成任何一侧
+都是假的。消费方仓库不受影响，仍是真的执行。
 
 ### 阶段 1 的常见错误
 

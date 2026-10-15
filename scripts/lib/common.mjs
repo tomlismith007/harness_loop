@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 export const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const PACK_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
@@ -13,6 +14,23 @@ export const TEMPLATE_DIR = path.join(PACK_ROOT, 'templates');
 export const SKILLS_DIR = path.join(PACK_ROOT, 'skills');
 
 export const SUBSYSTEMS = ['instructions', 'state', 'verification', 'scope', 'lifecycle'];
+
+/**
+ * 两个路径是否指向同一个文件/目录。
+ *
+ * 用于"自引用"判定：init.sh 里 `pwd -W` 给出 `D:/repo/init.sh`（正斜杠），
+ * Node 的 path.resolve 给出 `D:\repo\init.sh`（反斜杠），字符串比较必然不等。
+ * Windows 下路径大小写不敏感，统一小写再比；其他平台保持大小写敏感。
+ */
+export function samePath(a, b) {
+  if (!a || !b) return false;
+  const norm = (p) => {
+    let s = path.resolve(String(p)).replace(/[\\/]+$/, '').replace(/\\/g, '/');
+    if (process.platform === 'win32') s = s.toLowerCase();
+    return s;
+  };
+  return norm(a) === norm(b);
+}
 
 /** 拒绝列表模式（与 loop-constraints.md 保持一致） */
 export const DENYLIST_PATTERNS = [
@@ -319,6 +337,14 @@ export function initScriptFromCommands(commands) {
     'ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
     'cd "$ROOT_DIR"',
     '',
+    // 自我识别标记：harness-stage 的判据 5 看到它就知道「要跑的正是正在执行的这份
+    // init.sh」，记为 NOT RUN 而不是重入——重入会 init.sh → harness-stage → init.sh
+    // 无限递归（实测套到 9 层、69 次 120s 超时、上万次进程 spawn，且每次超时都留孤儿）。
+    // pwd -W 在 MSYS 下给出 Windows 形式路径（D:/…），与 Node 的 path.resolve 对得上；
+    // 没有 -W 的平台（Linux/macOS）回退到 pwd。
+    'ROOT_WIN="$(cd "$ROOT_DIR" && pwd -W 2>/dev/null || pwd)"',
+    'export LOOP_HARNESS_ACTIVE_INIT="$ROOT_WIN/init.sh"',
+    '',
     'echo "==> Working directory: $PWD"',
     '',
   ];
@@ -565,6 +591,89 @@ function globToRegex(pattern) {
     return new RegExp(`^(?:.*/)?${body}(?:$|/|${fileForm}$)`, 'i');
   }
   return new RegExp(`^(?:.*/)?${body}$`, 'i');
+}
+
+// ---------------------------------------------------------------- 子进程
+
+/** GNU timeout 是否可用。探测一次缓存——每次调用都探测会给每次执行加一次 spawn。 */
+let _gnuTimeout = null;
+function hasGnuTimeout() {
+  if (_gnuTimeout !== null) return _gnuTimeout;
+  try {
+    const p = spawnSync('timeout', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    _gnuTimeout = p.status === 0 && /GNU coreutils/i.test(p.stdout || '');
+  } catch { _gnuTimeout = false; }
+  return _gnuTimeout;
+}
+
+/**
+ * 执行一个会拉起子进程树的命令，超时后**整棵树**被杀掉。
+ *
+ * 为什么不能用 `execFileSync(..., { timeout })`：Node 的 timeout 只对直接子进程
+ * 发 kill。在 Windows/MSYS 上，被杀的 bash 下面的 node/npm 全部存活成孤儿——
+ * 实测：树深 3 层时，超时之后 3 个进程全 ALIVE（心跳文件继续增长）。
+ * 而 GNU coreutils 的 `timeout` 用进程组语义，实测同一场景整棵树全灭。
+ *
+ * 这不是"清理不干净"的小事：孤儿进程会继续烧 CPU 并互相拖慢，让后续每一次
+ * spawn 都更慢，形成正反馈。本仓库曾因此积累 21 棵孤儿树、上万次 spawn。
+ *
+ * 返回 { ok, status, stdout, stderr, timedOut, spawnFailed, treeKill }，不抛异常——
+ * 调用方需要区分「脚本退出码非 0」与「脚本没跑起来」，前者是判据失败，
+ * 后者是环境问题（硬约束：未跑必须显式记为 NOT RUN，不能伪装成失败）。
+ */
+export function runWithTreeKill(cmd, args, opts = {}) {
+  const { cwd, timeoutMs = 120000, env, killGraceMs = 2000 } = opts;
+  const spawnOpts = {
+    cwd,
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    maxBuffer: 32 * 1024 * 1024,
+    env: env ? { ...process.env, ...env } : process.env,
+  };
+
+  // 优先用 GNU timeout（进程组语义）。没有它时退回 Node 的 timeout，并在返回值里
+  // 明确标注 treeKill:false —— 能力缺失要可见，不能静默降级成一半的语义。
+  if (hasGnuTimeout()) {
+    const secs = String(Math.max(1, Math.ceil(timeoutMs / 1000)));
+    const grace = String(Math.max(1, Math.ceil(killGraceMs / 1000)));
+    try {
+      const out = execFileSync('timeout', ['-k', grace, secs, cmd, ...args],
+        { ...spawnOpts, timeout: timeoutMs + killGraceMs + 5000 });
+      return { ok: true, status: 0, stdout: out, stderr: '', timedOut: false, spawnFailed: false, treeKill: true };
+    } catch (e) {
+      const status = e.status;
+      const out = `${e.stdout || ''}`;
+      const err = `${e.stderr || ''}`;
+      // GNU timeout 的退出码语义：
+      //   124 = 超时（TERM 生效）；137 = TERM 无效、KILL 兜底（超时的另一种形态）
+      //   125 = timeout 自身失败；126 = 命令找到但无法执行；127 = 命令不存在
+      //   其他 = 原样透传子进程的退出码（127 也可能是脚本自己的 command not found，
+      //          用 stderr 区分——timeout 的报错以 "timeout: failed to run command" 开头）
+      // ETIMEDOUT 是 Node 侧兜底超时（GNU timeout 自己卡住时才会发生）——仍是超时。
+      const timedOut = status === 124 || status === 137 || e.code === 'ETIMEDOUT';
+      const spawnFailed = !timedOut && (status === 125 || status === 126 || status === null
+        || e.code === 'ENOENT' || e.code === 'EACCES'
+        || /timeout: failed to run command/i.test(err));
+      return { ok: false, status, stdout: out, stderr: err, timedOut, spawnFailed, treeKill: true };
+    }
+  }
+
+  // 降级路径：Node 自带 timeout。语义弱一半（孙进程可能存活），显式标出。
+  try {
+    const out = execFileSync(cmd, args, spawnOpts);
+    return { ok: true, status: 0, stdout: out, stderr: '', timedOut: false, spawnFailed: false, treeKill: false };
+  } catch (e) {
+    const status = e.status;
+    const timedOut = e.code === 'ETIMEDOUT' || e.signal === 'SIGTERM';
+    // 超时在 Node 的降级路径下 status 也是 null —— 若不加 !timedOut，
+    // spawnFailed 会同时为 true，调用方按 spawnFailed 分支就会把超时
+    // 报成「bash 不可用」，正是这次要修的那个误报。
+    const spawnFailed = !timedOut && (status === null || e.code === 'ENOENT' || e.code === 'EACCES');
+    return {
+      ok: false, status, stdout: `${e.stdout || ''}`, stderr: `${e.stderr || ''}`,
+      timedOut, spawnFailed, treeKill: false,
+    };
+  }
 }
 
 // ---------------------------------------------------------------- 输出

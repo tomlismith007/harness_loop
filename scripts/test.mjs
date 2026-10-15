@@ -13,9 +13,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { parseArgs, boolArg, readRegistryStages, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText, hasEventWiring } from './lib/common.mjs';
+import { parseArgs, boolArg, readRegistryStages, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText, hasEventWiring, runWithTreeKill } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { route, ROUTES, readLocks } from './event-router.mjs';
 import { checkGates } from './gate-check.mjs';
@@ -633,6 +633,11 @@ section('9. init.sh 生成');
   ok('含 npm install', script.includes('npm install'));
   ok('含 npm test', script.includes('npm test'));
   ok('含 Next steps', script.includes('Next steps'));
+  // 自我识别标记：判据 5 凭它认出「要跑的正是正在运行的这份 init.sh」。
+  // 生成的脚本若不带标记，判据 5 在自引用场景下会退化成无限递归。
+  ok('含自我识别标记 LOOP_HARNESS_ACTIVE_INIT', /export LOOP_HARNESS_ACTIVE_INIT=/.test(script),
+    script.split('\n').slice(0, 16).join('\n'));
+  ok('标记的值是该脚本自身的绝对路径', /LOOP_HARNESS_ACTIVE_INIT="\$ROOT_WIN\/init\.sh"/.test(script));
 }
 
 // ---------------------------------------------------------------- 10. 模板完整性
@@ -2460,6 +2465,181 @@ section('20. 三阶段驱动器');
   ok('模板注释里的示例不算真实教训条目', lessonCheck && lessonCheck.ok === false,
     'LESSONS.md 模板自带 <!-- 示例：Seen 1× --> 被误判为真实条目');
   fs.rmSync(tpl, { recursive: true, force: true });
+
+  // ---- 自引用防护：判据 5 不得重入正在运行的 init.sh ----
+  // 源仓库的 init.sh 第 72 行是 `harness-stage.mjs .`，而判据 5 会执行被审计
+  // 仓库的 init.sh——目标是源仓库时二者互为因果，无限递归。实测：9 层、69 次
+  // 120s 超时、上万次 spawn，每次超时都留孤儿。三条断言分别锁住：
+  //   1. 行为：源仓库自审必须秒回，且判据 5 是 NOT RUN（不是假 PASS 也不是假 FAIL）
+  //   2. 判据 1（环境变量标记）单独生效——消费方手写递归 init.sh 的入口
+  //   3. 判据 2（root == PACK_ROOT）单独生效
+  {
+    // 用 runWithTreeKill 而不是裸 execFileSync：万一自引用防护失效，这一条必须
+    // **快速变红**，而不是把整个套件拖进 15 分钟的递归里。超时即判失败，
+    // 同时整棵树被杀——测试自己也不留孤儿。
+    const t0 = Date.now();
+    const selfRun = runWithTreeKill(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), PACK_ROOT, '--json'],
+      { timeoutMs: 25000 });
+    const elapsed = Date.now() - t0;
+    ok('源仓库自审在 25s 内返回（不重入 init.sh）', selfRun.ok,
+      selfRun.ok ? `${elapsed}ms`
+        : `未在 25s 内返回（${elapsed}ms）——判据 5 很可能又递归进 init.sh 了。`
+          + `stderr: ${(selfRun.stderr || '').slice(0, 160)}`);
+    if (!selfRun.ok) {
+      // 后续断言依赖这份 JSON；拿不到就显式记 FAIL，不要静默跳过
+      ok('自引用时判据 5 记为 NOT RUN', false, '上一条已失败：拿不到阶段报告');
+      ok('自引用时判据 5 不是 PASS（没跑不能算通过）', false, '上一条已失败：拿不到阶段报告');
+      ok('自引用时证据说明原因', false, '上一条已失败：拿不到阶段报告');
+    } else {
+      const self = JSON.parse(selfRun.stdout);
+      const c5 = self.stages[0].checks.find((c) => /能跑通/.test(c.label));
+      ok('自引用时判据 5 记为 NOT RUN', c5 && c5.notRun === true,
+        c5 ? JSON.stringify(c5) : '找不到判据 5');
+      ok('自引用时判据 5 不是 PASS（没跑不能算通过）', c5 && c5.ok === false);
+      ok('自引用时证据说明原因', c5 && /自引用/.test(c5.evidence || ''), c5 && c5.evidence);
+    }
+
+    // 判据 1：正在运行的 init.sh 会把自身路径传下去。模拟"消费方手写递归脚本"：
+    // 目标不是 PACK_ROOT，但 LOOP_HARNESS_ACTIVE_INIT 指向它的 init.sh。
+    const recur = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-selfref-env-'));
+    fs.writeFileSync(path.join(recur, 'package.json'), JSON.stringify({ name: 'x' }));
+    runStage(recur, ['--upgrade', '--stage', '1']);
+    const envProbe = execFileSync(process.execPath, [
+      '-e', `process.env.LOOP_HARNESS_ACTIVE_INIT=${JSON.stringify(path.join(recur, 'init.sh'))};`
+        + `import(${JSON.stringify(pathToFileURL(path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs')).href)})`
+        + `.then(m => { const r = m.detectSelfReference(${JSON.stringify(recur)});`
+        + `process.stdout.write(JSON.stringify(r)); });`,
+    ], { encoding: 'utf8' });
+    const envRes = JSON.parse(envProbe);
+    ok('判据 1：环境变量标记命中时判为自引用', envRes.self === true, envProbe);
+    ok('判据 1 的证据点明是标记', /LOOP_HARNESS_ACTIVE_INIT/.test(envRes.reason || ''), envRes.reason);
+
+    // 反向：标记指向**别的**仓库时不得误报（否则任何子进程都会让它 NOT RUN）
+    const other = execFileSync(process.execPath, [
+      '-e', `process.env.LOOP_HARNESS_ACTIVE_INIT=${JSON.stringify(path.join(PACK_ROOT, 'init.sh'))};`
+        + `import(${JSON.stringify(pathToFileURL(path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs')).href)})`
+        + `.then(m => { const r = m.detectSelfReference(${JSON.stringify(recur)});`
+        + `process.stdout.write(JSON.stringify(r)); });`,
+    ], { encoding: 'utf8' });
+    ok('判据 1 不误报别的仓库', JSON.parse(other).self === false, other);
+
+    // 判据 2：目标是 PACK_ROOT 即自引用，不依赖任何环境变量
+    const p2 = execFileSync(process.execPath, [
+      '-e', `delete process.env.LOOP_HARNESS_ACTIVE_INIT;`
+        + `import(${JSON.stringify(pathToFileURL(path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs')).href)})`
+        + `.then(m => { const r = m.detectSelfReference(${JSON.stringify(PACK_ROOT)});`
+        + `process.stdout.write(JSON.stringify(r)); });`,
+    ], { encoding: 'utf8' });
+    ok('判据 2：目标为 pack 根时判为自引用', JSON.parse(p2).self === true, p2);
+
+    // 消费方仓库的正常路径不受影响：判据 5 仍然真的执行 init.sh 并给 PASS
+    const normal = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-selfref-ok-'));
+    // 必须有 test 脚本，否则生成的 init.sh 含 "No test script found" 占位符，
+    // 判据 5 会因占位符（而非自引用防护）失败——那样测的就不是这条路径了。
+    fs.writeFileSync(path.join(normal, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    runStage(normal, ['--upgrade', '--stage', '1']);
+    const nc = JSON.parse(runStage(normal, ['--json']).out).stages[0].checks
+      .find((c) => /能跑通/.test(c.label));
+    ok('消费方仓库判据 5 仍为 PASS（防护没有误伤正常路径）',
+      nc && nc.ok === true && !nc.notRun, JSON.stringify(nc));
+    fs.rmSync(recur, { recursive: true, force: true });
+    fs.rmSync(normal, { recursive: true, force: true });
+  }
+
+  // ---- 超时必须记为 NOT RUN，且整棵树被杀 ----
+  // 原实现把超时误报成「bash 不可用或脚本不存在」——证据指向错误的原因。
+  // 超时是"没跑完"，与"跑不通"是两件事，硬约束要求未跑必须显式列出。
+  {
+    const hang = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-timeout-'));
+    fs.writeFileSync(path.join(hang, 'package.json'), JSON.stringify({ name: 'x' }));
+    runStage(hang, ['--upgrade', '--stage', '1']);
+    // 写一个会挂住的 init.sh，并记录它拉起的孙进程 pid（用于验证整棵树被杀）。
+    // 路径用正斜杠写进脚本：bash 里未加引号的反斜杠会被当转义符吃掉。
+    const pidFile = path.join(hang, 'grand.pid');
+    const pidFileSh = pidFile.replace(/\\/g, '/');
+    fs.writeFileSync(path.join(hang, 'init.sh'),
+      `#!/usr/bin/env bash\nset -e\nsleep 611 &\necho $! > "${pidFileSh}"\nwait\n`, 'utf8');
+
+    const t1 = Date.now();
+    const r = execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), hang, '--json'],
+      { encoding: 'utf8', env: { ...process.env, LOOP_HARNESS_INIT_TIMEOUT_MS: '1500' } });
+    const hung = Date.now() - t1;
+    const hc = JSON.parse(r).stages[0].checks.find((c) => /能跑通/.test(c.label));
+    ok('超时后判据 5 记为 NOT RUN（不是 FAIL）', hc && hc.notRun === true, JSON.stringify(hc));
+    ok('超时的证据说明是超时，不是"bash 不可用"',
+      hc && /超过 \d+s 未结束/.test(hc.evidence || '') && !/bash 不可用/.test(hc.evidence || ''),
+      hc && hc.evidence);
+    ok(`超时真的生效（${hung}ms < 20s，未等满 120s）`, hung < 20000, `${hung}ms`);
+
+    // 整棵树被杀：孙进程不能存活。用 kill -0 判定，不用计数。
+    const grand = (() => { try { return fs.readFileSync(pidFile, 'utf8').trim(); } catch { return null; } })();
+    ok('挂起的 init.sh 确实拉起了孙进程（前置条件）', Boolean(grand), `pidFile=${pidFile}`);
+    if (grand) {
+      let alive = true;
+      try { execFileSync('bash', ['-c', `kill -0 ${grand}`], { stdio: 'ignore' }); } catch { alive = false; }
+      ok('超时后孙进程已被回收（整棵树被杀，不留孤儿）', !alive,
+        `pid ${grand} 仍存活——孤儿进程会继续烧 CPU 并拖慢后续每一次 spawn`);
+    }
+    fs.rmSync(hang, { recursive: true, force: true });
+  }
+
+  // ---- 判据 5 每次运行只执行 init.sh 一次（memoization）----
+  // 曾经 checksByStage / detectStage / JSON 输出各算一遍判据，于是 init.sh 被真的
+  // 执行三次——一个挂起的脚本因此耗时 6 分钟（120s × 3）。这不是"慢一点"：
+  // 判据是 (root, audit) 的纯函数，重复执行纯属浪费，且每一次都可能留孤儿。
+  // 断言方式：让 init.sh 自报执行次数，数它到底跑了几遍。
+  {
+    const once = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-memo-'));
+    fs.writeFileSync(path.join(once, 'package.json'),
+      JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    runStage(once, ['--upgrade', '--stage', '1']);
+    const counter = path.join(once, 'runs.txt');
+    const counterSh = counter.replace(/\\/g, '/');
+    fs.writeFileSync(path.join(once, 'init.sh'),
+      `#!/usr/bin/env bash\nset -euo pipefail\necho run >> "${counterSh}"\necho ok\n`, 'utf8');
+
+    runStage(once, ['--json']);
+    const runs = fs.existsSync(counter)
+      ? fs.readFileSync(counter, 'utf8').trim().split('\n').filter(Boolean).length
+      : 0;
+    eq('一次 --json 运行只执行 init.sh 一次', runs, 1);
+    fs.rmSync(once, { recursive: true, force: true });
+  }
+
+  // ---- runWithTreeKill：超时语义与退出码区分 ----
+  // 这是判据 5 的底座，单独测它比"通过判据 5 间接测"更快定位。
+  {
+    const okRun = runWithTreeKill('bash', ['-c', 'exit 0']);
+    ok('成功命令 ok=true 且 status=0', okRun.ok === true && okRun.status === 0, JSON.stringify(okRun).slice(0, 120));
+
+    const failRun = runWithTreeKill('bash', ['-c', 'exit 7']);
+    ok('非零退出 ok=false 且 status 透传（7）', failRun.ok === false && failRun.status === 7,
+      JSON.stringify(failRun).slice(0, 120));
+    ok('非零退出不算 timedOut 也不算 spawnFailed',
+      failRun.timedOut === false && failRun.spawnFailed === false, JSON.stringify(failRun).slice(0, 120));
+
+    const toRun = runWithTreeKill('bash', ['-c', 'sleep 30'], { timeoutMs: 1200 });
+    ok('超时 ok=false 且 timedOut=true', toRun.ok === false && toRun.timedOut === true,
+      JSON.stringify(toRun).slice(0, 120));
+    ok('超时不算 spawnFailed（否则会被报成"bash 不可用"）', toRun.spawnFailed === false,
+      JSON.stringify(toRun).slice(0, 120));
+
+    const missRun = runWithTreeKill('this-command-does-not-exist-xyz', []);
+    ok('命令不存在 → spawnFailed=true', missRun.spawnFailed === true,
+      JSON.stringify(missRun).slice(0, 120));
+    ok('命令不存在不算 timedOut', missRun.timedOut === false, JSON.stringify(missRun).slice(0, 120));
+
+    // 平台能力必须可见：有 GNU timeout 时 treeKill=true。没有它时降级路径
+    // 会把 treeKill 标成 false——能力缺失不能静默。
+    const probe = (() => {
+      try { return execFileSync('timeout', ['--version'], { encoding: 'utf8' }); } catch { return ''; }
+    })();
+    const hasGnu = /GNU coreutils/i.test(probe);
+    eq('treeKill 标记与平台能力一致', okRun.treeKill, hasGnu);
+  }
 }
 
 // ---------------------------------------------------------------- 21. 预算与 kill switch

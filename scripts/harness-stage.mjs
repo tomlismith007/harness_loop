@@ -19,11 +19,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
   PACK_ROOT, SKILLS_DIR, SKILL_DIRS, SCRIPT_DIR, parseDenylistFrom, detectProject,
   verificationCommands, initScriptFromCommands, textHas, structuredText, fail, hasEventWiring,
+  samePath, runWithTreeKill,
 } from './lib/common.mjs';
 import { scoreHarness } from './loop-audit.mjs';
 
@@ -110,6 +110,53 @@ function initScriptHasPlaceholder(root) {
   }
   if (!/set -e/.test(text)) return { placeholder: true, reason: 'init.sh 缺少 set -e（失败不会中断）' };
   return { placeholder: false, reason: null };
+}
+
+/**
+ * 判据 5 执行 init.sh 的超时（毫秒）。
+ *
+ * 默认 120s。测试要覆盖"超时 → NOT RUN 而不是假 FAIL"这条路径，等 120 秒不可行，
+ * 所以留一个环境变量旋钮——它必须真的改变行为（test.mjs 第 20 节有断言：
+ * 设成 1500ms 时一个 sleep 30 的脚本必须在 2 秒内返回 NOT RUN）。
+ * 写成只读环境变量、不暴露 CLI 标志：这是测试与受限环境的逃生口，
+ * 不是给日常使用调的参数。
+ */
+const INIT_TIMEOUT_MS = (() => {
+  const raw = process.env.LOOP_HARNESS_INIT_TIMEOUT_MS;
+  if (!raw) return 120000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 120000;
+})();
+
+/**
+ * 判据 5 要执行的 init.sh，是否正是**当前这次运行所处的**那一个。
+ *
+ * 判据 5 会执行被审计仓库的 init.sh。若该 init.sh 的内容又会拉起
+ * harness-stage 审计自己（源仓库的 init.sh 就是这么写的），判据就变成了
+ * 自引用：执行 → 递归 → 执行 → …… 实测套到 9 层、69 次 120s 超时。
+ *
+ * 两个独立的判据，命中任一即视为自引用：
+ *   1. 正在执行的 init.sh 在本次运行开始时导出了 LOOP_HARNESS_ACTIVE_INIT
+ *      （由 common.initScriptFromCommands 生成，值是该脚本自身的绝对路径）；
+ *   2. 目标 root 就是本脚本所在的 pack 根目录 —— 即便 init.sh 是手写的、
+ *      没有那个标记，只要它在审计 pack 仓库自己，就会踩同一个环。
+ *
+ * 判据 2 是兜底：只有判据 1 时，任何人手写一个同样调用 harness-stage 的
+ * init.sh 就能重新引爆递归。两条都要有，且都要有测试断言。
+ *
+ * 导出是为了让测试能对两条判据分别做变异回退——行为级测试在"检测失效"的
+ * 变异下会退化成递归（跑不完），单元级测试才能快速定位是哪条判据没了。
+ */
+export function detectSelfReference(root) {
+  const selfInit = path.join(root, 'init.sh');
+  const active = process.env.LOOP_HARNESS_ACTIVE_INIT;
+  if (active && samePath(active, selfInit)) {
+    return { self: true, reason: `自引用：判据 5 要执行的正是当前正在运行的 ${path.basename(active)}（由 LOOP_HARNESS_ACTIVE_INIT 标记）——记为 NOT RUN 以避免无限递归` };
+  }
+  if (samePath(root, PACK_ROOT)) {
+    return { self: true, reason: '自引用：目标就是 harness 包自身的仓库，其 init.sh 会再次调用 harness-stage.mjs——记为 NOT RUN 以避免无限递归' };
+  }
+  return { self: false, reason: null };
 }
 
 /**
@@ -300,7 +347,8 @@ function featuresHaveAcceptance(root) {
 /** 阶段 1 判据 */
 function checkStage1(root, audit) {
   const c = [];
-  const add = (label, ok, evidence, action) => c.push({ label, ok: Boolean(ok), evidence, action });
+  const add = (label, ok, evidence, action, opts = {}) =>
+    c.push({ label, ok: Boolean(ok), evidence, action, ...(opts.notRun ? { notRun: true } : {}) });
 
   const instr = hasFile(root, 'AGENTS.md') || hasFile(root, 'CLAUDE.md');
   add('指令文件存在（AGENTS.md / CLAUDE.md）', instr,
@@ -318,30 +366,53 @@ function checkStage1(root, audit) {
 
   // init.sh 从"非占位符"升级为"真的能跑"：原判据只读文本，
   // 一个写对了格式但命令跑不通的 init.sh 照样拿 PASS——而它是新会话的启动路径。
+  //
+  // 自引用防护（2026-10-15）：本仓库的 init.sh 第 72 行是 `harness-stage.mjs .`，
+  // 即"用 harness-stage 审计本仓库"，而阶段 1 判据 5 又会执行被审计仓库的 init.sh。
+  // 目标是源仓库时二者互为因果 → init.sh → harness-stage → init.sh 无限递归。
+  // 实测：套到 9 层、69 次 120s 超时、上万次进程 spawn，且 Node 的 timeout 只杀
+  // 直接子进程，每次超时都留下孤儿树（21 棵，互相拖慢形成正反馈）。
+  // 递归不是"慢一点"，是判据在这种输入下无法给出任何结论——所以记为 NOT RUN，
+  // 而不是重入。判据在消费方仓库上行为不变（下面三条断言锁住这一点）。
   const ph = initScriptHasPlaceholder(root);
-  const runnable = ph.placeholder ? { ok: false, reason: ph.reason } : (() => {
-    const initPath = path.join(root, 'init.sh');
-    try {
-      execFileSync('bash', [initPath], { cwd: root, encoding: 'utf8', timeout: 120000 });
-      return { ok: true, reason: null };
-    } catch (e) {
-      const out = `${e.stdout || ''}${e.stderr || ''}`;
-      // 区分两种失败：bash 本身跑不起来（spawn 层失败），vs bash 起来了但脚本非零退出。
-      // 早期版本按 /not found/ 匹配输出，把脚本里的 "command not found"
-      // 误报成「bash 不可用」——证据指向了错误的原因。
-      const spawnFailed = e.status === null
-        || e.code === 'ENOENT'
-        || e.code === 'EACCES'
-        || /^Error: spawn/i.test(String(e.message || ''));
-      if (spawnFailed) {
-        return { ok: false, reason: `无法执行 init.sh（bash 不可用或脚本不存在）：${(e.message || out).trim().slice(0, 160)}` };
-      }
-      return { ok: false, reason: `init.sh 退出码 ${e.status}——启动路径跑不通：${out.trim().slice(0, 200)}` };
-    }
-  })();
+  const selfRef = detectSelfReference(root);
+  const runnable = ph.placeholder
+    ? { ok: false, reason: ph.reason }
+    : selfRef.self
+      ? { ok: false, notRun: true, reason: selfRef.reason }
+      : (() => {
+        const initPath = path.join(root, 'init.sh');
+        // 把"我正在执行哪个 init.sh"传给子进程。若该 init.sh 又会拉起
+        // harness-stage 审计同一个 root，下一层就能凭这个标记认出递归并停下。
+        // 这条覆盖的是「消费方手写了一个递归 init.sh」——判据 2（root == PACK_ROOT）
+        // 拦不住它，因为 root 是消费方仓库。两条判据各覆盖一种入口，都要有。
+        const r = runWithTreeKill('bash', [initPath], {
+          cwd: root, timeoutMs: INIT_TIMEOUT_MS,
+          env: { LOOP_HARNESS_ACTIVE_INIT: initPath },
+        });
+        if (r.ok) return { ok: true, reason: null };
+
+        const out = `${r.stdout}${r.stderr}`;
+        // 三态要分清，证据必须指向真正的原因：
+        //   超时      → 脚本没跑完，是"未跑"而非"跑不通"（原实现把它报成"bash 不可用"）
+        //   spawn 失败 → bash 不存在等环境问题，同样是"未跑"
+        //   非零退出   → 真的跑不通，这才是判据要拦的
+        if (r.timedOut) {
+          const secs = Math.round(INIT_TIMEOUT_MS / 1000);
+          return { ok: false, notRun: true, reason: `init.sh 超过 ${secs}s 未结束（超时被杀，整棵树）——未跑完，不判定通过或失败` };
+        }
+        if (r.spawnFailed) {
+          return { ok: false, notRun: true, reason: `无法执行 init.sh（bash 不可用或脚本不存在）：${(r.stderr || out || '').trim().slice(0, 160)}` };
+        }
+        const treeNote = r.treeKill ? '' : '（注意：本平台无 GNU timeout，孙进程可能未被回收）';
+        return { ok: false, reason: `init.sh 退出码 ${r.status}——启动路径跑不通：${out.trim().slice(0, 200)}${treeNote}` };
+      })();
   add('init.sh 存在、可执行且真的能跑通', !ph.placeholder && runnable.ok,
     runnable.ok ? null : runnable.reason,
-    '运行 bash init.sh 直到退出码 0；脚本是会话启动路径，跑不通等于没有验证');
+    runnable.notRun
+      ? '这一项没跑完（见 evidence）。在消费方仓库上重跑，或修掉自引用后重试'
+      : '运行 bash init.sh 直到退出码 0；脚本是会话启动路径，跑不通等于没有验证',
+    { notRun: Boolean(runnable.notRun) });
 
   const wr = agentsDeclaresWorkRules(root);
   add('指令文件声明了工作规则（一次一个 item / 不验证不宣称完成 / 完成定义）', wr.declared,
@@ -499,20 +570,37 @@ export const STAGE_CHECKS = { 1: checkStage1, 2: checkStage2, 3: checkStage3 };
 
 // ---------------------------------------------------------------- 阶段检测
 
-/** 返回某阶段是否达成（忽略人工确认项） */
-export function stageComplete(stageId, root, audit) {
-  const checks = STAGE_CHECKS[stageId](root, audit);
+/** 返回某阶段是否达成（忽略人工确认项）。memo 可选——传了就不重算判据 */
+export function stageComplete(stageId, root, audit, memo) {
+  const checks = memo ? memo.get(stageId) : STAGE_CHECKS[stageId](root, audit);
   return checks.filter((c) => !c.human).every((c) => c.ok);
 }
 
 /** 检测当前处于哪个阶段（已完成的最高阶段） */
-export function detectStage(root, audit) {
+export function detectStage(root, audit, memo) {
   let current = 0;
   for (const s of STAGES) {
-    if (stageComplete(s.id, root, audit)) current = s.id;
+    if (stageComplete(s.id, root, audit, memo)) current = s.id;
     else break;
   }
   return current;
+}
+
+/**
+ * 阶段判据缓存。
+ *
+ * 曾经 checksByStage、detectStage、JSON 输出各调一次 STAGE_CHECKS，于是判据 5
+ * 会真的执行 init.sh **三遍**——实测一个挂起的脚本因此耗时 6 分钟（120s × 3）。
+ * 判据是 (root, audit) 的纯函数，同一进程内算一次就够。
+ */
+function memoStageChecks(root, audit) {
+  const cache = {};
+  return {
+    get(id) {
+      if (!cache[id]) cache[id] = STAGE_CHECKS[id](root, audit);
+      return cache[id];
+    },
+  };
 }
 
 // ---------------------------------------------------------------- 升级（补齐文件）
@@ -722,7 +810,7 @@ function upgrade(root, targetStage, force, results, opts = {}) {
 
 // ---------------------------------------------------------------- 输出
 
-function renderReport(root, audit, current, checksByStage) {
+function renderReport(root, audit, current, checksByStage, memo) {
   const lines = [];
   const next = STAGES.find((s) => s.id === current + 1);
   lines.push(`Harness Stage Report — ${root}`);
@@ -736,12 +824,14 @@ function renderReport(root, audit, current, checksByStage) {
     const checks = checksByStage[stage.id];
     const mechanical = checks.filter((c) => !c.human);
     const done = mechanical.filter((c) => c.ok).length;
-    const state = stageComplete(stage.id, root, audit) ? 'COMPLETE' : (current + 1 === stage.id ? 'IN PROGRESS' : 'NOT STARTED');
+    const state = stageComplete(stage.id, root, audit, memo) ? 'COMPLETE' : (current + 1 === stage.id ? 'IN PROGRESS' : 'NOT STARTED');
     lines.push(`── 阶段 ${stage.id} · ${stage.name}（${stage.en}） [${state}] ${done}/${mechanical.length}`);
     lines.push(`   目标：${stage.goal}`);
     lines.push(`   对应等级：${stage.level}`);
     for (const c of checks) {
-      const mark = c.human ? 'HUMAN' : (c.ok ? 'PASS ' : 'FAIL ');
+      // 三态：PASS / FAIL / NOT RUN。硬约束——没跑的检查必须显式列出来，
+      // 不能和"跑了但失败"混为一谈（前者是环境问题，后者是代码问题）。
+      const mark = c.human ? 'HUMAN' : (c.ok ? 'PASS ' : (c.notRun ? 'NOT RUN' : 'FAIL '));
       lines.push(`   ${mark}  ${c.label}`);
       if (!c.human && !c.ok) {
         if (c.evidence) lines.push(`          evidence: ${c.evidence}`);
@@ -802,9 +892,11 @@ Exit codes:
   if (!exists(root)) fail(`target not found: ${root}`);
 
   const audit = scoreHarness(root);
+  // 判据只算一次：判据 5 会真的执行 init.sh，重复计算 = 重复执行（实测 3 倍成本）。
+  const memo = memoStageChecks(root, audit);
   const checksByStage = {};
-  for (const s of STAGES) checksByStage[s.id] = STAGE_CHECKS[s.id](root, audit);
-  const current = detectStage(root, audit);
+  for (const s of STAGES) checksByStage[s.id] = memo.get(s.id);
+  const current = detectStage(root, audit, memo);
 
   const targetStage = args.stage !== undefined ? Number(args.stage) : null;
   if (targetStage !== null && ![1, 2, 3].includes(targetStage)) {
@@ -864,16 +956,16 @@ Exit codes:
       current_stage: current,
       stages: STAGES.map((s) => ({
         id: s.id, name: s.name, en: s.en, goal: s.goal, level: s.level,
-        complete: stageComplete(s.id, root, audit),
+        complete: stageComplete(s.id, root, audit, memo),
         checks: checksByStage[s.id],
       })),
     });
   } else {
-    process.stdout.write(renderReport(root, audit, current, checksByStage));
+    process.stdout.write(renderReport(root, audit, current, checksByStage, memo));
   }
 
   if (args.require && targetStage !== null) {
-    process.exit(stageComplete(targetStage, root, audit) ? 0 : 2);
+    process.exit(stageComplete(targetStage, root, audit, memo) ? 0 : 2);
   }
   process.exit(0);
 }

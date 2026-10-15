@@ -169,7 +169,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 框架自带测试套件，覆盖闸门判定、熔断逻辑、拒绝列表匹配、事件路由、模板与技能完整性、端到端装配：
 
 ```bash
-node scripts/test.mjs           # 954 项断言
+node scripts/test.mjs           # 979 项断言
 node scripts/test.mjs --verbose # 显示每一项
 ```
 

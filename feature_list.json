@@ -353,6 +353,30 @@
         "YAML 解析：8/8 结构有效，8/8 含预算步骤"
       ],
       "notes": "WP-09 第二半 + WP-04 第二半。修复前只有 merge-gate 有预算与 kill switch。daily-triage / lesson-harvest 的内联预算恒为 0%（正则不带 s/m 标志，匹配不上跨多行的 run-log JSON），且用 Math.max 取全表最大上限。merge-gate 的接线本身 fail-open（|| true 吞掉退出码 → jq 得到 null → 无检查继续）。LOOP_BOT_TOKEN 的真实面是 3 个调 gh 的 workflow（不是 8 个）——另 5 个不调 gh，权限只来自 permissions: 声明，断言反向守住它们不得引用该 token。限制：新接线的 5 个 workflow 不写 loop-run-log.md（budget-check 的唯一数据源），所以 used 恒为 0，预算百分比要等真实花费写进 run-log 才有意义；立即生效的是 kill switch。已写进 workflow 注释与 STATE.md。"
+    },
+    {
+      "id": "loop-007",
+      "priority": 1,
+      "area": "loop",
+      "title": "验证路径不自递归，超时杀整棵树，判据只算一次",
+      "user_visible_behavior": "在本仓库跑 bash init.sh 45 秒内完成（修复前 10 分 06 秒）且退出码 0；跑 harness-stage.mjs . 在 1 秒内返回并把判据 5 记为 NOT RUN；任何 init.sh 超时后不留孤儿进程",
+      "status": "passing",
+      "verification": [
+        "bash init.sh → 45.4s，退出码 0",
+        "node scripts/test.mjs → 979 项断言全通过",
+        "node scripts/harness-stage.mjs . --json → 0.31s，判据 5 = NOT RUN (self-reference)",
+        "变异回退 4 次：关自引用检测 / 禁用 GNU timeout / 去掉生成脚本的标记 / 去掉 memo，全部确认落地后变红",
+        "超时后检查 sleep.exe 进程数为 0（无孤儿）"
+      ],
+      "evidence": [
+        "bash init.sh → real 0m45.377s, INIT_EXIT=0（基线 10m06.026s）",
+        "node scripts/test.mjs → Passed: 979 / Failed: 0, real 0m43.694s（基线 64.7s，断言 954）",
+        "node scripts/harness-stage.mjs . --json → real 0m0.314s（基线 6m00.414s）",
+        "变异 1 关自引用检测 → 7 条 FAIL；变异 2 禁 GNU timeout → 3 条 FAIL（含孤儿断言）；变异 3 去标记 → 2 条 FAIL；变异 4 去 memo → 1 条 FAIL（expected 1, got 3）",
+        "探针实测（修复前）：69 次执行仓库自身 init.sh 全部 120s 超时、10,753 次 spawn、最深 9 层、21 棵孤儿树",
+        "对照实验：execFileSync timeout 后 3 层孙进程全 ALIVE；GNU timeout -k 后整棵树全灭"
+      ],
+      "notes": "三处修复：① 判据 5 自引用防护（两条判据各覆盖一种入口：LOOP_HARNESS_ACTIVE_INIT 标记 / root==PACK_ROOT）；② runWithTreeKill 用 GNU timeout 杀整棵树（Node 的 timeout 只杀直接子进程）；③ 判据 memoization（同一次运行判据 5 被算 3 遍 = init.sh 执行 3 次）。超时从 FAIL 改判 NOT RUN——超时是「没跑完」不是「跑不通」，原实现把它报成「bash 不可用」，证据指向错误的原因。变异 2 抓出我自己引入的 bug：降级路径 timedOut 与 spawnFailed 可同时为 true。第 4 项提议（--quick）主动跳过，理由见 STATE.md。"
     }
   ]
 }

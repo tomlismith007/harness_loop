@@ -189,20 +189,37 @@ export function detectLoopActivity(root, stateText, files, loopText) {
   }
 
   // 4. git 历史里有真实的循环提交
-  try {
-    const out = execSync('git log --oneline -25', {
-      cwd: root, stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500,
-    }).toString();
-    if (/loop|triage|changelog-drafter|post-merge|daily triage|loop-run-log/i.test(out)) {
-      evidence.push('recent git history references loop artifacts');
-    }
-  } catch { /* 非 git 仓库或超时，忽略 */ }
+  const out = gitLogOnce(root);
+  if (out && /loop|triage|changelog-drafter|post-merge|daily triage|loop-run-log/i.test(out)) {
+    evidence.push('recent git history references loop artifacts');
+  }
 
   return {
     present: evidence.length > 0,
     evidence: [...new Set(evidence)].slice(0, 4),
     notes: [...new Set(notes)].slice(0, 4),
   };
+}
+
+/**
+ * 进程内缓存 `git log` 结果。
+ *
+ * scoreHarness 是热路径：harness-stage 每次运行调它一次，测试套件调它十几次。
+ * 每次都 spawn 一个 git 进程——实测整个套件曾出现 2,343 次 `git log --oneline -25`，
+ * 累计 173 秒。同一个进程内仓库历史不会变（审计不写仓库），缓存是安全的。
+ * 按 root 分键：不同仓库的历史不同，不能跨仓库共用。
+ */
+const _gitLogCache = new Map();
+function gitLogOnce(root) {
+  if (_gitLogCache.has(root)) return _gitLogCache.get(root);
+  let out = '';
+  try {
+    out = execSync('git log --oneline -25', {
+      cwd: root, stdio: ['ignore', 'pipe', 'ignore'], timeout: 1500,
+    }).toString();
+  } catch { out = ''; /* 非 git 仓库或超时 */ }
+  _gitLogCache.set(root, out);
+  return out;
 }
 
 /** 主评分函数 */

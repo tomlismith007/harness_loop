@@ -10,6 +10,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+# 自我识别标记：harness-stage 的判据 5 会执行被审计仓库的 init.sh，而本脚本第 72 行
+# 又回头调用 harness-stage 审计本仓库——二者互为因果，会无限递归（实测套到 9 层、
+# 69 次 120s 超时、上万次 spawn，且每次超时都留孤儿进程）。harness-stage 凭这个
+# 标记认出「要跑的正是正在运行的这份 init.sh」，记为 NOT RUN 而不是重入。
+# 生成的 init.sh（common.initScriptFromCommands）带同样的标记。
+ROOT_WIN="$(cd "$ROOT_DIR" && pwd -W 2>/dev/null || pwd)"
+export LOOP_HARNESS_ACTIVE_INIT="$ROOT_WIN/init.sh"
+
 echo "==> Working directory: $PWD"
 
 echo "=== Node version ==="

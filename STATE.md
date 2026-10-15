@@ -1,19 +1,18 @@
 # Loop State
 
-Last run: 2026-10-15 (workflow 预算接线 + LOOP_BOT_TOKEN — WP-09/WP-04 第二半)
+Last run: 2026-10-15 (验证路径自递归 + 孤儿进程修复)
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表、本轮噪声。**每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
 
-- [x] **本轮已完成（2026-10-15 第三批）**：WP-09 第二半 + WP-04 第二半。8 个 workflow 现在**全部**调用 `budget-check.mjs` 并各传自己的 pattern id；`merge-gate` 的 fail-open（`|| true` 吞掉退出码 → jq 得 null → 无检查继续）已修，8/8 都有 `jq -e '.mode'` 守卫。`LOOP_BOT_TOKEN` 落地到全部 3 个调用 `gh` 的 workflow。断言从单文件改成规则、双向。断言 945 → 954，3 次变异全部确认落地后变红。提交 `7fc0fe0`。
-- [x] **已完成（2026-10-15 第二批）**：`acting_on` 锁键接线。**只加 `--target` 是半个修复**——`grep` 确认没有任何 workflow 读 `.conflict`，锁结果被直接丢弃，传了等于没传。按"传锁键 + 消费锁结果"两个条件一起修：4 个落盘 work item 的循环（`pr-review` / `ci-sweeper` / `issue-intake` / `post-merge`）传 `--target` 并在 `lock-held` 时跳过落盘；`release-draft` **有意不传**（`LOOP.md` 列为"只读为主，可安全并发"）。断言 931 → 945。提交 `f36301b`。
-- [x] **已完成（2026-10-15 第一批）**：WP-09 的 A 类缺口第一半。补 3 个循环的预算行（含 `signal-gatekeeper`）、修 `parseBudgetCaps` 的静默回退与过宽别名、新增 `resolveCap` 暴露解析路径。断言 923 → 931。提交 `94a8f3d`。
+- [x] **本轮已完成（2026-10-15 第四批）**：修复验证路径的自递归与孤儿进程。`init.sh` 从 **10m06s → 45.4s**（13 倍），`test.mjs` 从 64.7s → 43.7s。核心是三处：① 判据 5 的自引用防护（源仓库的 `init.sh` 调 `harness-stage`，而判据 5 又执行被审计仓库的 `init.sh` → 无限递归，实测 9 层、69 次 120s 超时）；② `runWithTreeKill`（Node 的 timeout 只杀直接子进程，实测超时后孙进程全存活 → 换 GNU `timeout -k`，实测整棵树全灭）；③ 判据 memoization（同一次运行里判据 5 被算 3 遍 = init.sh 执行 3 次）。断言 954 → 979，4 次变异全部确认落地后变红。
 - [ ] **预算百分比目前对 5 个 workflow 恒为 0（已知限制，不是 bug）**：`budget-check` 从 `loop-run-log.md` 累加当日花费，而只有 `daily-triage` / `lesson-harvest` 在写它。新接线的 5 个（`ci-sweeper` / `issue-intake` / `post-merge` / `pr-review` / `release-draft`）不写 run-log，所以 `used` 恒为 0。**本次接线立即生效的是 kill switch**；预算百分比要等 agent 平台把真实花费写进 run-log 才有意义。让 workflow 自己写 run-log 有风险（runner 文件系统是临时的，写入不会持久化到仓库——见 `examples/github-actions/README.md` 的说明），需要先决定持久化方式（评论 / dispatch / 直接 commit）。
 - [ ] **`loop-constraints.md` 与 `LOOP.md` 的文件数阈值自相矛盾**：前者写"超过 5 个文件 → 停止并升级"，后者写"超过 10 个文件 → 人工审批"。本仓库的实际改动面经常超过 5（本轮 10 个文件，其中 3 个是被测试强制的文档数字同步）。需要先统一阈值，或明确"同步类改动不计入"。
-- [ ] **真机验证（硬约束 10）**：`WP-04` 的注入修复、`WP-02`/`WP-07` 的装配形态、本轮的锁接线与预算接线，全部只验证到"本地临时目录 + 本地模拟 + YAML 解析"。**8 个 workflow 从未在任何真实 GitHub 仓库上跑过。** 合并进任何项目前，必须在一个测试仓库上跑一次真实事件，确认 workflow 能执行 `event-router`、把 work item 交付出来、且 `budget-check` 在 runner 上真的读得到文件。
+- [ ] **真机验证（硬约束 10）**：`WP-04` 的注入修复、`WP-02`/`WP-07` 的装配形态、锁接线与预算接线，全部只验证到"本地临时目录 + 本地模拟 + YAML 解析"。**8 个 workflow 从未在任何真实 GitHub 仓库上跑过。** 合并进任何项目前，必须在一个测试仓库上跑一次真实事件，确认 workflow 能执行 `event-router`、把 work item 交付出来、且 `budget-check` 在 runner 上真的读得到文件。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整（本仓库是技能源仓库，见 Post-Run Critique）。
 - [ ] 把三份审查里**未纳入本轮范围**的项排进下一轮（见下方「Watch List」）。
+- [ ] **快慢分离（本轮的 4 号提议，主动跳过）**：给 `test.mjs` 加 `--quick` 子集。**跳过理由**：修完自递归后 `init.sh` 已是 45 秒，快速子集的边际收益不再支撑它的复杂度（多一条"哪些断言属于快集"的真相源，而本仓库的教训正是"没人读的配置会漂移"）。若将来断言数再翻倍，重开此项。
 
 ## Active
 
@@ -35,6 +34,13 @@ Last run: 2026-10-15 (workflow 预算接线 + LOOP_BOT_TOKEN — WP-09/WP-04 第
 ## Watch List
 
 - 尚未跑过任何一轮真实事件。第一周目标：只报告，积累可靠的 triage 记录。
+- **`feature_list.json` 有一个重复 id（`stage-001` 出现两次，索引 1 与 7）**：
+  "三阶段检测与升级可用" 与 "阶段 1 只产出 harness 地基" 共用同一 id。
+  本轮发现但未修（与验证路径无关，一轮一个修复）。重复 id 会让"按 id 查 feature"
+  这类消费方拿到不确定的结果，且没有任何断言守住唯一性——加断言前先决定改哪个 id。
+- **本轮修复只在本机验证（Windows/MSYS）**：GNU `timeout` 是 MSYS 提供的；
+  Linux CI 上 coreutils timeout 必然存在，但 `samePath` 的路径规范化与
+  `pwd -W` 回退分支未在真机跑过。这是硬约束 10 的一个子项，随真机验证一并做。
 - `examples/github-actions/` 的 workflow 只做了静态修复，**未在真实 GitHub 仓库上跑过一次**。
   合并进任何项目之前必须先在一个测试仓库上验证（硬约束 10）。
 - 本轮未处理的审查结论：
@@ -78,6 +84,72 @@ Last run: 2026-10-15 (workflow 预算接线 + LOOP_BOT_TOKEN — WP-09/WP-04 第
 —
 
 ## Post-Run Critique (from last run)
+
+### 2026-10-15 · 验证路径自递归 + 孤儿进程（本轮）
+
+- **本轮做了什么**：修掉"跑一次验证要等 10 分钟"的根因。`init.sh` 10m06s → **45.4s**，
+  `test.mjs` 64.7s → **43.7s**（且断言从 954 涨到 979）。三处修复 + 4 次变异回退。
+
+- **病灶是自引用环，不是"测试多"**。`init.sh:72` 是 `node scripts/harness-stage.mjs .`
+  （用 harness-stage 审计本仓库），而阶段 1 判据 5 要求"目标的 init.sh 真的能跑通"——
+  于是 `harness-stage.mjs` 真的去执行目标的 init.sh，目标就是自己。探针实测：
+  **69 次执行仓库自身的 init.sh，全部 120,00x 毫秒超时，嵌套深度 0–6 层，
+  总计 10,753 次进程 spawn、最深 9 层**。这不是"慢"，是判据在这种输入下
+  **无法给出任何结论**——它每次都在超时后返回一个假的失败。
+
+- **Node 的 `timeout` 只杀直接子进程，这是孤儿的来源**。实测（心跳文件 + 精确 winpid）：
+  `execFileSync(..., {timeout})` 超时后**三个层级的孙进程全部 ALIVE，心跳继续增长**；
+  换成 GNU `timeout -k` 后同一场景**整棵树全灭、心跳停止**。
+  后果不是"清理不干净"：孤儿继续烧 CPU 并互相拖慢，让后续每次 spawn 都更慢——
+  实测一轮跑完后探针日志又长了 9,800 行，21:00 时机器上有 **83 个进程、21 棵孤儿树**。
+
+- **判据被算 3 遍 = init.sh 被执行 3 遍**。`checksByStage`、`detectStage`、JSON 输出
+  各调一次 `STAGE_CHECKS`。基线实测：一个 `sleep 297` 的 init.sh 让判据 5 耗时
+  **恰好 6m00s**（120s × 3）。判据是 `(root, audit)` 的纯函数，加 memo 即可。
+  变异 4（去掉 memo）红在"expected 1, got 3"——这个数字直接指认了病因。
+
+- **超时被报成"bash 不可用"，证据指向错误的原因**。基线证据原文：
+  `无法执行 init.sh（bash 不可用或脚本不存在）：spawnSync bash ETIMEDOUT`——
+  init.sh 明明存在，bash 也明明可用。这违反三态约定：超时是"**没跑完**"，
+  与"跑不通"是两件事。现在超时记 **NOT RUN**（`notRun: true`），报告里显示为
+  `NOT RUN` 而非 `FAIL`。
+
+- **自引用防护做了两条判据，各覆盖一种入口**（两条都有独立测试）：
+  1. 环境变量标记 `LOOP_HARNESS_ACTIVE_INIT`——`init.sh`（生成的与手写的）导出自身
+     绝对路径，下一层凭它认出递归。覆盖"消费方手写递归脚本"。
+  2. `root == PACK_ROOT`——兜底。覆盖"标记被绕过/不存在"的情况。
+  只做判据 1 时，任何手写递归 init.sh 就能重新引爆；只做判据 2 时，消费方的递归
+  脚本（root 不是 PACK_ROOT）拦不住。**两条都是必需的**，测试分别断言。
+  `pwd -W` 给出 `D:/repo/init.sh`（正斜杠）而 Node 给 `D:\repo\init.sh`，
+  所以配了 `samePath()` 做规范化——否则判定永远为假。
+
+- **4 次变异，全部确认落地后读结果**：
+
+  | 变异 | 结果 |
+  |---|---|
+  | 1. `detectSelfReference` 恒返回 false | ✅ **7 条红**，含"未在 25s 内返回——判据 5 很可能又递归进 init.sh 了" |
+  | 2. 禁用 GNU timeout（退回 Node timeout） | ✅ **3 条红**，含"pid 1151 仍存活——孤儿进程会继续烧 CPU" |
+  | 3. 生成的 init.sh 去掉标记 | ✅ **2 条红** |
+  | 4. 去掉 memoization | ✅ **1 条红**：`expected 1, got 3` |
+
+- **变异 2 当场抓出我自己引入的一个真 bug**：降级路径里 `timedOut` 与 `spawnFailed`
+  可以同时为 true（Node 的 timeout 也让 `status === null`），于是调用方按
+  `spawnFailed` 分支走，又把超时报成"bash 不可用"——正是本轮要修的那个误报。
+  修法：`spawnFailed = !timedOut && (...)`。**这就是变异回退的价值**：
+  这条路径在正常平台上永远不会走到（有 GNU timeout），只有变异才会暴露它。
+
+- **测试设计的一个改进**：自引用断言改用 `runWithTreeKill`（25s 上限）而不是裸
+  `execFileSync`。因为变异 1 会让测试**真的递归**——第一次跑就是 15 分钟没返回，
+  我不得不中途掐掉。**断言失效时必须快速变红，而不是把整个套件拖进被测代码的病里。**
+
+- **第 4 项提议（`--quick` 快慢分离）主动跳过**。修完自递归后 `init.sh` 已 45 秒，
+  快速子集的边际收益不再支撑它的复杂度——多一条"哪些断言属于快集"的真相源，
+  而本仓库的教训恰恰是"没人读的配置会漂移"。若断言数再翻倍，重开此项。
+
+- **`loop-audit.mjs` 的 `git log` 加了进程内缓存**。实测整个套件曾出现 2,343 次
+  `git log --oneline -25`（累计 173s），是递归树的副产品；但 `scoreHarness` 本身
+  也是热路径（测试套件调它十几次）。按 root 分键缓存——审计不写仓库，同进程内
+  历史不变。已确认测试套件不会中途 `git init`/`commit`，缓存安全。
 
 ### 2026-10-15 · workflow 预算接线 + LOOP_BOT_TOKEN（WP-09/WP-04 第二半）
 
