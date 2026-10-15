@@ -306,6 +306,30 @@
         "resolveCap 逐循环：issue-intake/pr-review-triage/ci-sweeper/merge-gate/post-merge-cleanup/release-drafter/daily-triage/lesson-harvest/signal-gatekeeper 全部 source=exact"
       ],
       "notes": "WP-09 的 A 类缺口第一半。原先断言写在单个文件上（/budget-check\\.mjs/.test(merge-gate.yml)），于是'另外 7 个 workflow 没接线'测不出来。本轮把断言改成规则：遍历 LOOP.md 注册的每个循环，逐一核对它在 loop-budget.md 里有自己的行。发现 signal-gatekeeper 同样注册为循环却没有预算行（registry.yaml 写着 suggested_daily_cap: 30000，但无消费者），一并补上。同时修 parseBudgetCaps 的静默回退：新增 slug 索引让表里的自然写法与循环 id 直接对上，capForPattern 的别名表退回真正的兜底，并新增 resolveCap 暴露解析路径（exact / alias:<表名> / null），使'借来的上限'与'自己的上限'在输出里可区分。另发现 loop-budget.md 与 LOOP.md 是两份各说各话的上限真相源，已记入 STATE.md Watch List。workflow 侧的接线（8 个 yml）仍未做——见 STATE.md High Priority。"
+    },
+    {
+      "id": "loop-005",
+      "priority": 1,
+      "area": "loop",
+      "title": "多循环协调的锁键在生产路径上真正生效",
+      "user_visible_behavior": "同一目标（分支/PR/issue）已被另一循环持有时，新的 workflow 运行产出 conflict=lock-held 并跳过落盘 work item；删掉任一 workflow 的 --target、或删掉写队列那一步的 if: 守卫，测试立刻变红",
+      "status": "passing",
+      "verification": [
+        "node scripts/test.mjs → 945 项断言全通过",
+        "逐条变异回退：删 --target / 删 conflict 消费 / 删 if: 守卫 / 给 release-draft 加 --target，四次都必须变红",
+        "bash init.sh → 退出码 0",
+        "行为断言：真跑 event-router CLI，有锁 → lock-held + held_by；目标不同 → 无冲突"
+      ],
+      "evidence": [
+        "node scripts/test.mjs → Passed: 945 / Failed: 0（本轮新增 14 条断言）",
+        "变异 1 删 pr-review 的 --target → FAIL 并指名 pr-review.yml",
+        "变异 2 把 jq -r '.conflict' 换成常量 → 第一版断言漏过，补强后 FAIL",
+        "变异 3 删写队列步骤的 if: 守卫 → 前两版断言漏过，改为按步骤定位后 FAIL",
+        "变异 4 给 release-draft 加 --target → FAIL（反向规则生效）",
+        "bash init.sh → INIT_EXIT=0",
+        "实测：传 --target main → conflict=lock-held；不传 → conflict 字段不存在"
+      ],
+      "notes": "WP-11 只改了技能文档，而 spec 状态表声称『断言已加并通过变异回退』——实际 test.mjs 里不存在针对 harness-loop/SKILL.md 的 --target 断言（grep '第 2 步' 命中 0 次）。本轮把断言补在规则层：落盘 work item 的 workflow 必须传 --target、必须真的读 conflict、写队列那一步必须有 if: 守卫；不落盘的不得传 --target。release-draft 有意排除（LOOP.md 列为可安全并发），并加注释说明是设计选择而非漏改。本轮工作曾被外部进程一次性还原，重做后立即提交（f36301b）。"
     }
   ]
 }
