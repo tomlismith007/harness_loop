@@ -19,7 +19,7 @@ import { parseArgs, boolArg, readRegistryStages, matchesDenylist, loadDenylist, 
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { route, ROUTES, readLocks } from './event-router.mjs';
 import { checkGates } from './gate-check.mjs';
-import { parseBudgetCaps, capForPattern } from './budget-check.mjs';
+import { parseBudgetCaps, capForPattern, resolveCap } from './budget-check.mjs';
 import { worktreeName } from './worktree.mjs';
 import { scoreHarness } from './loop-audit.mjs';
 
@@ -2336,6 +2336,57 @@ section('21. 预算与 kill switch（budget-check）');
       } catch (e) { return e.status; }
     })();
     eq('budget-check 拒绝未知标志', bad, 1);
+  }
+
+  // ---- 规则断言：LOOP.md 注册的每个循环都必须有自己的预算行 ----
+  //
+  // 这条断言防的是一整类漏改，而不是某个文件。此前的形态是
+  // `/budget-check\.mjs/.test(merge-gate.yml)`——断言写在单个文件上，
+  // 于是"另外 7 个 workflow 没接线"永远测不出来（WP-09 的实际失效）。
+  //
+  // 更根本的一层：即使 8 个 workflow 都调用了 budget-check，只要某个循环在
+  // loop-budget.md 里没有自己的行，它就会拿到 cap:null → mode:exit。
+  // 也就是说"接线"和"有上限"是两件事，必须分别守住。
+  {
+    // 从 LOOP.md 抽出注册的循环名。表格第一列是循环名（可能带中文括号注释）。
+    const loopMd = fs.readFileSync(path.join(PACK_ROOT, 'LOOP.md'), 'utf8');
+    const loopIds = [];
+    for (const line of loopMd.split('\n')) {
+      if (!line.trim().startsWith('|')) continue;
+      const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+      if (cells.length < 4) continue;
+      const name = cells[0];
+      if (/^[-: ]+$/.test(name) || name === '循环') continue;
+      const id = name.replace(/（[^）]*）|\([^)]*\)/g, '').trim().toLowerCase().replace(/\s+/g, '-');
+      if (/^[a-z][a-z0-9-]*$/.test(id)) loopIds.push(id);
+    }
+    ok('LOOP.md 能抽出注册的循环', loopIds.length >= 8, `抽出 ${loopIds.length} 个: ${loopIds.join(', ')}`);
+
+    const caps = parseBudgetCaps(fs.readFileSync(path.join(PACK_ROOT, 'loop-budget.md'), 'utf8'));
+    const uncapped = loopIds
+      .filter((id) => resolveCap(caps, id).cap === null)
+      .map((id) => `${id}（loop-budget.md 里没有对应行）`);
+    ok('每个注册循环都有预算上限（否则它一接线就 mode=exit）',
+      uncapped.length === 0, uncapped.join('; '));
+
+    // 双向：新加一个循环但忘了配预算 → 必须变红。
+    // 只测"现有 8 个都有"是不够的——那证明不了这条规则会拦住第九个。
+    const probe = resolveCap(caps, 'brand-new-loop-nobody-capped');
+    eq('未登记的循环解析不到上限（规则真的生效）', probe.cap, null);
+    ok('未登记时来源为 null（调用方据此区分"借来的上限"）', probe.source === null, JSON.stringify(probe));
+
+    // 解析路径必须可区分，且**双向**：
+    //   - 注册的循环各有自己的行 → exact
+    //   - 表里没有的历史/别名 id → alias（而不是 null，也不是 exact）
+    // 只测一个方向是不够的：若全部报 exact，就说明别名表已经死掉；
+    // 若注册循环报 alias，就说明它有借来的上限而不是自己的。
+    eq('注册循环报 exact（有自己的行）', resolveCap(caps, 'ci-sweeper').source, 'exact');
+    eq('daily-triage 报 exact', resolveCap(caps, 'daily-triage').source, 'exact');
+    ok('非注册的历史 id 靠别名兜底',
+      String(resolveCap(caps, 'ci-triage').source).startsWith('alias:'),
+      String(resolveCap(caps, 'ci-triage').source));
+    eq('别名兜底与自成一行的循环解析到同一个上限',
+      resolveCap(caps, 'ci-triage').cap, resolveCap(caps, 'ci-sweeper').cap);
   }
 
   fs.rmSync(tmp, { recursive: true, force: true });

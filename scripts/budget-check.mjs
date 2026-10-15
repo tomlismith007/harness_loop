@@ -49,29 +49,58 @@ export function parseBudgetCaps(text) {
     if (/^[-: ]+$/.test(name) || /循环|loop/i.test(name) && /token/i.test(tokenCap)) continue;
     const m = String(tokenCap).match(/^(\d+(?:\.\d+)?)\s*k$/i);
     if (!m) continue;
-    caps[name.toLowerCase()] = Math.round(Number(m[1]) * 1000);
+    const cap = Math.round(Number(m[1]) * 1000);
+    const lower = name.toLowerCase();
+    caps[lower] = cap;
+    // 同时按"空格 → 连字符"建索引，让表里的自然写法（`Issue Intake`）
+    // 与循环 id（`issue-intake`）直接对上。没有这一层时，自然写法的行
+    // 只能靠 capForPattern 的别名表兜底——而兜底是启发式的，新循环会被
+    // 静默算到别的循环头上，正是"per-loop 上限"失效的那种失效。
+    const slug = lower.replace(/\s+/g, '-');
+    if (slug !== lower) caps[slug] = cap;
   }
   return caps;
 }
 
-/** 把 pattern id 映射到 loop-budget.md 的循环名。 */
-export function capForPattern(caps, pattern) {
+/**
+ * 把 pattern id 映射到 loop-budget.md 的循环名。
+ *
+ * 返回值带 `source`，因为**静默回退与正确解析在退出码上不可区分**：
+ * 一个没有自己预算行的 pattern 会退回到别的循环的上限，而调用方看到的是
+ * 一个正常的百分比。曾经正是这种静默让"per-loop 上限"名存实亡。
+ * 现在把解析路径报出来，让回退可见。
+ *
+ * source 取值：
+ *   'exact'          该 pattern 在表里有自己的一行（正常）
+ *   'alias:<表名>'   靠别名表兜底（表名是自然写法，见 loop-budget.md）
+ *   null             没有匹配到任何行 —— 调用方必须按"无上限"处理（退出）
+ */
+export function resolveCap(caps, pattern) {
   const p = String(pattern || '').toLowerCase();
-  const direct = caps[p];
-  if (direct !== undefined) return direct;
-  // pattern id 与中文/英文表名不同名，做一次包含匹配。
+  if (!p) return { cap: null, source: null };
+  if (caps[p] !== undefined) return { cap: caps[p], source: 'exact' };
+
+  // 别名表：只覆盖"表名是自然写法、id 是连字符写法"的已知循环。
+  // 每项都锚定到 id 的词首或明确形态，避免 `/issue/` 这类子串匹配把
+  // 无关的 id（如 ci-issue-sweeper）静默算到别的循环头上。
+  // 顺序无关紧要——它们是互斥的——但保持具体者在前便于阅读。
   const aliases = [
-    [/intake|issue/, 'issue intake'],
-    [/pr-review|review-triage|babysitter/, 'pr review triage'],
-    [/ci-sweeper|ci-triage|ci-/, 'ci sweeper'],
-    [/merge-gate|gate/, 'merge gate'],
-    [/post-merge|cleanup/, 'post-merge cleanup'],
-    [/release|changelog|drafter/, 'release drafter'],
+    [/^ci-sweeper$|^ci-triage$|^ci-/, 'ci sweeper'],
+    [/^pr-review|review-triage|babysitter/, 'pr review triage'],
+    [/^issue-intake$|^intake$|^issues?-/, 'issue intake'],
+    [/^merge-gate$|^gate$/, 'merge gate'],
+    [/^post-merge|cleanup/, 'post-merge cleanup'],
+    [/^release|changelog|drafter/, 'release drafter'],
   ];
   for (const [re, name] of aliases) {
-    if (re.test(p) && caps[name] !== undefined) return caps[name];
+    if (re.test(p) && caps[name] !== undefined) return { cap: caps[name], source: `alias:${name}` };
   }
-  return null;
+  return { cap: null, source: null };
+}
+
+/** 兼容入口：只取上限数字。新代码用 resolveCap 以便看到解析路径。 */
+export function capForPattern(caps, pattern) {
+  return resolveCap(caps, pattern).cap;
 }
 
 /**
@@ -126,13 +155,16 @@ export function decide(used, cap, paused, thresholds = DEFAULT_THRESHOLDS) {
 
 export function checkBudget(root, pattern, today = new Date().toISOString().slice(0, 10)) {
   const caps = parseBudgetCaps(readText(path.join(root, 'loop-budget.md')));
-  const cap = capForPattern(caps, pattern);
+  const { cap, source: capSource } = resolveCap(caps, pattern);
   const { used, entries } = sumTodaySpend(readText(path.join(root, 'loop-run-log.md')), pattern, today);
   const { paused, where } = isPaused(root);
   const d = decide(used, cap, paused);
   return {
     pattern: pattern ?? null,
     cap,
+    // 上限是从哪来的：'exact' / 'alias:<表名>' / null。
+    // 调用方据此能区分"这个循环有自己的上限"与"它借了别人的"。
+    cap_source: capSource,
     used,
     entries,
     paused,

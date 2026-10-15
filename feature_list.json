@@ -1,6 +1,6 @@
 {
   "project": "harness_loop",
-  "last_updated": "2026-10-13",
+  "last_updated": "2026-10-15",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -283,6 +283,29 @@
         "node scripts/loop-audit.mjs . → 94/100 L2（原 98/L3 为虚高：把 manual 开发记录当成了循环活动）"
       ],
       "notes": "按 REVIEW-2026-10-14-remediation-spec.md 的 28 个工作包落地，修掉审查报告的 31 项缺陷（HL-01…HL-31）。新增三个脚本：budget-check（per-loop 上限真正生效）、queue-read（第 0 步的队列读取契约）、worktree（隔离要求首次有代码入口）。审计分数从 98/L3 降到 94/L2 是唯一正确的退步——它把虚高的就绪度还原成真实状态。"
+    },
+    {
+      "id": "loop-004",
+      "priority": 1,
+      "area": "loop",
+      "title": "每个注册循环都有自己的预算上限，且这条规则被断言守住",
+      "user_visible_behavior": "在 loop-budget.md 里删掉任一循环的预算行，测试立刻变红并指出是哪个循环；budget-check --pattern <任意注册循环> 都解析到该循环自己的上限，而不是全表最大值或别人的上限",
+      "status": "passing",
+      "verification": [
+        "node scripts/test.mjs → 931 项断言全通过",
+        "逐条变异回退：删预算行 / 去掉 slug 索引 / 让未知循环 fail-open，三次都必须变红",
+        "bash init.sh → 退出码 0",
+        "node -e 逐循环打印 resolveCap，确认 9 个注册循环全部 source=exact"
+      ],
+      "evidence": [
+        "node scripts/test.mjs → Passed: 931 / Failed: 0（本轮新增 8 条断言）",
+        "变异 1 删 signal-gatekeeper 行 → FAIL '每个注册循环都有预算上限' 并指名该循环",
+        "变异 2 去掉 parseBudgetCaps 的 slug 索引 → FAIL '注册循环报 exact'，得到 alias:ci sweeper",
+        "变异 3 让 resolveCap 对未知循环返回 500000 → 3 条 FAIL（含既有的'没有 per-loop 上限时退出'）",
+        "bash init.sh → INIT_EXIT=0",
+        "resolveCap 逐循环：issue-intake/pr-review-triage/ci-sweeper/merge-gate/post-merge-cleanup/release-drafter/daily-triage/lesson-harvest/signal-gatekeeper 全部 source=exact"
+      ],
+      "notes": "WP-09 的 A 类缺口第一半。原先断言写在单个文件上（/budget-check\\.mjs/.test(merge-gate.yml)），于是'另外 7 个 workflow 没接线'测不出来。本轮把断言改成规则：遍历 LOOP.md 注册的每个循环，逐一核对它在 loop-budget.md 里有自己的行。发现 signal-gatekeeper 同样注册为循环却没有预算行（registry.yaml 写着 suggested_daily_cap: 30000，但无消费者），一并补上。同时修 parseBudgetCaps 的静默回退：新增 slug 索引让表里的自然写法与循环 id 直接对上，capForPattern 的别名表退回真正的兜底，并新增 resolveCap 暴露解析路径（exact / alias:<表名> / null），使'借来的上限'与'自己的上限'在输出里可区分。另发现 loop-budget.md 与 LOOP.md 是两份各说各话的上限真相源，已记入 STATE.md Watch List。workflow 侧的接线（8 个 yml）仍未做——见 STATE.md High Priority。"
     }
   ]
 }

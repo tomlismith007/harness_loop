@@ -1,12 +1,16 @@
 # Loop State
 
-Last run: 2026-10-14 (remediation spec — WP-01 … WP-28)
+Last run: 2026-10-15 (per-loop 预算上限 — WP-09 缺口第一半)
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表、本轮噪声。**每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
 
-- [x] **本轮已完成**：按 `REVIEW-2026-10-14-remediation-spec.md` 落地全部 28 个工作包，修掉三份审查里的 31 项缺陷（HL-01…HL-31）。断言 724 → 923，每个 WP 都做过变异回退（改回错误写法确认测试变红）。详见 `loop-run-log.md` 本轮条目。
+- [x] **本轮已完成**：WP-09 的 A 类缺口第一半。**没有照原方案做**——原方案"给 8 个 workflow 加 `budget-check` 调用"实测会立刻炸：`daily-triage` 与 `lesson-harvest` 在 `loop-budget.md` 里根本没有行，`budget-check` 对无上限返回 `cap:null` → `mode:exit`，两个 workflow 会在自己的预算检查里直接死掉。先做前置：补 3 个循环的预算行（含同样注册为循环却无预算行的 `signal-gatekeeper`）、修 `parseBudgetCaps` 的静默回退与过宽别名、新增 `resolveCap` 暴露解析路径。断言从"单文件"改成"规则"：遍历 `LOOP.md` 注册的每个循环核对预算行。断言 923 → 931，3 次变异全部确认落地并变红。
+- [ ] **WP-09 第二半（workflow 接线）**：8 个 workflow 里只有 `merge-gate` 调用 `budget-check.mjs`。`daily-triage` / `lesson-harvest` 仍用 `Math.max(...caps)` 内联取全表最大上限，且其正则 `/\{.*\}/g` 不带 `s`/`m` 标志，**跨多行的 JSON 记录一条都匹配不上** → 预算恒为 0%；另 5 个完全没有预算与 kill switch。注意：这两个 workflow 恰好是唯二在写 `loop-run-log.md` 的，而 run-log 是 `budget-check` 的唯一数据源——真正活跃的循环贡献的花费在"今天花了多少"里是隐形的。规则应按**消耗 token / 调用 `gh`** 划，不是按"产不产 work item"（`release-draft` 不产 work item 但会 `gh pr list`，且 `on: push: tags` 可反复触发）。
+- [ ] **锁键 `--target`：8/8 workflow 全都没传**（实测：传 `--target main` → `conflict: "lock-held"`；不传 → `conflict: undefined`）。`LOOP.md` 的"同一分支每小时最多一个循环修改"是**多循环协调的唯一机制**，而生产路径上一次都没触发过。WP-11 只改了技能文档，断言只测"文档里写了 `--target`"。与 WP-09/WP-04 是同一个病，换了个位置。
+- [ ] **WP-04 第二半（`LOOP_BOT_TOKEN`）**：8 个 workflow 里只有 `merge-gate` 用 `LOOP_BOT_TOKEN || GITHUB_TOKEN`；另 7 个是裸 `GITHUB_TOKEN`。断言用 `.some()`，1/8 也算通过——强度不足以守住它声称守住的东西。实测只有 3 个 workflow 真的调用 `gh`（`daily-triage` / `merge-gate` / `release-draft`），另 5 个不调 `gh`，所以 token 问题实际面是 3 个。
+- [ ] **单个修复的文件数阈值自相矛盾**：`loop-constraints.md` 写"超过 5 个文件 → 停止并升级"，`LOOP.md` 写"超过 10 个文件 → 人工审批"。两处阈值不一致，且 WP-09 的完整修复面（8 yml + test.mjs + loop-budget.md）会撞上 5 文件那条。必须拆分或先统一阈值。
 - [ ] **真机验证（硬约束 10）**：`WP-04` 的注入修复与 `WP-02`/`WP-07` 改变的装配/接线形态，目前只验证到"本地临时目录 + 本地模拟"。合并进任何项目前，必须在一个测试仓库上跑一次真实事件，确认 workflow 能执行 `event-router` 并把 work item 交付出来。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整（本仓库是技能源仓库，见 Post-Run Critique）。
 - [ ] 把三份审查里**未纳入本轮范围**的项排进下一轮（见下方「Watch List」）。
@@ -35,7 +39,20 @@ Last run: 2026-10-14 (remediation spec — WP-01 … WP-28)
     即可满足。
   - `detectLoopActivity` 的 git 历史分支匹配 commit message 子串，在本仓库几乎必然命中。
   - `**/*_key*` 会误命中 `src/monkey_key.ts`。**有意保留**：拒绝列表宁可多拦不可漏拦。
-  - `loop-budget.md` 的 per-loop 上限没被真正使用（`Math.max(...caps)` 取全表最大值 500k）。
+  - ~~`loop-budget.md` 的 per-loop 上限没被真正使用（`Math.max(...caps)` 取全表最大值 500k）。~~
+    **2026-10-15 更新**：脚本侧已修完（`budget-check.mjs` 按 pattern 取该循环自己的上限，
+    并新增 `resolveCap` 暴露解析路径；`loop-budget.md` 补齐 3 个缺失的循环行）。
+    **剩下的纯是接线**：8 个 workflow 里只有 `merge-gate` 调用它。见 High Priority。
+  - **`loop-budget.md` 与 `LOOP.md` 是两份各说各话的上限真相源**：`LOOP.md` 的"已注册循环"
+    表也有"每日 token 上限"列（80k/300k/500k/100k/200k/100k），值目前与 `loop-budget.md`
+    一致，但**没有任何东西在校验两者相等**。`budget-check` 只读 `loop-budget.md`。
+    改一处不改另一处会静默产生两个不同的上限。要么让 `LOOP.md` 那列指向 `loop-budget.md`，
+    要么加一条双向断言。`patterns/registry.yaml` 的 `suggested_daily_cap` 是**第三份**
+    （8 个循环，无任何消费者）——三个真相源。
+  - **`patterns/registry.yaml` 的 `patterns:` 段整段没有消费者**：`suggested_daily_cap`
+    被 `grep` 确认无任何脚本读取；`readRegistryDefaults` 只读 `defaults:` 段，
+    `readRegistryStages` 只读 `stages:` 段。`patterns:` 段（8 个循环的机器可读定义）
+    目前是纯文档。与 WP-21 修掉的 `stages:` 是同一类病，只是还没轮到它。
   - `loop-verifier` 判据里"verifier 与执行者共享上下文则升级"依赖模型自觉，建议改成结构性保证
     （在调用者侧强制新上下文）。
   - `schedule:daily` / `issue_comment.created` / `check_run.completed` 等路由仍缺。本轮只把
@@ -56,6 +73,44 @@ Last run: 2026-10-14 (remediation spec — WP-01 … WP-28)
 —
 
 ## Post-Run Critique (from last run)
+
+### 2026-10-15 · per-loop 预算上限（WP-09 缺口第一半）
+
+- **本轮做了什么**：独立复核上一轮 agent 的自报缺口后，重做了 WP-09 的前置部分。
+  补 `loop-budget.md` 的 3 个缺失循环行、修 `parseBudgetCaps` 的静默回退与过宽别名、
+  新增 `resolveCap` 暴露解析路径、把断言从"单文件"改成"规则"。断言 923 → 931。
+
+- **原方案照做会当场炸，这是本轮最重要的一条**。上一轮 agent 提的修法是
+  "给 8 个 workflow 加 `budget-check` 调用"。实测：`daily-triage` 与 `lesson-harvest`
+  在 `loop-budget.md` 里**根本没有行**，而 `budget-check` 对无上限返回
+  `cap:null` → `mode:exit`（这是**正确**行为：没有上限就没有刹车）。于是按它的
+  workflow 模板（`if MODE = exit; then exit 1`），这两个 workflow 会在自己的预算
+  检查里直接死掉。**"给所有 workflow 接线"和"所有循环都有上限"是两件事，
+  必须分别守住**——前者是接线，后者是配置。只做前者会把一个静默失效换成硬崩溃。
+
+- **规则断言 vs 单文件断言**：原断言是 `/budget-check\.mjs/.test(merge-gate.yml)`——
+  写在单个文件上，所以"另外 7 个没接线"永远测不出来。新断言遍历 `LOOP.md` 注册的
+  每个循环，逐一核对预算行，并且**双向**：注册循环报 `exact`、非注册 id 报 `alias:`。
+  只测一个方向不够——全报 `exact` 说明别名表死了，注册循环报 `alias` 说明它借的是别人的上限。
+  这条断言当场抓到了 `signal-gatekeeper`：它注册为循环（`registry.yaml` 有
+  `suggested_daily_cap: 30000`）却没有任何预算行。
+
+- **静默回退是"配置存在却无人读取"的第二种形态**。上一轮修的是"没人读配置"；
+  这一轮发现的是"读了，但读错了地方还不出声"：`parseBudgetCaps` 只按表名原样建索引，
+  于是 `| Issue Intake |` 这行对 `--pattern issue-intake` 不可见，只能靠别名表兜底，
+  而兜底是启发式的——`/issue/` 会命中**任何**含 `issue` 的 id。
+  修法是让表名与循环 id 直接对上（slug 索引），别名表退回真正的兜底，
+  并新增 `resolveCap` 返回 `source`，让"借来的上限"在输出里可见。
+
+- **三份真相源**：`loop-budget.md`、`LOOP.md` 的"每日 token 上限"列、
+  `registry.yaml` 的 `suggested_daily_cap`——三者值目前一致，但没有任何东西校验。
+  `budget-check` 只读第一份。已记入 Watch List。
+
+- **变异回退 3 次，全部确认落地后读结果**：删预算行 → 断言指名 `signal-gatekeeper`；
+  去掉 slug 索引 → 断言报 `alias:ci sweeper`；让未知循环 fail-open →
+  3 条断言同时红（含既有的"没有 per-loop 上限时退出"）。
+  **我自己的第一条新断言写错了方向**（断言注册循环报 `alias`，而修复后正确行为是 `exact`），
+  被测试当场抓住——这与既有模式一致：新写的断言默认要验证方向。
 
 ### 2026-10-14 · remediation spec 全量落地（WP-01 … WP-28）
 

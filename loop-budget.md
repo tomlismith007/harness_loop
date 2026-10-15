@@ -13,6 +13,24 @@
 | Merge Gate | 48 | 100k | 1 |
 | Post-Merge Cleanup | 1 | 200k | 2 |
 | Release Drafter | 1 | 100k | 1 |
+| daily-triage | 1 | 50k | 0 |
+| lesson-harvest | 1 | 60k | 0 |
+| signal-gatekeeper | — | 30k | 0 |
+
+**行名的第一列是被代码消费的，不是给人看的标签。** `scripts/budget-check.mjs` 的
+`--pattern <id>` 按这一列查上限；查不到时返回 `cap: null`，而 `decide()` 对无上限的
+行为是**退出**（没有上限就没有刹车，不能静默放行）。
+
+- 自然写法（`Issue Intake`）与连字符写法（`issue-intake`）都认：`parseBudgetCaps`
+  同时按两种形态建索引，所以**表里每一行都必须能对上 `LOOP.md` 注册的一个循环**。
+- `test.mjs` 第 21 节有一条断言逐行核对这件事：在 `LOOP.md` 注册了循环却没有
+  对应预算行 → 测试变红。这是"新增循环忘了配预算"的机械防线。
+- `daily-triage` / `lesson-harvest` / `signal-gatekeeper` 不在事件脊上
+  （见 `LOOP.md` 的"非事件驱动循环"），但同样消耗 token，所以同样需要上限——
+  在此之前它们没有任何预算入口。
+
+上限值以 `patterns/registry.yaml` 的 `suggested_daily_cap` 为准，两处不一致时
+按本节的值执行（本节是 `budget-check.mjs` 实际读的那份）。
 
 ## Thresholds
 
