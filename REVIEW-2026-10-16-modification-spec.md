@@ -1103,6 +1103,9 @@ MP-02、MP-06 改的是**厂商接入**（GitHub Actions + `gh` + token 回退�
 
 ### 有意未做（附理由，可核对）
 
+共 **15 项**：MP-06…MP-09、MP-12…MP-19（12 项修改项）+ 3 项验证类（真机、Linux、`--upgrade` 写入路径）。
+MP-10 与 MP-11 虽列在 M2，已提前完成，故不在此表。
+
 | 项 | 状态 | 为什么没做 | 怎么核实 |
 |---|---|---|---|
 | MP-06 `run-log-append.mjs` | 未做 | **被 spec §8 待决 1 阻塞**：runner 文件系统是临时的，写入不持久化到仓库；三种持久化方式（提交分支 / PR 评论 / 由 agent 平台写）各有取舍，需先决策。在决策前实现等于给空气记账——`used` 仍会是 0。 | `scripts/run-log-append.mjs` 不存在；`budget-check --pattern issue-intake` 仍 `used: 0` |
