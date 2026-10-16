@@ -95,6 +95,31 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch verifier report
+        id: verifier
+        env:
+          GH_TOKEN: ${{ secrets.LOOP_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # verifier 的产出以带标记的 PR 评论形式存在，**绝不从检出目录读取**。
+          # 此前读的是工作区里的 verifier-report.md，而实现者可以把任何文件
+          # 提交进 PR——闸门照收。只有 bot 账号能发这条评论，所以它是实现者
+          # 无法伪造的来源。
+          set -euo pipefail
+          REPORT="$RUNNER_TEMP/verifier-report.md"
+          gh pr view "$PR_NUMBER" --json comments \
+            | jq -r '[.comments[] | select(.body | startswith("<!-- loop-verifier-report -->"))] | last | .body // ""' \
+            > "$REPORT.raw"
+          if [ ! -s "$REPORT.raw" ] || [ "$(cat "$REPORT.raw")" = "null" ]; then
+            echo "verdict=awaiting" >> "$GITHUB_OUTPUT"
+            echo "No verifier report on this PR yet — merge is blocked pending verification."
+            exit 0
+          fi
+          sed '1d' "$REPORT.raw" > "$REPORT"
+          VERDICT="$(grep -m1 -oE 'APPROVE|REJECT|ESCALATE_HUMAN' "$REPORT" || echo awaiting)"
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+          echo "evidence=$REPORT" >> "$GITHUB_OUTPUT"
+
       - name: Run gate check
         id: gate
         env:
@@ -103,20 +128,32 @@ jobs:
           REVIEWED_SHA: ${{ steps.rev.outputs.reviewed }}
           HEAD_SHA: ${{ steps.rev.outputs.head }}
           RED_CHECK: ${{ steps.red.outputs.state }}
+          VERDICT: ${{ steps.verifier.outputs.verdict }}
+          EVIDENCE_FILE: ${{ steps.verifier.outputs.evidence }}
         run: |
-          # 四个参数不可省，省掉会让对应闸门失效或必然升级：
+          # 参数不可省，省掉会让对应闸门失效或必然升级：
           #   --reviewed-sha/--head-sha → 约束 7（TOCTOU）
           #   --red-check               → 约束 8（回退测试）
           #   --evidence-file           → verdict 是断言，不是证据
-          # 此前的调用只传了 4 个参数，于是每个 ready_for_review 的 PR 都收到
-          # "human decision required"——持续假升级会训练人忽略它。
+          #
+          # verdict 来自 verifier 的产出，不再硬编码。此前这里写死 `--verdict none`，
+          # 而规则 9 是 "verdict none + gate 阶段 → escalate"，于是这个 workflow
+          # **从未放行过任何 PR**——每个 ready_for_review 都收到同一条升级，
+          # 而持续假升级会训练人忽略它（文件自己的注释就这么写着）。
           EVIDENCE=""
-          if [ -f verifier-report.md ]; then EVIDENCE="--evidence-file verifier-report.md"; fi
+          if [ -n "$EVIDENCE_FILE" ]; then EVIDENCE="--evidence-file $EVIDENCE_FILE"; fi
+          if [ -z "$VERDICT" ] || [ "$VERDICT" = "awaiting" ]; then
+            # 没验 ≠ 验失败。闸门自己会把这条报成 gate: "awaiting-verification"，
+            # 所以这里只传 none，不重写结果——调用方改写闸门输出会让
+            # "闸门说了什么"与"报告显示了什么"变成两份真相源。
+            echo "::warning::No verifier verdict on this PR — awaiting verification, not a failure."
+            VERDICT="none"
+          fi
           node scripts/gate-check.mjs \
             --item "pr-${PR_NUMBER}" \
             --phase gate \
             --diff-files @changed.txt \
-            --verdict none \
+            --verdict "$VERDICT" \
             --budget-pct "$BUDGET_PCT" \
             --reviewed-sha "$REVIEWED_SHA" \
             --head-sha "$HEAD_SHA" \

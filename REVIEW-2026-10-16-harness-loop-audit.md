@@ -41,7 +41,7 @@
 4. **当前不适合直接用于真实项目**；适合作为"受控试验 + 只读报告模式（L1）"使用，L2 自动修复路径在修掉 P0-01/P0-02 之前不建议开启。
 5. 信心**中等偏高**：结论基于实际命令执行与逐文件阅读；限制是全部验证只在本机 Windows/MSYS 完成，Linux 行为（GNU timeout 路径）与真实 GitHub 仓库行为未能验证，目标 agent 的触发行为是基于文本的预测。
 
-**问题分布**：P0 × 2，P1 × 7，P2 × 10，P3 × 3，合计 22 条。
+**问题分布**：P0 × 2，P1 × 7，P2 × 10，P3 × 3，合计 22 条。**第 4 轮撤销 1 条（P2-01），有效 21 条。**
 
 **第 3 轮复核结论（2026-10-16）**：逐条重跑关键探针后，**20 条原样成立，1 条表述错误（P1-07），1 条触发条件错误（P2-08），1 条从"存疑"升格为"已确认"（P1-04 的 `noop`）**。没有发现凭空捏造的结论。两处错误都**直接改变实施动作**——见 §7.4 与 §9.4，实施前必读。
 
@@ -186,7 +186,20 @@
 
 ### 3.3 P2 级
 
-#### P2-01 `loop-audit` 的占位符守卫在 CRLF 下静默失效
+#### P2-01 `loop-audit` 的占位符守卫在 CRLF 下静默失效 —— **已证伪，撤销**
+
+> **第 4 轮撤销（2026-10-17）**：实现 MP-03 时走代码路径复测，**该条不成立**。
+> `loop-audit.mjs:130` 是 `const value = lastRunMatch[1].trim();`——`.trim()` 会去掉 `\r`；
+> 而且 `.` 本就不匹配 `\r`，捕获组根本不会包含它。所以 `value` 从来不是 `"never\r"`，
+> `isPlaceholder` 一直为 `true`，守卫**不是**死代码。
+>
+> 报告（和第三轮复核）都在**孤立地测正则**——把 `'never\r'` 直接喂给 `/^(never|…)$/i`
+> 看它不匹配，就下了结论。**这正是同一份报告里反复批评的"只测了一半"**：
+> 没有走被测代码的真实路径。`P1-01` 是真的（`queue-read.mjs:71` 的正则确实带 `$`
+> 且没有 `.trim()`），但 `P2-01` 不是——两条的差别就在那个 `.trim()`。
+>
+> **因此 MP-03 只做 P1-01 的部分**（`readText` 归一化 + queue-read 正则收尾），
+> 不包含"修复 loop-audit 的守卫"——那条不需要修。
 
 - **位置**：`scripts/loop-audit.mjs:131` `const isPlaceholder = /^(never|—|-|none|n\/a|tbd|todo)$/i.test(value);`
 - **证据**：`value` 来自 `stateText.match(/last\s*run\s*[:：]\s*(.+)/i)[1].trim()`，而 `.` 不匹配 `\r`，所以 CRLF 下 `value === "never\r"` → `isPlaceholder === false`。逐字验证：`'never\r'` 不匹配该正则，`'never'` 匹配。
@@ -383,7 +396,7 @@
 | P1-05 | 每小时一改 / 验证者独立实例 / worktree 强制三条硬约束无运行时实现 | `scripts/` grep 无实现；`loop-verifier/SKILL.md` | 高 | 1 | 已确认 |
 | P1-06 | `hasEventWiring` 假阳性：本包 CI 被判为已接线，`no-wiring` 永不触发，污染 Stage 3 判据 | `scripts/lib/common.mjs`；实跑 `hasEventWiring('.')` | 高 | 1 | 已确认 |
 | P1-07 | 对**多行清单**忘记 `@` 使拒绝列表 + 范围两个闸门同时静默失效（**第 3 轮已修正触发条件**） | `scripts/gate-check.mjs:399-410`；`--diff-files big.txt` vs `@big.txt` 对照 | 高 | 2（轮 3 修正） | 已确认（表述已更正） |
-| P2-01 | `loop-audit` 占位符守卫在 CRLF 下失效（死代码） | `scripts/loop-audit.mjs:131`；正则逐字验证 | 中 | 1 | 已确认 |
+| P2-01 | ~~`loop-audit` 占位符守卫在 CRLF 下失效（死代码）~~ | `scripts/loop-audit.mjs:130` 有 `.trim()`，守卫**一直有效** | — | 1 | **已证伪（第 4 轮撤销）** |
 | P2-02 | 安装漂移检测默认走错目录、清单缺 layout/dotDir、真实漂移已发生且无人发现 | `scripts/install-skills.mjs:206-269`；实跑 `--check` × 3 | 中 | 1 | 已确认 |
 | P2-03 | 文件数阈值 5 vs 10 两份真相源 | `loop-constraints.md:51` / `minimal-fix/SKILL.md:26` vs `LOOP.md:157` | 中 | 1 | 已确认 |
 | P2-04 | 无任何工具范围声明；读侧无权限隔离 | 17 个技能 grep `allowed-tools` = 0；`loop-audit.mjs:290` FAIL | 中 | 1 | 已确认 |

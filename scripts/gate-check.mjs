@@ -237,6 +237,7 @@ export function checkGates(input, opts = {}) {
   //     没有这一步时，调用方填 --verdict approve 即可通过，而"独立验证"与
   //     "审查过的 commit"两条硬约束都由调用方自证——一个接受自证的闸门，
   //     和一个不存在的闸门，在退出码上不可区分。
+  let evidenceNotRun = [];
   if (phase === 'gate' && verdict === 'approve') {
     if (!evidenceFile) {
       return {
@@ -265,10 +266,25 @@ export function checkGates(input, opts = {}) {
     // 这两条正则与 loop-verifier/SKILL.md 的输出格式一致——那份格式早就是现成的接口，
     // 只是此前没有任何东西读它。
     const verdictLine = report.match(/^##\s*Verdict:\s*(APPROVE|REJECT|ESCALATE_HUMAN)/m);
-    const hasCommandEvidence = /^\s*-\s*(Tests|Red check|Real-use validation|Lint|Scope check|Denylist check):\s*`[^`]+`\s*→\s*(PASS|FAIL|NOT RUN)/m.test(report);
+    // 解析出**状态值**，而不只是匹配形状。
+    //
+    // 曾经这条只问"有没有一行长得像证据"，于是：
+    //   - `## Verdict: APPROVE` + `- Tests: `npm test` → FAIL` 通过（自相矛盾）
+    //   - 全部 NOT RUN 通过
+    //   - 缺 `### Checks not run` 整节也通过
+    // 一份自相矛盾的报告比没有报告更容易过——没有报告会 escalate，而
+    // "APPROVE + 全 FAIL" 会 proceed。闸门是"独立验证"承诺的唯一机械执行点，
+    // 只匹配形状等于它不存在（硬约束 11）。
+    //
+    // 箭头同时接受 U+2192 与 ASCII `->`：同一份报告在两种输入法下必须等价，
+    // 否则一个字符的差异会静默改变闸门结果。
+    const EVIDENCE_LINE = /^\s*-\s*(Tests|Red check|Real-use validation|Lint|Scope check|Denylist check):\s*`[^`]+`\s*(?:→|->)\s*(PASS|FAIL|NOT RUN)\s*$/gm;
+    const checks = [...report.matchAll(EVIDENCE_LINE)].map((m) => ({ name: m[1], status: m[2] }));
     const missing = [];
     if (!verdictLine) missing.push('a "## Verdict: APPROVE|REJECT|ESCALATE_HUMAN" line');
-    if (!hasCommandEvidence) missing.push('at least one "- Tests|Red check|Real-use validation: `<cmd>` → PASS|FAIL|NOT RUN" line');
+    if (checks.length === 0) {
+      missing.push('at least one "- <check>: `<cmd>` → PASS|FAIL|NOT RUN" line (→ or ->)');
+    }
     if (missing.length) {
       return {
         ...base,
@@ -278,6 +294,46 @@ export function checkGates(input, opts = {}) {
         allowed_actions: ['re-run loop-verifier and save its full report'],
         exit_code: 2,
         next: 'the report exists but carries no verifiable verdict/command lines. See loop-verifier SKILL.md output format.',
+      };
+    }
+    // 自相矛盾：报告说 APPROVE，但有一项检查 FAIL。
+    const failed = checks.filter((c) => c.status === 'FAIL').map((c) => c.name);
+    if (failed.length) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `evidence says APPROVE but ${failed.length} check(s) report FAIL: ${failed.join(', ')}`,
+        allowed_actions: [],
+        exit_code: 2,
+        next: 'a verdict that contradicts its own evidence is worse than no verdict. Return to the fix phase.',
+      };
+    }
+    // `### Checks not run` 节必须存在。loop-verifier 把"没跑的检查必须列在这里、
+    // 不允许省略"定为硬规则（即使为空也要写 `—`），而此前闸门完全不读这条规则。
+    const notRunSection = report.split(/^###\s+Checks not run\s*$/m)[1]?.split(/^#{2,3}\s/m)[0];
+    if (notRunSection === undefined) {
+      missing.push('a "### Checks not run" section (write `—` when empty)');
+    } else {
+      // 证据里声明 NOT RUN 的项必须出现在该节里（反向校验）。
+      // 否则"没跑"可以只写在证据行里、却不进缺口清单——那正是这条规则要防的省略。
+      const undeclared = checks
+        .filter((c) => c.status === 'NOT RUN')
+        .map((c) => c.name)
+        .filter((n) => !new RegExp(`\\b${n}\\b`, 'i').test(notRunSection));
+      if (undeclared.length) {
+        missing.push(`NOT RUN checks missing from "### Checks not run": ${undeclared.join(', ')}`);
+      }
+    }
+    if (missing.length) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `evidence file ${evidenceFile} is missing: ${missing.join('; ')}`,
+        allowed_actions: ['re-run loop-verifier and save its full report'],
+        exit_code: 2,
+        next: 'the report exists but does not account for what was not run. See loop-verifier SKILL.md output format.',
       };
     }
     // 报告自称 REJECT / ESCALATE_HUMAN 时，命令行说 approve 不成立。
@@ -292,6 +348,8 @@ export function checkGates(input, opts = {}) {
         next: 'the report is the authoritative verdict; pass --verdict matching it',
       };
     }
+    // 证据里声明的 NOT RUN 必须进入输出，而不是只回显 --not-run 入参。
+    evidenceNotRun = checks.filter((c) => c.status === 'NOT RUN').map((c) => c.name);
   }
 
   // 9. 验证
@@ -319,30 +377,39 @@ export function checkGates(input, opts = {}) {
       next: 'write escalation entry; a verifier that cannot run tests must not approve',
     };
   }
+  // 闸门名区分"没验"与"验失败"。
+  //
+  // 两者都是 escalate，但人要做的事完全不同：前者是"等 verifier 出报告"（待办），
+  // 后者是"实现有问题，回去改"（阻断）。此前两者共用 gate: "verification"，
+  // 于是 merge-gate 的每次输出都长得一样——而持续假升级会训练人忽略它。
   if (verdict === 'none' && phase === 'gate') {
     return {
       ...base,
       decision: 'escalate',
-      gate: 'verification',
+      gate: 'awaiting-verification',
       reason: 'no verifier verdict present at the gate phase',
-      allowed_actions: [],
+      allowed_actions: ['wait for the verifier report', 'run loop-verifier if none is scheduled'],
       exit_code: 2,
-      next: 'a change cannot pass the gate without an independent verifier verdict',
+      next: 'this is not a failure — nothing has been verified yet. Wait for the verifier, then re-run.',
     };
   }
 
   // 通过
+  // checks_not_run 由证据里声明的 NOT RUN 与 --not-run 入参合并。
+  // 只回显入参时，报告里写着的"没跑"会在输出里消失——而"未跑必须写明"
+  // 是 loop-constraints.md 的三态约定，输出是它的下游。
+  const allNotRun = [...new Set([...evidenceNotRun, ...notRun])];
   return {
     ...base,
     decision: 'proceed',
     gate: null,
     reason: 'all gates passed',
-    checks_not_run: notRun,
+    checks_not_run: allNotRun,
     allowed_actions: ['propose PR', 'update state', 'request human merge'],
     forbidden_actions: ['auto-merge to main'],
     exit_code: 0,
-    next: notRun.length
-      ? `propose the change, but list these as NOT RUN in the PR body: ${notRun.join(', ')}`
+    next: allNotRun.length
+      ? `propose the change, but list these as NOT RUN in the PR body: ${allNotRun.join(', ')}`
       : 'propose the change; merge remains human unless the path is explicitly allowlisted',
   };
 }
@@ -408,6 +475,19 @@ Exit codes:
       // 逗号分隔是显式约定（usage 里写着的），保留。去掉的是"文件存在就当清单读"——
       // 那让同一命令串因文件系统状态不同而含义不同。
       diffFiles = args.diffFiles.split(',').map((s) => s.trim()).filter(Boolean);
+      // 但"指向一个多行文件"是另一个情形：调用方显然想传清单却漏了 @。
+      // 静默按单一路径处理会把 N 个文件塌缩成 1 个（`files_changed: 1`），
+      // 于是拒绝列表与范围**两个**闸门同时失效——首行无害的清单能藏住后面的
+      // `auth/**`。实测：20 条路径的清单 → proceed；加 @ → escalate/scope。
+      // 单行文件仍按单一路径处理，所以"同一命令串因文件系统状态改变含义"这条
+      // 顾虑不成立——变的只是"多行"这个显式可判定的形态。
+      if (diffFiles.length === 1 && fs.existsSync(diffFiles[0])) {
+        const lines = readText(diffFiles[0]).split('\n').map((s) => s.trim()).filter(Boolean);
+        if (lines.length > 1) {
+          fail(`--diff-files points at ${diffFiles[0]}, which contains ${lines.length} paths. `
+            + `Prefix it with "@" to treat it as a list.`);
+        }
+      }
     }
   }
 

@@ -15,7 +15,7 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { parseArgs, boolArg, readRegistryStages, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText, hasEventWiring, runWithTreeKill } from './lib/common.mjs';
+import { parseArgs, boolArg, readRegistryStages, matchesDenylist, loadDenylist, parseDenylistFrom, readRegistryDefaults, structuredText, textHas, structuredHas, detectProject, verificationCommands, initScriptFromCommands, PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, listFiles, readText, hasEventWiring, runWithTreeKill, hasGnuTimeout } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { route, ROUTES, readLocks } from './event-router.mjs';
 import { checkGates } from './gate-check.mjs';
@@ -308,6 +308,46 @@ section('4. 熔断器判定');
   ];
   eq('失败后成功 → 连续计数归零', checkLedger({ attempts: withSuccess }).consecutive_failures, 0);
 
+  // ---- noop 不得洗掉"没进展"的计数 ----
+  // `noop` 是账本 schema 的合法 outcome（被锁跳过时的结局），而旧实现只数
+  // 尾部连续 `failure`，于是 [f,f,noop,f,f] 判 ok / 2-of-5，而 [f,f,f,f,f]
+  // 判 no-progress / 5-of-5——同样是"5 次里 5 次失败、中间没有任何一次成功"，
+  // 只因插入一次 noop 就熔断不了。数的是"尾部非 success 段"。
+  const noopWashed = [
+    ...mk(2, 'failure', 'E1'),
+    { iteration: 3, item: 'x', action: 'a', outcome: 'noop', tokensUsed: 0, at: 'x' },
+    ...mk(2, 'failure', 'E1').map((a) => ({ ...a, iteration: a.iteration + 3 })),
+  ];
+  eq('noop 不重置连续失败计数', checkLedger({ attempts: noopWashed }).consecutive_failures, 5);
+  eq('noop 洗不掉 → 仍然 no-progress', checkLedger({ attempts: noopWashed }).verdict, 'no-progress');
+  // 反向：success 确实重置（否则上面那条会退化成"永远 no-progress"）
+  eq('success 仍然重置计数',
+    checkLedger({ attempts: [...noopWashed, { iteration: 6, item: 'x', action: 'a', outcome: 'success', tokensUsed: 0, at: 'x' }] })
+      .consecutive_failures, 0);
+
+  // ---- per-pattern 切片 ----
+  // 共享账本里，A 循环的失败会把 B 循环的熔断器顶爆。`budget-check` 早有
+  // per-pattern 解析，账本这侧没有，是不对称的。
+  {
+    const mkP = (n, pattern, prefix) => Array.from({ length: n }, (_, i) => ({
+      iteration: i + 1, item: 'x', action: 'a', outcome: 'failure', error: `${prefix}${i}`,
+      pattern, tokensUsed: 0, at: 'x',
+    }));
+    const mixed = [...mkP(4, 'ci-sweeper', 'A'), ...mkP(4, 'pr-review', 'B')];
+    // 不切片：8 次连续失败（错误各不相同，所以不是 stagnation）
+    eq('不切片时 8 次连续失败 → no-progress', checkLedger({ attempts: mixed }).verdict, 'no-progress');
+    // 切片后各自只有 4 次 → 未达阈值
+    eq('切片后 ci-sweeper 未达阈值 → ok', checkLedger({ attempts: mixed }, { pattern: 'ci-sweeper' }).verdict, 'ok');
+    eq('切片后只统计本循环的条数', checkLedger({ attempts: mixed }, { pattern: 'ci-sweeper' }).iterations, 4);
+    // 切片后为空必须显式报，而不是回落到"没记录所以正常"
+    const onlyOther = mkP(2, 'pr-review', 'B');
+    eq('账本无本循环记录 → no-pattern-records',
+      checkLedger({ attempts: onlyOther }, { pattern: 'ci-sweeper' }).verdict, 'no-pattern-records');
+    ok('no-pattern-records 说明为什么',
+      /没有一条属于/.test(checkLedger({ attempts: onlyOther }, { pattern: 'ci-sweeper' }).unreadable_reason),
+      checkLedger({ attempts: onlyOther }, { pattern: 'ci-sweeper' }).unreadable_reason);
+  }
+
   // 迭代上限
   const many = Array.from({ length: 10 }, (_, i) => ({
     iteration: i + 1, item: 'x', action: 'a', outcome: i % 2 === 0 ? 'success' : 'failure', error: 'E' + i, tokensUsed: 10, at: 'x',
@@ -431,11 +471,16 @@ section('6. 闸门判定');
   // 都由调用方自证——一个接受自证的闸门和一个不存在的闸门，在退出码上不可区分。
   const evTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-gate-ev-'));
   const EV = path.join(evTmp, 'report.md');
+  // 合规证据必须带 `### Checks not run` 节（即使为空也写 `—`），这是
+  // loop-verifier 的硬规则——闸门现在真的读它了。
   fs.writeFileSync(EV, [
     '## Verdict: APPROVE', '',
     '### Evidence',
     '- Tests: `npm test` → PASS',
-    '- Red check: PASS — 回退后新测试挂掉',
+    '- Red check: `npm run red` → PASS',
+    '',
+    '### Checks not run',
+    '- —',
   ].join('\n'));
   const GATE = { phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass', reviewedSha: 'abc123', headSha: 'abc123', evidenceFile: EV };
   eq('干净通过', checkGates({ item: 'p', ...GATE, budgetPct: 10 }).decision, 'proceed');
@@ -497,18 +542,85 @@ section('6. 闸门判定');
     eq('只有一句话的报告 → escalate',
       checkGates({ item: 'p', ...GATE, evidenceFile: thinFile }).decision, 'escalate');
 
-    // 报告自称 REJECT 时，命令行说 approve 不成立
+    // 报告自称 REJECT 时，命令行说 approve 不成立。
+    // 注意这里同时含 FAIL：现在"有 FAIL 却说 APPROVE"会先被自相矛盾闸拦下，
+    // 所以断言要按闸门实际给出的理由——两条路径都必须拦，理由不同。
     const rejFile = path.join(evTmp, 'rej.md');
-    fs.writeFileSync(rejFile, '## Verdict: REJECT\n\n### Evidence\n- Tests: `npm test` → FAIL\n');
+    fs.writeFileSync(rejFile, [
+      '## Verdict: REJECT', '', '### Evidence',
+      '- Tests: `npm test` → FAIL', '', '### Checks not run', '- —',
+    ].join('\n'));
     const contrad = checkGates({ item: 'p', ...GATE, evidenceFile: rejFile });
     eq('证据自称 REJECT → escalate', contrad.decision, 'escalate');
-    ok('矛盾被指出来', /contradicts/.test(contrad.reason), contrad.reason);
+    ok('矛盾被指出来', /contradicts|FAIL/.test(contrad.reason), contrad.reason);
 
     // 有 verdict 行但没有命令行证据 → 仍不算
     const noCmd = path.join(evTmp, 'nocmd.md');
     fs.writeFileSync(noCmd, '## Verdict: APPROVE\n\nLooks fine to me.\n');
     eq('缺命令输出行 → escalate',
       checkGates({ item: 'p', ...GATE, evidenceFile: noCmd }).decision, 'escalate');
+
+    // ---- 证据闸门不能只匹配形状（P0-01）----
+    // 此前它只问"有没有一行长得像证据"，不解析状态值、不读 `### Checks not run`，
+    // 于是三份自相矛盾/残缺的报告都能拿到 proceed exit 0——比没有报告更容易过。
+    const write = (name, lines) => {
+      const p = path.join(evTmp, name);
+      fs.writeFileSync(p, lines.join('\n'));
+      return p;
+    };
+    // 1. APPROVE 但有一项 FAIL
+    const selfContra = checkGates({
+      item: 'p', ...GATE,
+      evidenceFile: write('contra.md', [
+        '## Verdict: APPROVE', '', '### Evidence',
+        '- Tests: `npm test` → FAIL', '- Red check: `npm run red` → PASS',
+        '', '### Checks not run', '- —',
+      ]),
+    });
+    eq('APPROVE + FAIL → escalate', selfContra.decision, 'escalate');
+    ok('自相矛盾被指名是哪一项', /Tests/.test(selfContra.reason), selfContra.reason);
+    // 2. 缺 `### Checks not run` 整节
+    eq('缺 Checks not run 节 → escalate',
+      checkGates({
+        item: 'p', ...GATE,
+        evidenceFile: write('nosection.md', [
+          '## Verdict: APPROVE', '', '### Evidence', '- Tests: `npm test` → PASS',
+        ]),
+      }).decision, 'escalate');
+    // 3. 证据里声明 NOT RUN 但没列进该节
+    eq('NOT RUN 未列入该节 → escalate',
+      checkGates({
+        item: 'p', ...GATE,
+        evidenceFile: write('undeclared.md', [
+          '## Verdict: APPROVE', '', '### Evidence',
+          '- Tests: `npm test` → PASS', '- Lint: `npm run lint` → NOT RUN',
+          '', '### Checks not run', '- —',
+        ]),
+      }).decision, 'escalate');
+    // 4. 箭头：ASCII `->` 与 U+2192 必须等价
+    eq('ASCII -> 与 U+2192 等价',
+      checkGates({
+        item: 'p', ...GATE,
+        evidenceFile: write('ascii.md', [
+          '## Verdict: APPROVE', '', '### Evidence',
+          '- Tests: `npm test` -> PASS', '', '### Checks not run', '- —',
+        ]),
+      }).decision, 'proceed');
+    // 5. 证据声明的 NOT RUN 必须进入输出（而不是只回显 --not-run 入参）
+    const derived = checkGates({
+      item: 'p', ...GATE,
+      evidenceFile: write('derived.md', [
+        '## Verdict: APPROVE', '', '### Evidence',
+        '- Tests: `npm test` → PASS', '- Real-use validation: `staging` → NOT RUN',
+        '', '### Checks not run', '- Real-use validation — 环境不可用',
+      ]),
+    });
+    eq('证据里的 NOT RUN 被推导进输出', derived.decision, 'proceed');
+    ok('推导出的 NOT RUN 出现在 checks_not_run',
+      Array.isArray(derived.checks_not_run) && derived.checks_not_run.includes('Real-use validation'),
+      JSON.stringify(derived.checks_not_run));
+    // 6. 反向：把状态值分组收紧成只有 PASS，第 1 条必须变红
+    ok('FAIL 状态真的被解析（不是形状匹配）', /FAIL/.test(selfContra.reason), selfContra.reason);
 
     // 非 gate 阶段不强制证据，否则 fix 阶段无法工作
     eq('fix 阶段 approve 不需要证据',
@@ -1042,6 +1154,52 @@ section('14. GitHub Actions 接线');
     for (const flag of ['--reviewed-sha', '--head-sha', '--red-check', '--diff-files', '--budget-pct']) {
       ok(`merge-gate 传入 ${flag}`, mg.includes(flag));
     }
+    // verdict 必须来自 verifier 的产出，不能硬编码。
+    // 曾经写死 `--verdict none`，而 "verdict none + gate 阶段 → escalate"，
+    // 于是这个 workflow **从未放行过任何 PR**——每个 ready_for_review 都收到
+    // 同一条升级，而持续假升级会训练人忽略它（文件自己的注释就这么写着）。
+    const mgCode = mg.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    ok('merge-gate 不硬编码 --verdict none',
+      !/--verdict\s+none/.test(mgCode) || /awaiting/.test(mgCode),
+      'verdict 是写死的');
+    ok('merge-gate 从 verifier 产出取 verdict', /\$\{\{\s*steps\.verifier\.outputs\.verdict/.test(mgCode),
+      'verdict 不来自 verifier');
+    // 证据不得来自检出目录：实现者能把任何文件提交进 PR，闸门照收。
+    ok('merge-gate 不从工作区读证据文件',
+      !/--evidence-file\s+verifier-report\.md/.test(mgCode), '证据来自可被实现者提交的路径');
+    ok('merge-gate 的证据路径落在 RUNNER_TEMP', /RUNNER_TEMP/.test(mgCode));
+    // "没验"与"验失败"必须可区分，且**由闸门自己给出**——调用方改写
+    // gate-check 的输出会让"闸门说了什么"与"报告显示了什么"变成两份真相源。
+    ok('merge-gate 不自行重写闸门结果',
+      !/\.gate\s*=\s*"awaiting-verification"/.test(mgCode), '调用方在改写闸门输出');
+    // 行为断言：无 verifier 产出时闸门名必须是 awaiting-verification，
+    // 而有 APPROVE 产出时不得是它。
+    {
+      const tmpAw = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-aw-'));
+      fs.writeFileSync(path.join(tmpAw, 'changed.txt'), 'src/app.ts\n');
+      const runAw = (extra) => {
+        try {
+          const o = execFileSync(process.execPath, [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'),
+            '--item', 'pr-1', '--phase', 'gate', '--diff-files', '@changed.txt',
+            '--budget-pct', '10', '--reviewed-sha', 'abc', '--head-sha', 'abc', '--red-check', 'pass', ...extra],
+            { encoding: 'utf8', cwd: tmpAw });
+          return { code: 0, out: o };
+        } catch (e) { return { code: e.status, out: e.stdout || '' }; }
+      };
+      const awaiting = runAw(['--verdict', 'none']);
+      ok('无 verifier 产出 → gate: awaiting-verification',
+        /"gate": "awaiting-verification"/.test(awaiting.out), awaiting.out.slice(0, 200));
+      const evp = path.join(tmpAw, 'ev.md');
+      fs.writeFileSync(evp, [
+        '## Verdict: APPROVE', '', '### Evidence', '- Tests: `npm test` → PASS',
+        '', '### Checks not run', '- —',
+      ].join('\n'));
+      const approved = runAw(['--verdict', 'approve', '--evidence-file', evp]);
+      ok('有 APPROVE 产出时不再是 awaiting-verification',
+        !/"gate": "awaiting-verification"/.test(approved.out), approved.out.slice(0, 200));
+      eq('有 APPROVE 产出时 decision=proceed', approved.code, 0);
+      fs.rmSync(tmpAw, { recursive: true, force: true });
+    }
     ok('merge-gate 用 @ 前缀传清单（否则拒绝列表闸门失效）', /--diff-files\s+@/.test(mg), '未找到 --diff-files @');
     ok('merge-gate 调用 budget-check 而不是内联算预算', /budget-check\.mjs/.test(mg));
     // 调用必须 fail-closed。`budget-check ... || true` 吞掉一切：脚本崩溃时
@@ -1052,8 +1210,7 @@ section('14. GitHub Actions 接线');
       !/budget-check\.mjs[^\n]*\|\|\s*true\s*$[\s\S]{0,400}?if \[ "\$MODE" = "exit" \]/.test(mg)
       || /jq -e '\.mode'/.test(mg),
       'budget-check 失败时没有拒绝运行的守卫');
-    // 注释里提到旧逻辑不算问题——要抓的是活的代码行。
-    const mgCode = mg.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    // 注释里提到旧逻辑不算问题——要抓的是活的代码行（mgCode 见上）。
     ok('merge-gate 不再有 Math.max 取全表上限的旧逻辑', !/Math\.max\(\.\.\.caps\)/.test(mgCode));
 
     // 行为断言：用 workflow 里的参数形态（占位替换成具体值）必须能到非 escalate
@@ -1142,6 +1299,30 @@ section('14. GitHub Actions 接线');
     const inlineMax = ymls.filter((f) => /Math\.max\(\.\.\.caps\)/.test(textOf(f)));
     ok('没有 workflow 再用 Math.max(...caps) 取全表上限',
       inlineMax.length === 0, inlineMax.join('; '));
+
+    // ---- 熔断器必须真的被执行，不只是被打印 ----
+    // 硬约束 2「同一事项最多 3 次自动尝试，之后升级给人」的生产执行点。
+    // 此前 `ledger-check` 只出现在 ci-sweeper 的一段 `cat <<'EOF'` 里——
+    // 那是打印给人看的说明文本，不是执行的命令。熔断器在整条生产路径上
+    // 没有调用者，于是"机械强制尝试上限"在文档层是真的、在运行层是假的。
+    //
+    // 判据要剥掉 heredoc：只搜文本会被说明文字骗过（这正是它原来的形态）。
+    const stripHeredocs = (t) => t.replace(/cat\s+<<[-']?(\w+)['-]?[\s\S]*?\n\s*\1\s*$/gm, '');
+    const breakerWired = ymls.filter((f) => /node scripts\/ledger-check\.mjs/.test(stripHeredocs(textOf(f))));
+    ok('至少一个 workflow 的 run: 真的执行 ledger-check',
+      breakerWired.length > 0, 'ledger-check 只出现在 heredoc 说明文本里');
+    // 断言必须锚在**判定那次调用**上，不能只搜整个文件里有没有 --pattern。
+    // 第一版用 `ledger-check[\s\S]{0,600}?--pattern` 跨行匹配，结果匹配到的是
+    // 熔断分支里的 --escalation 那次调用——把判定调用的 --pattern 删掉后它依然绿
+    // （变异回退当场证明了这点）。这与仓库反复记录的模式同源：
+    // **断言的范围一旦比被守护的对象大，它就会在对象失效后继续绿。**
+    ok('执行 ledger-check 的 workflow 在判定那次调用上传 --pattern（否则共享账本会互相顶爆）',
+      breakerWired.every((f) => /ledger-check\.mjs[^\n]*--pattern[^\n]*--json/.test(stripHeredocs(textOf(f)))),
+      breakerWired.join('; '));
+    // 熔断触发必须改变行为：光跑不拦等于没跑
+    ok('熔断触发时真的停下（exit 1）',
+      breakerWired.every((f) => /ledger-check[\s\S]{0,600}?exit 1/.test(stripHeredocs(textOf(f)))),
+      breakerWired.join('; '));
 
     // 每个 workflow 必须传自己的 pattern id，否则会解析不到上限。
     // 从 budget-check 的调用行里抽出 --pattern 值，逐一验证能解析到 cap。
@@ -1588,8 +1769,28 @@ section('18. gate-check CLI 文件列表');
 
   // 裸路径一律按单一路径处理——曾经"文件存在就当清单读"，同一命令串因
   // 文件系统状态不同而含义不同。要传清单必须写 @ 前缀。
+  //
+  // 但"指向一个多行文件"必须**报错**，不能静默按单一路径处理：那会把 N 个
+  // 文件塌缩成 1 个（files_changed: 1），于是拒绝列表与范围**两个**闸门同时失效——
+  // 首行无害的清单能藏住后面的 auth/**。实测：20 条路径 → proceed；
+  // 加 @ → escalate/scope。单行文件仍按单一路径处理（见下面的 r1b）。
   const r1 = run(['--item', 'p', '--diff-files', listPath, '--verdict', 'approve']);
-  ok('裸文件路径按单一路径处理', r1.out.includes('"files_changed": 1'), r1.out.slice(0, 120));
+  eq('裸路径指向多行清单时退出 1', r1.code, 1);
+  ok('报错提示加 @ 前缀', /Prefix it with "@"/.test(r1.err), r1.err.slice(0, 160));
+
+  // 单行文件仍是单一路径——"多行"才是被拒绝的形态
+  const oneLine = path.join(tmp, 'one.txt');
+  fs.writeFileSync(oneLine, 'src/a.ts\n');
+  const r1b = run(['--item', 'p', '--diff-files', oneLine, '--verdict', 'approve']);
+  eq('单行文件按单一路径处理', r1b.code, 0);
+  ok('单行文件 files_changed 为 1', r1b.out.includes('"files_changed": 1'), r1b.out.slice(0, 120));
+
+  // 行为断言：拒绝列表条目藏在清单第二行时，忘记 @ 曾经会静默放行。
+  // 现在它在解析阶段就被拦下，不会到达闸门。
+  const hidden = path.join(tmp, 'hidden.txt');
+  fs.writeFileSync(hidden, 'src/a.ts\nauth/x.ts\n');
+  eq('第二行是拒绝列表路径的清单也被拦下（不静默放行）',
+    run(['--item', 'p', '--diff-files', hidden, '--verdict', 'approve']).code, 1);
 
   const r2 = run(['--item', 'p', '--diff-files', '@' + denyList, '--verdict', 'approve']);
   ok('@前缀文件列表命中拒绝列表', r2.out.includes('"gate": "denylist"'), r2.out.slice(0, 160));
@@ -1664,7 +1865,10 @@ section('18. gate-check CLI 文件列表');
     '## Verdict: APPROVE', '',
     '### Evidence',
     '- Tests: `npm test` → PASS',
-    '- Red check: PASS — 回退后新测试挂掉',
+    '- Red check: `npm run red` → PASS',
+    '',
+    '### Checks not run',
+    '- —',
   ].join('\n'));
   const g3 = run(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
     '--reviewed-sha', 'abc123', '--head-sha', 'abc123', '--diff-files', 'a.ts',
@@ -1699,7 +1903,10 @@ section('18. gate-check CLI 文件列表');
   // 和一个不存在的闸门，在退出码上不可区分。
   {
     const bad = path.join(tmp, 'bad.md');
-    fs.writeFileSync(bad, '## Verdict: REJECT\n\n### Evidence\n- Tests: `npm test` → FAIL\n');
+    fs.writeFileSync(bad, [
+      '## Verdict: REJECT', '', '### Evidence', '- Tests: `npm test` → FAIL',
+      '', '### Checks not run', '- —',
+    ].join('\n'));
     const thin = path.join(tmp, 'thin.md');
     fs.writeFileSync(thin, 'LGTM, looks good to me.\n');
 
@@ -1715,7 +1922,7 @@ section('18. gate-check CLI 文件列表');
 
     const contrad = run([...G, '--evidence-file', bad]);
     eq('证据自称 REJECT 时退出 2', contrad.code, 2);
-    ok('矛盾被明确指出来', /contradicts/.test(contrad.out), contrad.out.slice(0, 200));
+    ok('矛盾被明确指出来', /contradicts|FAIL/.test(contrad.out), contrad.out.slice(0, 200));
 
     eq('只有一句话的报告被拒', run([...G, '--evidence-file', thin]).code, 2);
 
@@ -2297,12 +2504,17 @@ section('20. 三阶段驱动器');
     fs.writeFileSync(path.join(w0, '.github', 'workflows', 'ci.yml'), 'name: ci\n');
     const w1 = hasEventWiring(w0);
     eq('只有非 loop workflow 时仍未接线', w1.wired, false);
-    ok('区分"没目录"与"目录里没有 loop 文件"', /没有调用运行层脚本/.test(w1.detail), w1.detail);
+    ok('区分"没目录"与"目录里没有接线 workflow"', /没有由仓库事件驱动/.test(w1.detail), w1.detail);
 
     // ---- 假阳性防护：只有第三方 action 的 workflow 不算接线 ----
     // 曾经判定的是文件名（/loop|triage|release-draft|.../），于是官方
     // release-drafter action 或任何叫 triage.yml 的文件都算接线——
     // harness-loop 会据此对着空队列跑完 8 步，把"没做事"记成一次正常运行。
+    //
+    // 第二层（2026-10-17）：光"调用了运行层脚本"仍会假阳性。本仓库自己的
+    // self-check.yml 触发于 push/pull_request、调这些脚本只是为了冒烟测试 CLI，
+    // 于是它被判为"已接线"，而 STATE.md 写着"尚未跑过任何一轮真实事件"。
+    // 所以还要求触发事件是仓库事件，且真的消费路由结果。
     {
       const fp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wire-fp-'));
       fs.mkdirSync(path.join(fp, '.github', 'workflows'), { recursive: true });
@@ -2313,23 +2525,40 @@ section('20. 三阶段驱动器');
       fs.writeFileSync(path.join(fp, '.github', 'workflows', 'triage.yml'), 'name: triage\non:\n  issues:\n');
       eq('名字带 triage 但无脚本调用时未接线', hasEventWiring(fp).wired, false);
 
+      // 纯 CI 触发 + 调用 event-router + 消费路由结果（本仓库 self-check.yml 的形态：
+      // 触发于 push/pull_request，调脚本只是为了冒烟测试 CLI）→ 仍不算接线。
+      // 这个 fixture 必须**只**违反"仓库事件"这一条，否则它测不到那条守卫
+      // （变异回退当场证明了这点：去掉 REPO_EVENT 判断后它依然 false，
+      //  因为它压根没调 event-router——失败原因错了，断言就没有牙齿）。
+      fs.writeFileSync(path.join(fp, '.github', 'workflows', 'smoke.yml'),
+        'name: smoke\non:\n  push:\n    branches: [main]\n  pull_request:\n  workflow_dispatch:\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --target main\n      - run: echo "$C"\n        env:\n          C: ${{ steps.route.outputs.conflict }}\n');
+      eq('纯 CI 触发下即使调用 event-router 也不算接线（self-check 形态）',
+        hasEventWiring(fp).wired, false);
+
+      // 仓库事件 + 调用 event-router，但不消费路由结果 → 仍不算
+      fs.writeFileSync(path.join(fp, '.github', 'workflows', 'noop.yml'),
+        'name: n\non:\n  issues:\n    types: [opened]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --item x\n');
+      eq('仓库事件但不消费路由结果 → 未接线', hasEventWiring(fp).wired, false);
+
       fs.writeFileSync(path.join(fp, '.github', 'workflows', 'loop-intake.yml'),
-        'name: loop\non:\n  issues:\n    types: [opened]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --item x\n');
-      eq('真实调用运行层脚本时算接线', hasEventWiring(fp).wired, true);
+        'name: loop\non:\n  issues:\n    types: [opened]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --target main\n      - run: echo "$C"\n        env:\n          C: ${{ steps.route.outputs.conflict }}\n');
+      eq('仓库事件 + 消费路由结果时算接线', hasEventWiring(fp).wired, true);
       fs.rmSync(fp, { recursive: true, force: true });
     }
 
-    // 放一个真实调用运行层脚本的 workflow → 接线
+    // 放一个真实的事件驱动 workflow → 接线
     fs.writeFileSync(path.join(w0, '.github', 'workflows', 'loop-intake.yml'),
-      'name: loop\non:\n  issues:\n    types: [opened]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --item x\n');
+      'name: loop\non:\n  issues:\n    types: [opened]\njobs:\n  r:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/event-router.mjs --event issues.opened --target main\n      - run: echo "$C"\n        env:\n          C: ${{ steps.route.outputs.conflict }}\n');
     const w2 = hasEventWiring(w0);
-    eq('有 loop workflow 时已接线', w2.wired, true);
+    eq('有事件驱动 workflow 时已接线', w2.wired, true);
     eq('接线方式标为 workflow', w2.via, 'workflow');
     const wj2 = JSON.parse(runStage(w0, ['--json']).out);
     eq('阶段 3 判据同步转为 PASS',
       wj2.stages[2].checks.find((c) => /事件脊/.test(c.label))?.ok, true);
 
-    // 非 GitHub 平台：LOOP.md 声明调度也算
+    // 非 GitHub 平台：LOOP.md 声明调度也算——但只在**没有 workflow 目录**时。
+    // 有 workflow 目录说明这就是 GitHub 仓库，文件才是真相；否则"在 LOOP.md
+    // 里写一句 cron"就能让接线判据通过（本仓库正好命中过这条）。
     const w3 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wire-2-'));
     fs.writeFileSync(path.join(w3, 'LOOP.md'), '## 调度\n\n- schedule: daily\n- 事件驱动\n');
     eq('LOOP.md 声明调度时算接线', hasEventWiring(w3).wired, true);
@@ -2337,6 +2566,11 @@ section('20. 三阶段驱动器');
     // 只写 schedule 不写事件驱动 → 不算
     fs.writeFileSync(path.join(w3, 'LOOP.md'), '## 调度\n\n- schedule: daily\n');
     eq('只有 schedule 没有事件驱动时不算接线', hasEventWiring(w3).wired, false);
+    // 有 workflow 目录时，LOOP.md 的声明不能替代文件
+    fs.mkdirSync(path.join(w3, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(w3, '.github', 'workflows', 'ci.yml'), 'name: ci\n');
+    fs.writeFileSync(path.join(w3, 'LOOP.md'), '## 调度\n\n- schedule: daily\n- 事件驱动\n');
+    eq('有 workflow 目录时 LOOP.md 声明不能替代真实接线', hasEventWiring(w3).wired, false);
     fs.rmSync(w3, { recursive: true, force: true });
     fs.rmSync(w0, { recursive: true, force: true });
 
@@ -2346,6 +2580,18 @@ section('20. 三阶段驱动器');
     ok('harness-loop 第 0 步包含事件接线检查', /事件接线/.test(loopSkill));
     ok('harness-loop 声明 no-wiring 这个 outcome', /no-wiring/.test(loopSkill));
     ok('harness-loop 指向共用的 helper', /hasEventWiring/.test(loopSkill));
+
+    // ---- 边界声明：本包不含 agent 运行器 ----
+    // 措辞（"派发""执行者与验证者必须是不同实例"）读起来像已实现的能力，
+    // 而 8 个 workflow 里没有一行 agent 调用——唯一的命中是一句 echo。
+    // 把边界写清楚，比让读者以为第 5 步已经接线要诚实。
+    ok('harness-loop 声明本包不含 agent 运行器', /本包不含 agent 运行器/.test(loopSkill));
+    ok('harness-loop 说明未接线时止于 fix-proposed', /fix-proposed/.test(loopSkill));
+    {
+      const wfReadme = fs.readFileSync(path.join(PACK_ROOT, 'examples', 'github-actions', 'README.md'), 'utf8');
+      ok('事件接线 README 声明只能完成"感知 + 判定 + 记账"',
+        /只能完成/.test(wfReadme), '未声明能力边界');
+    }
 
     // ---- 手动调用边界必须在技能与文档之间一致 ----
     // 曾经技能写 "Do NOT invoke by hand"，而 docs/10 两处推荐手动调用 `/harness-loop`，
@@ -2575,13 +2821,32 @@ section('20. 三阶段驱动器');
     ok(`超时真的生效（${hung}ms < 20s，未等满 120s）`, hung < 20000, `${hung}ms`);
 
     // 整棵树被杀：孙进程不能存活。用 kill -0 判定，不用计数。
+    //
+    // 断言按**能力**分叉，不按平台名：有 GNU timeout 时断言孙进程真的死了；
+    // 没有它时（Node 的 timeout 只杀直接子进程）断言"降级必须可见"，
+    // 而不是断言一个该环境做不到的行为。
+    // 实测：原生 PowerShell 下 Git 在 PATH 里时 hasGnu 为真、同样 979/0；
+    // 只有 system32 排在 Git 之前才落到降级分支。按 process.platform 分叉
+    // 会在开发机上恒绿。
     const grand = (() => { try { return fs.readFileSync(pidFile, 'utf8').trim(); } catch { return null; } })();
     ok('挂起的 init.sh 确实拉起了孙进程（前置条件）', Boolean(grand), `pidFile=${pidFile}`);
     if (grand) {
       let alive = true;
       try { execFileSync('bash', ['-c', `kill -0 ${grand}`], { stdio: 'ignore' }); } catch { alive = false; }
-      ok('超时后孙进程已被回收（整棵树被杀，不留孤儿）', !alive,
-        `pid ${grand} 仍存活——孤儿进程会继续烧 CPU 并拖慢后续每一次 spawn`);
+      if (hasGnuTimeout()) {
+        ok('超时后孙进程已被回收（整棵树被杀，不留孤儿）', !alive,
+          `pid ${grand} 仍存活——孤儿进程会继续烧 CPU 并拖慢后续每一次 spawn`);
+      } else {
+        // 本环境没有 GNU timeout：能做的只有"把降级说清楚"。
+        // 先收掉这个泄漏的孙进程，否则它会一直烧 CPU（这正是这条检查要防的事）。
+        // 必须用 bash 的 kill：pidFile 里是 MSYS 的 pid，Windows 的 taskkill
+        // 认不出它（实测 taskkill /PID <msys-pid> 静默失败，进程照样活着）。
+        try { execFileSync('bash', ['-c', `kill -9 ${grand}`], { stdio: 'ignore' }); } catch { /* 已退出 */ }
+        let stillAlive = true;
+        try { execFileSync('bash', ['-c', `kill -0 ${grand}`], { stdio: 'ignore' }); } catch { stillAlive = false; }
+        ok('无 GNU timeout 时明确标记降级（treeKill=false），且已清理孤儿', !stillAlive,
+          `pid ${grand} 未能回收——降级路径下必须显式清理`);
+      }
     }
     fs.rmSync(hang, { recursive: true, force: true });
   }
@@ -2632,13 +2897,12 @@ section('20. 三阶段驱动器');
       JSON.stringify(missRun).slice(0, 120));
     ok('命令不存在不算 timedOut', missRun.timedOut === false, JSON.stringify(missRun).slice(0, 120));
 
-    // 平台能力必须可见：有 GNU timeout 时 treeKill=true。没有它时降级路径
+    // 能力必须可见：有 GNU timeout 时 treeKill=true。没有它时降级路径
     // 会把 treeKill 标成 false——能力缺失不能静默。
-    const probe = (() => {
-      try { return execFileSync('timeout', ['--version'], { encoding: 'utf8' }); } catch { return ''; }
-    })();
-    const hasGnu = /GNU coreutils/i.test(probe);
-    eq('treeKill 标记与平台能力一致', okRun.treeKill, hasGnu);
+    //
+    // 判据用 common.mjs 导出的 hasGnuTimeout()，不再就地重探一次：两处探测
+    // 就是两份真相源，改一处不改另一处会静默产生不一致的判定。
+    eq('treeKill 标记与实际能力一致', okRun.treeKill, hasGnuTimeout());
   }
 }
 
@@ -2883,6 +3147,19 @@ section('22. worktree 隔离与队列读取');
     eq('回落被标记', q3.json.fell_back, true);
     eq('只取未勾选的条目', q3.json.items.length, 1);
     ok('未勾选条目的标题正确', /修 CI 的 flake/.test(q3.json.items[0].title), JSON.stringify(q3.json.items));
+
+    // ---- CRLF 检出：本仓库 32 个受控文件是 w/crlf 且没有 .gitattributes ----
+    // 曾经逐行正则 `(.+)$` 里的 `.` 与 `$` 都不吃 `\r`，于是 `- [ ] 待办\r`
+    // 匹配不上——真实仓库的 6 条待办被读成"没有待办"，note 还谎称"既无 .loop/queue
+    // 也无 STATE.md 待办"。修复前这条断言必红（items 会是 0）。
+    fs.writeFileSync(path.join(tmp, 'STATE.md'), [
+      '# State', '', '## High Priority (loop is acting)', '',
+      '- [ ] 修 CI 的 flake', '- [x] 已完成', '', '## Active', '', '—',
+    ].join('\r\n'));
+    const qCrlf = runQ(['--json']);
+    eq('CRLF 检出下仍读到未勾选待办', qCrlf.json.items.length, 1);
+    ok('CRLF 下 note 不谎称没有待办', !/既无/.test(qCrlf.json.note ?? ''), qCrlf.json.note);
+
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
@@ -3043,10 +3320,13 @@ section('17. registry 与路由一致性');
 // 本仓库曾有四个互相矛盾的数字（323 / 409 / 451 / 498），实测是第三个值。
 // 断言总数依赖配置（如 registry 的事件数），所以用固定偏移量而不是硬编码。
 const DOC_OFFSET = 3; // 本节自身的三条断言尚未计入，故补 3
+// 计数跨过 1000 之后 `\b(\d{3})` 匹配不上——"1004" 中间没有词边界，
+// 于是三条断言全报"未找到断言数声明"。这正是"没人读就会漂移"的反面：
+// 读它的代码写死了位数，数字一长大就静默失配。改成 3–4 位。
 const docChecks = [
-  ['README.md', /\b(\d{3})\s*项断言/],
-  ['progress.md', /\b(\d{3})\s*项测试断言/],
-  ['docs/10-how-to-use.md', /\b(\d{3})\s*项断言/],
+  ['README.md', /\b(\d{3,4})\s*项断言/],
+  ['progress.md', /\b(\d{3,4})\s*项测试断言/],
+  ['docs/10-how-to-use.md', /\b(\d{3,4})\s*项断言/],
 ];
 const expectedTotal = passed + failed + DOC_OFFSET;
 for (const [file, re] of docChecks) {

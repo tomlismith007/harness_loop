@@ -123,7 +123,25 @@ export function checkLedger(ledger, opts = {}) {
       { maxIterations, stagnationThreshold, noProgressThreshold, tokenBudget });
   }
 
-  const attempts = ledger.attempts;
+  const all = ledger.attempts;
+  // per-pattern 切片。
+  //
+  // 共享账本里，A 循环的失败会把 B 循环的熔断器顶爆——一个循环还没跑，
+  // 却因为另一个循环的 5 次失败被判 no-progress。`budget-check` 早就有
+  // per-pattern 解析（resolveCap），账本这一侧没有，是不对称的。
+  //
+  // 切片后为空时显式报 no-pattern-records，而不是回落到"没有记录所以一切正常"：
+  // "这个循环还没跑过"与"账本里根本没有它的记录"必须可区分。
+  const attempts = opts.pattern
+    ? all.filter((a) => a.pattern === opts.pattern || a.item === opts.pattern)
+    : all;
+  if (opts.pattern && all.length && attempts.length === 0) {
+    return {
+      ...unreadableLedger(`账本有 ${all.length} 条记录，但没有一条属于 pattern '${opts.pattern}'`,
+        { maxIterations, stagnationThreshold, noProgressThreshold, tokenBudget }),
+      verdict: 'no-pattern-records',
+    };
+  }
 
   // 出厂账本与真实历史的区分。装配生成的账本 goal 写着 "Replace with the current
   // loop goal"，模板示例写着 "Example loop ledger"——两者都不是本循环的真实目标，
@@ -153,11 +171,17 @@ export function checkLedger(ledger, opts = {}) {
   const iterations = attempts.length;
   const tokensUsed = attempts.reduce((sum, a) => sum + (Number(a.tokensUsed) || 0), 0);
 
-  // 连续失败
+  // 连续失败。
+  //
+  // 只数尾部连续 `failure` 会让 `noop` 洗掉计数：`noop` 是账本 schema 的合法
+  // outcome（被锁跳过时的结局），实测 `[f,f,noop,f,f]` 被判 ok / 2-of-5，
+  // 而 `[f,f,f,f,f]` 判 no-progress / 5-of-5——同样是"5 次里 5 次失败、中间
+  // 没有任何一次成功"，只因插入一次被锁跳过的 noop 就熔断不了。
+  // 所以数的是"尾部非 success 段"：failure 与 noop 都算没进展，success 才重置。
   let consecutiveFailures = 0;
   for (let i = attempts.length - 1; i >= 0; i--) {
-    if (attempts[i].outcome === 'failure') consecutiveFailures++;
-    else break;
+    if (attempts[i].outcome === 'success') break;
+    consecutiveFailures++;
   }
 
   // 同一错误签名重复次数（连续）
@@ -298,7 +322,7 @@ function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
     'ledger', 'stagnation', 'noProgress', 'maxIterations', 'tokenBudget',
-    'escalation', 'json', 'registry', 'help',
+    'pattern', 'escalation', 'json', 'registry', 'help',
   ], 'ledger-check');
   if (args.help) {
     process.stdout.write(`ledger-check — loop circuit breaker
@@ -312,6 +336,8 @@ Options:
   --no-progress <n>      Consecutive-failure threshold (default: 5)
   --max-iterations <n>   Total iteration limit (default: 10)
   --token-budget <n>     Token budget for this loop
+  --pattern <id>         Only judge attempts belonging to this loop. A shared ledger
+                         would otherwise let one loop's failures trip another's breaker.
   --escalation           Emit an escalation markdown document
   --json                 Emit JSON result
   --help                 Show this help
@@ -345,6 +371,7 @@ Exit codes:
   if (args.noProgress !== undefined) opts.noProgressThreshold = numArg(args.noProgress, '--no-progress');
   if (args.maxIterations !== undefined) opts.maxIterations = numArg(args.maxIterations, '--max-iterations');
   if (args.tokenBudget !== undefined) opts.tokenBudget = numArg(args.tokenBudget, '--token-budget');
+  if (args.pattern !== undefined) opts.pattern = String(args.pattern);
 
   const result = checkLedger(ledger, opts);
 

@@ -133,11 +133,31 @@ jobs:
             regression → new failure correlated with a recent commit        → actionable
             env        → runner, registry, secrets, quota                   → ESCALATE, never fix with code
             config     → workflow, dependency install, cache                → human judgment
-
-          Before each retry:
-            node scripts/ledger-check.mjs --ledger loop-ledger.json
-            exit code 2 → STOP, escalate to human
           EOF
+
+      # 硬约束 2「同一事项最多 3 次自动尝试，之后升级给人」的生产执行点。
+      # 在此之前，`ledger-check` 只出现在上面那段 cat <<'EOF' 里——那是打印给人看的
+      # 说明文本，不是执行的命令。熔断器在整条生产路径上没有调用者，于是
+      # "机械强制尝试上限"这句在文档层是真的、在运行层是假的（硬约束 11）。
+      - name: Circuit breaker
+        id: breaker
+        env:
+          ITEM: ${{ steps.item.outputs.item }}
+        run: |
+          set +e
+          # 出厂的 loop-ledger.json 带占位 goal，熔断器会（正确地）判 placeholder-ledger。
+          # 那时没有真实历史可判，不阻断本轮——把"未初始化"与"该停了"分开。
+          node scripts/ledger-check.mjs --ledger loop-ledger.json --pattern ci-sweeper --json > breaker.json
+          CODE=$?
+          set -e
+          cat breaker.json
+          VERDICT=$(jq -r '.verdict // "unknown"' breaker.json)
+          if [ "$CODE" = "2" ] && [ "$VERDICT" != "placeholder-ledger" ] && [ "$VERDICT" != "no-pattern-records" ]; then
+            echo "::error::Circuit breaker tripped (${VERDICT}) — no further attempts on ${ITEM}."
+            node scripts/ledger-check.mjs --ledger loop-ledger.json --pattern ci-sweeper \
+              --escalation > escalation.md
+            exit 1
+          fi
 
       # 锁被别的循环持有 → 不落盘 work item，本轮是 no-op。
       - name: Record work item

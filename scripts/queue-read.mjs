@@ -68,7 +68,9 @@ export function readStateHighPriority(root) {
   const body = section.split(/^##\s+/m)[0];
   const items = [];
   for (const line of body.split('\n')) {
-    const m = line.match(/^\s*-\s*\[( |x|X)\]\s*(.+)$/);
+    // 收尾用 `(.+?)\s*$` 而不是 `(.+)$`：readText 已经归一化过换行，
+    // 这里再兜一层，防止将来有人绕过 readText 直接喂进带 \r 的行。
+    const m = line.match(/^\s*-\s*\[( |x|X)\]\s*(.+?)\s*$/);
     if (!m) continue;
     if (m[1].toLowerCase() === 'x') continue; // 已完成
     const text2 = m[2].trim();

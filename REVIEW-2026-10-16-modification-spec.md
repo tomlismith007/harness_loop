@@ -82,7 +82,7 @@
 |---|---|---|---|---|
 | MP-01 | P0-01 + P1-07 | 证据闸门解析状态值、要求 `### Checks not run`、兼容 ASCII 箭头；**多行清单忘记 `@` 时显式报错**（原写"裸路径报错"，第 3 轮修正） | **P0** | — |
 | MP-02 | P0-02 | merge-gate 的 verdict 与证据改由 verifier 产出驱动，不再硬编码 `none` | **P0** | MP-01 |
-| MP-03 | P1-01 + P2-01 | 读文件统一换行归一；`queue-read` 复选框正则收尾；补 CRLF fixture | **P1** | — |
+| MP-03 | P1-01（~~P2-01~~ 已证伪） | 读文件统一换行归一；`queue-read` 复选框正则收尾；补 CRLF fixture | **P1** | — |
 | MP-04 | P1-06 | `hasEventWiring` 收窄到"真事件 + 真路由调用" | **P1** | — |
 | MP-05 | P1-04 | `ledger-check` 按 pattern 切片；`ci-sweeper` 的 heredoc 改成真步骤；账本占位符独立状态 | **P1** | — |
 | MP-06 | P1-02 | 新增 `run-log-append.mjs`；决定持久化方式（见 §8 待决 1） | **P1** | MP-05 |

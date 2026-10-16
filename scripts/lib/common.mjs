@@ -176,9 +176,17 @@ export function exists(p) {
   }
 }
 
+/**
+ * 读文本并归一化换行。
+ *
+ * Windows 检出（core.autocrlf=true，本仓库没有 .gitattributes）里每个文件都是 CRLF，
+ * 而逐行解析的正则带 `$` 锚定——`.` 与 `$` 都不吃 `\r`，于是 `- [ ] 待办\r` 匹配不上，
+ * 6 条待办被读成"没有待办"。逐处给正则加 `\r?` 会漏（漏一处就是一个静默缺陷），
+ * 所以归一化放在唯一的读入口。
+ */
 export function readText(p) {
   try {
-    return fs.readFileSync(p, 'utf8');
+    return fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
   } catch {
     return '';
   }
@@ -434,6 +442,14 @@ export function loadDenylist(root = '.') {
 }
 
 /**
+ * 仓库事件：能代表"有事发生"的触发类型。
+ *
+ * push/pull_request/workflow_dispatch 不算——任何 CI 都有它们，
+ * 它们不说明这个仓库挂了事件脊（本仓库的 self-check.yml 就是这种）。
+ */
+const REPO_EVENT = /^\s*(issues|issue_comment|pull_request_review|check_suite|check_run|workflow_run|release|repository_dispatch)\s*:|^\s*pull_request\s*:\s*\n\s*types\s*:/m;
+
+/**
  * 项目是否接好了事件脊。
  *
  * 阶段 3 的判据 1 与 `harness-loop` 的第 0 步退出检查共用这一份逻辑——同一件事
@@ -450,31 +466,49 @@ export function hasEventWiring(root = '.') {
     // 任何叫 triage.yml 的文件都算接线——而 harness-loop 会据此认为项目已接事件脊，
     // 对着空队列跑完 8 步，把"没做事"记成一次正常运行；阶段 3 判据也会给一个
     // 不存在事件脊的项目发 PASS。
+    //
+    // 第二层收窄（2026-10-17）：光"调用运行层脚本"仍不够。本仓库自己的
+    // self-check.yml 就是反例——它触发于 push/pull_request，调这些脚本是为了
+    // 冒烟测试它们的 CLI，于是 hasEventWiring('.') 返回 wired:true，而
+    // STATE.md 明写着"尚未跑过任何一轮真实事件"。后果是 no-wiring 这道
+    // "该不该跑"的自检在本仓库永不触发，阶段 3 判据 1 也拿到一个假 PASS。
+    // 所以还要求：触发事件是**仓库事件**（不是纯 CI），且真的消费路由结果。
     const wired = files.filter((f) => {
       if (!/\.ya?ml$/.test(f)) return false;
       const text = readText(path.join(wfDir, f));
       if (!/^on:/m.test(text)) return false;
-      // 真的调用了本框架的运行层脚本，才算"接上了这条脊"
-      return /node\s+scripts\/(event-router|gate-check|ledger-check|budget-check)\.mjs/.test(text);
+      // 纯 CI 事件（push / pull_request / workflow_dispatch）不算"接上了事件脊"
+      if (!REPO_EVENT.test(text)) return false;
+      if (!/node\s+scripts\/event-router\.mjs/.test(text)) return false;
+      // 必须真的用上路由结果：读锁冲突、落盘 work item、或传锁键
+      return /\.conflict|\.loop\/queue|--target/.test(text);
     });
     if (wired.length) {
       return {
         wired: true,
         via: 'workflow',
-        detail: `${wired.length} 个 workflow 调用了运行层脚本（${wired.slice(0, 3).join(', ')}）`,
+        detail: `${wired.length} 个 workflow 由仓库事件驱动且消费了路由结果（${wired.slice(0, 3).join(', ')}）`,
       };
     }
   }
-  // 非 GitHub 平台：LOOP.md 里声明了调度也算
-  const loop = readText(path.join(root, 'LOOP.md'));
-  if (loop && /schedule|cron|scheduler|automation/i.test(loop) && /on:|事件驱动/.test(loop)) {
-    return { wired: true, via: 'declared', detail: 'LOOP.md 声明了调度' };
+  // 非 GitHub 平台：LOOP.md 里声明了调度也算。
+  //
+  // 但只在**没有 .github/workflows/** 时才认这条。有 workflow 目录说明这就是
+  // 一个 GitHub 仓库，那么文件才是真相——否则"在 LOOP.md 里写一句 cron"
+  // 就能让接线判据通过，而本仓库正是这么命中过：self-check.yml 被收窄后，
+  // 判定落到这里，因为 LOOP.md 的调度段含 `cron:` 与"事件驱动"两个词。
+  // 那与 P1-06 是同一个形状的问题，只是换了一层。
+  if (!wfDir || !exists(wfDir)) {
+    const loop = readText(path.join(root, 'LOOP.md'));
+    if (loop && /schedule|cron|scheduler|automation/i.test(loop) && /on:|事件驱动/.test(loop)) {
+      return { wired: true, via: 'declared', detail: 'LOOP.md 声明了调度' };
+    }
   }
   return {
     wired: false,
     via: null,
     detail: wfDir && exists(wfDir)
-      ? '存在 .github/workflows/，但里面没有调用运行层脚本的 workflow'
+      ? '存在 .github/workflows/，但没有由仓库事件驱动并消费路由结果的 workflow'
       : '没有 .github/workflows/，LOOP.md 也未声明调度',
   };
 }
@@ -595,9 +629,16 @@ function globToRegex(pattern) {
 
 // ---------------------------------------------------------------- 子进程
 
-/** GNU timeout 是否可用。探测一次缓存——每次调用都探测会给每次执行加一次 spawn。 */
 let _gnuTimeout = null;
-function hasGnuTimeout() {
+/**
+ * GNU timeout 是否可用。探测一次缓存——每次调用都探测会给每次执行加一次 spawn。
+ *
+ * 导出是为了让断言能按**能力**分叉，而不是按平台名。实测：原生 PowerShell 下
+ * 直接跑 test.mjs 也是 979/0——Git 的 /usr/bin 在 PATH 上时解析到 GNU coreutils，
+ * 这里为真。只有把 system32 排到 Git 之前才落到降级路径。
+ * 按 `process.platform === 'win32'` 分叉会写出一个在开发机上恒绿的假断言。
+ */
+export function hasGnuTimeout() {
   if (_gnuTimeout !== null) return _gnuTimeout;
   try {
     const p = spawnSync('timeout', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
