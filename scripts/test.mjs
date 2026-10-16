@@ -3312,6 +3312,35 @@ section('17. registry 与路由一致性');
     const noReason = skippedRows.filter((l) => l.split('|').filter((c) => c.trim()).length < 4);
     ok('每个未做项都写了理由', noReason.length === 0, `${noReason.length} 项缺理由`);
   }
+
+  // ---- 新 spec 的落地状态同样必须可核对 ----
+  // 同上一条的理由：列了 MP 却没人记录哪些真的做了，"已完成"就不可验证。
+  // 这里守两件事：(a) 每个 MP 在状态表里有一行；(b) 每个未做项都写了理由
+  // 与核实方式——只写"未做"不写为什么，等于把工作丢给下一个读的人重新推断。
+  const specPath = path.join(PACK_ROOT, 'REVIEW-2026-10-16-modification-spec.md');
+  if (fs.existsSync(specPath)) {
+    const spec = fs.readFileSync(specPath, 'utf8');
+    ok('spec 有落地状态章节', /## 落地状态/.test(spec));
+    const mps = [...new Set([...spec.matchAll(/^### 3\.\d+ (MP-\d+)/gm)].map((m) => m[1]))];
+    ok(`spec 里有 ${mps.length} 个修改项`, mps.length >= 15);
+    for (const mp of mps) {
+      ok(`${mp} 在落地状态表中有记录`,
+        new RegExp(`\\|\\s*${mp}[^\\n]*\\|\\s*(✅|⬜|未做)`).test(spec),
+        `${mp} 没有状态行`);
+    }
+    ok('spec 有「有意未做」清单', /### 有意未做（附理由，可核对）/.test(spec));
+    // 只取该章节本身——直接 split 会把后面的「自检」等章节也扫进来，
+    // 那里面的"未验证"字样不是未做项。
+    const skipSection = (spec.split('### 有意未做')[1] || '').split(/\n#{2,3}\s/)[0];
+    const specSkipped = skipSection
+      .split('\n').filter((l) => /^\|\s*[^|]*\|/.test(l) && /未做|NOT RUN|未验证/.test(l));
+    ok(`spec 有意未做清单非空（${specSkipped.length} 项）`, specSkipped.length > 0);
+    // 表是 4 列：项 | 状态 | 为什么没做 | 怎么核实。四项都必须非空——
+    // 只写"未做"不写为什么，等于把工作丢给下一个读的人重新推断。
+    const specNoReason = specSkipped.filter((l) => l.split('|').filter((c) => c.trim()).length < 4);
+    ok('spec 每个未做项都写了理由与核实方式',
+      specNoReason.length === 0, `${specNoReason.length} 项缺理由或核实方式`);
+  }
 }
 
 // ---------------------------------------------------------------- 汇总

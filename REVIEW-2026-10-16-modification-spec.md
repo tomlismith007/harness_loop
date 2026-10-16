@@ -1080,6 +1080,58 @@ MP-02、MP-06 改的是**厂商接入**（GitHub Actions + `gh` + token 回退�
 
 ---
 
+## 落地状态（每次实施后更新）
+
+> 沿用 `REVIEW-2026-10-14-consolidated-plan.md` §6.2 的约定：**列了条目却没人记录哪些真的做了，
+> "已完成"就不可验证**。每个 MP 必须有状态，每个未做项必须写理由与核实方式。
+> 核实方式给的是**可执行的检查**，不是"我说做了"。
+
+### M1 状态表（2026-10-17 完成）
+
+| MP | 状态 | 证据 |
+|---|---|---|
+| MP-01 证据闸门 + 清单塌缩 | ✅ 已做 | 6 组对抗输入逐条翻正：`APPROVE`+`FAIL` → escalate 且指名项；缺节 → escalate；ASCII `->` 与 U+2192 等价；证据的 NOT RUN 推导进 `checks_not_run`；多行清单无 `@` → exit 1。5 条变异断言红 |
+| MP-02 合并闸门 verdict 来源 | ✅ 已做 | verdict 取自带标记 PR 评论；`--verdict none` 不再硬编码；证据路径在 `$RUNNER_TEMP`；`awaiting-verification` 为独立闸门名。3 条变异断言红 |
+| MP-03 换行归一 + CRLF fixture | ✅ 已做（P2-01 部分撤销） | `readText` 归一；真实仓库 `queue-read` 0 → 7 条；CRLF fixture 已确认 fail-first（`expected 1, got 0`）。**P2-01 证伪，不修** |
+| MP-04 接线判定收窄 | ✅ 已做 | 本仓库 `wired: true → false`；阶段 3 判据 1 同步转 FAIL；正例/负例/declared 回退三向断言。变异断言红 |
+| MP-05 熔断器接线 + per-pattern + noop | ✅ 已做 | ci-sweeper 的 `run:` 真执行 `ledger-check --pattern`；`[f,f,noop,f,f]` 从 `ok/2` → `no-progress/5`；切片证明：4+4 混合 → 不切片 `no-progress`、切片 `ok`。变异断言红 |
+| MP-06 … MP-19 | ⬜ **未做** | 见下方"有意未做" |
+
+**M1 出口条件（spec §5）实测**：`test.mjs` 在 `hasGnu` true/false **两环境均 `Failed: 0`**（1018 条）；
+`bash init.sh` 通过；`queue-read --json` 返回 **7** 条；`APPROVE`+`FAIL` 证据 **exit 2**；
+多行清单无 `@` **exit 1**；`hasEventWiring('.')` **false**；ci-sweeper 真执行 `ledger-check`。
+
+### 有意未做（附理由，可核对）
+
+| 项 | 状态 | 为什么没做 | 怎么核实 |
+|---|---|---|---|
+| MP-06 `run-log-append.mjs` | 未做 | **被 spec §8 待决 1 阻塞**：runner 文件系统是临时的，写入不持久化到仓库；三种持久化方式（提交分支 / PR 评论 / 由 agent 平台写）各有取舍，需先决策。在决策前实现等于给空气记账——`used` 仍会是 0。 | `scripts/run-log-append.mjs` 不存在；`budget-check --pattern issue-intake` 仍 `used: 0` |
+| MP-07 独立性声明一致性检查 | 未做（M2） | 依赖 MP-01 的 escalate 通道（已完成），但它属 M2 的可靠性批次。**注意**：spec §8 待决 3/4 尚未由作者确认"实现 vs 降级为约定"，实现前需先定。 | `gate-check --help` 无 `--verifier-id` / `--implementer-id` / `--worktree` |
+| MP-08 占位符账本独立退出码 | 未做（M2） | 依赖 MP-05（已完成）。属 M2 批次；当前 `placeholder-ledger` 仍与熔断同为 exit 2。 | `ledger-check --ledger loop-ledger.json` 仍 exit 2 |
+| MP-09 安装漂移检测 | 未做（M2） | M2 批次。当前 `--check` 默认仍走错目录（报 17 个无关技能为残留）。 | `install-skills.mjs --scope user --check` 仍报 `Checked 0` |
+| MP-10 能力感知断言 | ✅ **已做（提前）** | 原列 M2，但它是 **M1 出口条件的一部分**——"两环境 0 失败"要求 `hasGnu=false` 分支不再假红。故随 M1 落地。 | `hasGnuTimeout` 已导出；两环境均 `Failed: 0`；断言按能力分叉（`process.platform` 在该测试块零命中） |
+| MP-11 文档边界声明 | ✅ **已做（提前）** | 原列 M2 且要求"必须在任何 L2 使用之前完成"。本轮顺手做了（2 句声明 + 3 条断言），因为它是纯文档且零风险。 | `harness-loop/SKILL.md` 含"本包不含 agent 运行器"；`examples/github-actions/README.md` 含"只能完成" |
+| MP-12 阈值与枚举收敛 | 未做（M2） | M2 批次，与 M1 无耦合。文件数阈值（`loop-constraints.md` 的 5 vs `LOOP.md` 的 10）仍是两份真相源，已在 `STATE.md` High Priority 登记。 | `LOOP.md:157` 仍写"超过 10 个文件"；`loop-budget/SKILL.md` 仍是 5 值枚举 |
+| MP-13 触发描述加否定式边界 | 未做（M3） | M3 批次。且其验收标准本身标注为"基于文本的预测"——无法在目标 agent 中实测。 | `skills/harness-loop/SKILL.md` 的 `description` 首句仍非否定式 |
+| MP-14 宿主路径单一真相源 | 未做（M2） | 依赖 MP-09。`LAYOUTS` 与 `SKILL_DIRS` 仍是两份列表，`.pi` 仍缺席。 | `grep -n LAYOUTS scripts/install-skills.mjs` 仍只有 agents/zcode/both |
+| MP-15 无消费者的两处声明 | 未做（M3） | 需先定 spec §8 待决 6（接入 vs 降级）。接入要求先有 agent 运行器（P1-03），在运行器缺位时接入等于给空气设上限。 | `loop-budget.md` 第 4 列仍无消费者；`registry.yaml` 的 `suggested_daily_cap` 同 |
+| MP-16 工具范围声明 | 未做（M3） | 需先定 spec §8 待决 7（让声明满足它 vs 移出计分）。本包确实不提供工具级隔离。 | `loop-audit .` 的 `toolScope` 仍 FAIL |
+| MP-17 三条打磨项 | 未做（M3） | M3 批次，不影响任何判定或门禁。 | `loop-audit.mjs:380` 仍是 `Math.max(1, …)`；`test.mjs` 临时目录仍无 `try/finally` |
+| MP-18 无效字段断言 | 未做（M3） | M3 批次。需二选一：让 `user_invocable` 接到行为，或从断言移除。 | `test.mjs` 仍断言 `user_invocable`，而宿主不读该字段 |
+| MP-19 重复 id | 未做（M3） | M3 批次。`feature_list.json` 的 `stage-001` 仍出现两次（索引 1 与 7），导致阶段 1 判据 1 失败。 | `node -e` 读 `feature_list.json`：16 条、15 个唯一 id |
+| **真机验证（硬约束 10）** | **NOT RUN** | MP-02 改的是**厂商接入**（GitHub Actions + `gh` + token 回退），而 8 个 workflow 从未在任何真实 GitHub 仓库上跑过。按 spec §6.3，**未跑则不得在真实项目上启用 L2**。 | 无真实仓库运行记录写入 `STATE.md` |
+| Linux 真机验证 | **NOT RUN** | 本机两环境是 **PATH 顺序差异**（Git 的 `timeout` vs `C:\Windows\system32\timeout.exe`），不是真 Linux。`samePath` 的路径规范化与 `pwd -W` 回退分支未在 Linux 跑过。 | CI 是 `ubuntu-latest`，但本地从未复现过 Linux 行为 |
+| `harness-stage --upgrade` 写入路径 | 未验证 | 审查范围外（只读边界），本轮未执行。 | 无 |
+
+### 与审查报告的偏离记录
+
+| 项 | 报告结论 | 实施时实测 | 处理 |
+|---|---|---|---|
+| **P2-01** `loop-audit` 占位符守卫在 CRLF 下失效 | 已确认（"死代码"） | ❌ **证伪**：`loop-audit.mjs:130` 对捕获值调了 `.trim()`，而 `.` 本就不吃 `\r`——守卫一直有效 | 报告已标注撤销；MP-03 不含该项 |
+| P1-07 触发条件 | "裸路径 → proceed" | 第三轮已更正为"多行清单忘记 `@`" | 已按更正后实施 |
+
+---
+
 ## 自检
 
 ### 1. 问题是否全覆盖
