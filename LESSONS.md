@@ -52,6 +52,24 @@ Evidence: `scripts/lib/common.mjs` 的 `SKILL_DIRS`；目标仓库审计 7/100 �
 Seen 1× (2026-10-14)
 Evidence: 实测 `Last run: never` → 日期即触发；仅加一条 `run_id` 也触发（目录几乎为空仍 PASS）
 
+**归因一个差异之前，必须把对照的另一半也真的跑掉；只跑一半的观测不能用来定位原因。**
+原因：审查报告把 P1-07 从「设计取舍」升格为「安全绕过」时，只跑了「裸路径 `--diff-files auth/login.ts` → proceed」，
+**没有同时跑「同一路径加 `@`」**。第三轮复核重跑四种参数排列，全部 `escalate / denylist`——原结论复现不出。
+真正的触发条件是「对多行清单文件忘记 `@`」（`--diff-files big.txt` → `proceed, files_changed: 1`），
+同一个根因、不同触发条件。**差异必须来自被测变量，而"只跑一个对照"无法排除其它变量。**
+这与已记录的 D3（两个对照结果相同、实为 fixture 缺失造成的噪声）是同一个病的两种形态。
+Seen 1× (2026-10-16)
+Evidence: `REVIEW-2026-10-16-harness-loop-audit.md` §7.4 / §9.4；`gate-check` 四种排列实跑
+
+**断言的分叉判据要绑能力，不要绑平台名。**
+原因：`test.mjs` 的孙进程断言依赖 GNU `timeout`，报告写「原生 Windows → 978/1」。
+实测原生 `powershell.exe` 下是 **979/0**——Git 的 `/usr/bin` 在 PATH 上时解析到 GNU coreutils，
+`hasGnuTimeout()` 为真。只有把 `system32` 排到 Git 之前才复现 978/1。
+按 `process.platform === 'win32'` 分叉会得到一个**在开发机上恒绿的假断言**。
+判据要绑 `hasGnuTimeout()` 的返回值。
+Seen 1× (2026-10-16)
+Evidence: `REVIEW-2026-10-16-modification-spec.md` §3.11；两种 PATH 顺序实跑对照
+
 ---
 
 ## Done right

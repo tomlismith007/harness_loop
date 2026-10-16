@@ -1,10 +1,16 @@
 # Loop State
 
-Last run: 2026-10-15 (验证路径自递归 + 孤儿进程修复)
+Last run: 2026-10-16 (第三轮独立复核：修正审查报告两处，升格一处)
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表、本轮噪声。**每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
+
+- [ ] **`REVIEW-2026-10-16-*` 两处表述已修正，实施前必读**：第三轮独立复核逐条重跑关键探针后，22 条问题里 **20 条原样成立，1 条表述错误，1 条触发条件错误，1 条从"存疑"升格为"已确认"**。
+  - **P1-07（MP-01）表述错误**：原文"裸路径 `--diff-files auth/login.ts` → `proceed`"**复现不出**——四种参数排列（含文件真实存在）全部 `escalate / denylist`。真实缺陷是**对多行清单忘记 `@`**：`--diff-files big.txt`（20 条）→ `proceed, files_changed: 1`；`@big.txt` → `escalate / scope, 20`。危害相同（拒绝列表 + 范围闸门**同时**失效），但 fixture 必须按"忘记 `@`"写。
+  - **P2-08（MP-10）判据错误**：原文"原生 Windows → 978/1"不成立——原生 `powershell.exe` 直接跑是 **979/0**（Git 的 `timeout` 在 PATH 上）。只有 `system32` 排到 Git 之前才复现 978/1。**分叉判据必须是 `hasGnuTimeout()` 的返回值，不能是 `process.platform`**，否则写出在开发机上恒绿的假断言。
+  - **P1-04 的 `noop` 升格**：原标"静态分析，存疑"，实测确认——`[f,f,noop,f,f]` → `ok, 2/5, exit 0`，而 `[f,f,f,f,f]` → `no-progress, 5/5, exit 2`。一次被锁跳过的 `noop` 就能洗掉"5 次都没进展"。MP-05 的补充项从"先实测"改为"直接修"。
+  - 详见 `REVIEW-2026-10-16-harness-loop-audit.md` §7.4 / §9.4 与 `REVIEW-2026-10-16-modification-spec.md` 头部修正表。
 
 - [x] **本轮已完成（2026-10-15 第四批）**：修复验证路径的自递归与孤儿进程。`init.sh` 从 **10m06s → 45.4s**（13 倍），`test.mjs` 从 64.7s → 43.7s。核心是三处：① 判据 5 的自引用防护（源仓库的 `init.sh` 调 `harness-stage`，而判据 5 又执行被审计仓库的 `init.sh` → 无限递归，实测 9 层、69 次 120s 超时）；② `runWithTreeKill`（Node 的 timeout 只杀直接子进程，实测超时后孙进程全存活 → 换 GNU `timeout -k`，实测整棵树全灭）；③ 判据 memoization（同一次运行里判据 5 被算 3 遍 = init.sh 执行 3 次）。断言 954 → 979，4 次变异全部确认落地后变红。
 - [ ] **预算百分比目前对 5 个 workflow 恒为 0（已知限制，不是 bug）**：`budget-check` 从 `loop-run-log.md` 累加当日花费，而只有 `daily-triage` / `lesson-harvest` 在写它。新接线的 5 个（`ci-sweeper` / `issue-intake` / `post-merge` / `pr-review` / `release-draft`）不写 run-log，所以 `used` 恒为 0。**本次接线立即生效的是 kill switch**；预算百分比要等 agent 平台把真实花费写进 run-log 才有意义。让 workflow 自己写 run-log 有风险（runner 文件系统是临时的，写入不会持久化到仓库——见 `examples/github-actions/README.md` 的说明），需要先决定持久化方式（评论 / dispatch / 直接 commit）。
@@ -34,6 +40,8 @@ Last run: 2026-10-15 (验证路径自递归 + 孤儿进程修复)
 ## Watch List
 
 - 尚未跑过任何一轮真实事件。第一周目标：只报告，积累可靠的 triage 记录。
+- **第三轮复核暴露的方法论问题（值得进 LESSONS）**：轮 2 把 P1-07 从"设计取舍"升格为"问题"时，**依据的是一次没有对照的观测**——它记录了"裸路径 → proceed"，但没有同时跑"同一路径加 `@`"来确认差异真的来自 `@`。这与已记录的 D3（"两个对照结果相同却是噪声"）是同一个病的两种形态：**只跑了一个对照就归因**。对照实验的另一半必须真的跑，不能推理。
+- **`hasGnuTimeout` 是 `common.mjs` 的模块私有函数**，`test.mjs` 只能通过 `treeKill` 标记间接验证它。MP-10 要按它分叉，需要先导出（或导出 `capabilities()`）。这是 MP-10 的一个前置，不是可选项。
 - **`feature_list.json` 有一个重复 id（`stage-001` 出现两次，索引 1 与 7）**：
   "三阶段检测与升级可用" 与 "阶段 1 只产出 harness 地基" 共用同一 id。
   本轮发现但未修（与验证路径无关，一轮一个修复）。重复 id 会让"按 id 查 feature"
@@ -84,6 +92,41 @@ Last run: 2026-10-15 (验证路径自递归 + 孤儿进程修复)
 —
 
 ## Post-Run Critique (from last run)
+
+### 2026-10-16 · 第三轮独立复核：修正审查报告两处，升格一处（本轮）
+
+- **本轮做了什么**：对 `REVIEW-2026-10-16-harness-loop-audit.md` 与配套 spec 做了**对抗性复核**——不是重读代码，而是**逐条重跑关键探针**。目标是回答：这份报告里哪些结论是真的，哪些是推理出来的。产出为审查报告新增 §9、§7.4，spec 头部修正表与 MP-01/MP-05/MP-10 三处改写。**未改任何代码**（本轮是文档轮）。
+
+- **结论：报告骨架经得起复核，但两处"结论对、证据错"**。22 条问题里 20 条原样成立（P0-01/P0-02 尤其扎实——手写 4 份证据文件实跑，前三份全部 `proceed, exit 0`）；1 条表述错误（P1-07）；1 条触发条件错误（P2-08）；1 条从"存疑"升格为"已确认"（P1-04 的 `noop`）。**没有发现凭空捏造的结论，也没有发现"读了代码就说验证过"的条目。**
+
+- **P1-07 复现不出，这是本轮最重要的发现**。报告声称裸路径 `--diff-files auth/login.ts` → `proceed, files_changed: 1`。我跑了这个字符串、三种参数排列、以及让文件真实存在于磁盘上——**全部 `escalate / denylist`**。真正的缺陷更窄：**对多行清单文件忘记 `@`，N 个文件塌缩成 1 个**。实测 `--diff-files big.txt`（20 条路径）→ `proceed, files_changed: 1`；`@big.txt` → `escalate / scope, 20`。**拒绝列表闸门与范围闸门同时失效**——首行无害的清单能藏住后面的 `auth/**`。同一个根因（`split(',')` 把文件路径当单一路径），不同的触发条件。
+
+- **为什么轮 2 会写错，这个模式值得记**：轮 2 升格 P1-07 时**只跑了一个对照**——记录了"裸路径 → proceed"，但**没有同时跑"同一路径加 `@`"**来确认差异真的来自 `@`。这与仓库已记录的 D3 是同一个病的两种形态：D3 是"两个对照结果相同，实为噪声"；这次是"**只跑了一个对照就归因**"。**对照实验的另一半必须真的跑，不能推理。** 已记入 Watch List，建议进 `LESSONS.md`。
+
+- **P2-08 的 978/1 是环境相关，不是平台决定**。报告写"原生 Windows → 978/1"。实测：原生 `powershell.exe` 直接跑 `test.mjs` → **979/0**——因为 Git 的 `/usr/bin` 在 PATH 上，解析到 GNU coreutils 的 `timeout`，`hasGnuTimeout()` 为真。只有把 `C:\Windows\system32` 排到 Git 之前才复现 978/1（并确认降级路径 `treeKill: false` **确实**泄漏孙进程，`sleep.exe` 存活）。**这直接改变 MP-10 的实现**：分叉判据必须是 `hasGnuTimeout()` 的返回值，**不能是 `process.platform`**——按平台名写会得到一个在开发机上恒绿的假断言。
+
+- **`noop` 从"存疑"升格为"已确认"，且我构造的账本直接推翻了报告自己的谨慎**。报告标"静态分析得出，未实测"。实测：`[f,f,noop,f,f]` → `ok, 2/5, exit 0`；`[f,f,f,f,f]` → `no-progress, 5/5, exit 2`。同样是"5 次里 5 次失败、中间没有任何一次成功"，只因插入一次 `noop`（被锁跳过的**合法**结局）就从"熔断"变成"继续跑"。**报告在这里低估了自己的发现。**
+
+- **P2-07 比报告说的更严重**。我读了宿主 `pi-coding-agent` 的 `package-manager.js` 与 `config.js`：宿主读 `~/.agents/skills`、`<cwd>/.pi/skills`、`~/.pi/agent/skills`。**`.zcode` 在宿主源码里零命中**——装在 `~/.zcode/skills` 的 18 个技能没有任何东西在读。报告只说了"`.pi` 缺席三方不一致"，实际是"主力安装目录整个不被宿主读取"。
+
+- **我自己的失误（记下来）**：第一次跑 `loop-audit --json` 时我报告"无 FAIL"，一度看起来像 P2-04 报错了。那是**我的解析 bug**——`checks` 是扁平数组（`{key,label,ok,weight}`），不嵌在 `subsystems` 下；我按 `subsystems[k].checks` 去取，得到空数组。改用 `j.checks.filter(c => !c.ok)` 后立刻看到 `toolScope` 与 `loopActivity` 均 FAIL。**P2-04 属实。** 症状与本仓库反复记录的模式一样：**探针的范围一旦错位，绿色的输出就指向不存在的结论**——只不过这次错的是我的探针，不是被测代码。
+
+- **本轮的可检验产出**（全部实跑，非推理）：
+  | 命令 | 结果 |
+  |---|---|
+  | `gate-check` + `APPROVE`/`Tests→FAIL` 证据 | `proceed, exit 0`（缺陷确认） |
+  | `gate-check --diff-files big.txt`（无 `@`） | `proceed, files_changed: 1`（缺陷确认） |
+  | `gate-check --diff-files @big.txt` | `escalate / scope, 20`（对照） |
+  | `ledger-check --ledger led-noop.json` | `ok, 2/5, exit 0`（noop 洗计数确认） |
+  | `ledger-check --ledger led-tail.json` | `no-progress, 5/5, exit 2`（对照） |
+  | `queue-read --json`（本仓库） | `items: []`，note 谎称无待办（缺陷确认） |
+  | `hasEventWiring('D:/harness_loop')` | `wired: true`（假阳性确认） |
+  | `test.mjs`（git bash） | `Passed: 979 Failed: 0` |
+  | `test.mjs`（PowerShell + system32 优先） | `Passed: 978 Failed: 1`（唯一失败＝孙进程断言） |
+
+- **清理**：本轮跑测试泄漏了 `sleep.exe` 孤儿进程（正是 P2-08 描述的现象），已 `Stop-Process` 清理；探针临时文件已删。`git status --porcelain` 仅剩两份 review 文档为未跟踪。
+
+- **未做**：未改任何代码；未验证 Linux/GNU-timeout 路径、8 个 workflow 在真实仓库的行为、`harness-loop` 的触发行为、`harness-stage --upgrade` 的写入路径——与审查报告 §8 声明的缺口一致，复核**没有缩小**它们。
 
 ### 2026-10-15 · 验证路径自递归 + 孤儿进程（本轮）
 
