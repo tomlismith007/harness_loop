@@ -6,863 +6,838 @@
 <title>Loop Harness · 真实流程图</title>
 <style>
   :root{
-    --ink:#0c100e;
-    --panel:#131a16;
-    --panel-2:#18211c;
-    --line:#2a352e;
-    --line-soft:#202a24;
-    --text:#e8e4da;
-    --muted:#9aa79e;
-    --dim:#8b978f;
-    --amber:#e0a458;
-    --amber-soft:#3a2c1b;
-    --sage:#8fb3a3;
-    --pass:#8fbf6a;
-    --pass-soft:#1d2a19;
-    --stop:#e59073;
-    --stop-soft:#2e1d17;
-    --wait:#d8c07a;
-    --wait-soft:#2c2716;
-    --mono:"JetBrains Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
-    --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    --bg:#0b0f0d; --panel:#121914; --line:#2b3830; --text:#ece7db; --muted:#a9b6ac;
+    --amber:#e0a458; --sage:#93b8a6; --pass:#9ac474; --stop:#e59073; --wait:#e0ca84;
+    --mono:"JetBrains Mono","SFMono-Regular",Consolas,monospace;
+    --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   }
   *{box-sizing:border-box}
-  html{scroll-behavior:smooth;scroll-padding-top:76px}
-  body{
-    margin:0;background:var(--ink);color:var(--text);font-family:var(--sans);
-    line-height:1.65;
-    background-image:
-      radial-gradient(1100px 520px at 12% -8%, rgba(224,164,88,.10), transparent 60%),
-      radial-gradient(900px 420px at 92% 4%, rgba(143,179,163,.07), transparent 55%),
-      repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 64px),
-      repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 64px);
-  }
-  a{color:var(--amber);text-decoration:none}
-  a:hover{text-decoration:underline}
-  code,kbd{font-family:var(--mono);font-size:.86em;color:#f0d9b5;background:rgba(224,164,88,.08);padding:.12em .38em;border-radius:4px;border:1px solid rgba(224,164,88,.16)}
-  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
-
-  header.hero{padding:72px 0 40px;border-bottom:1px solid var(--line-soft)}
-  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--amber);margin:0 0 18px}
-  h1{font-size:clamp(2rem,4.2vw,3.4rem);line-height:1.12;margin:0 0 18px;font-weight:650;letter-spacing:-.02em}
-  h1 .thin{color:var(--muted);font-weight:350}
-  .lede{font-size:1.06rem;color:var(--muted);max-width:760px;margin:0 0 26px}
-  .stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
-  .stat{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:999px}
-  .stat b{color:var(--text);font-weight:600}
-
-  nav.toc{position:sticky;top:0;z-index:20;background:rgba(12,16,14,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line-soft)}
-  nav.toc .wrap{display:flex;gap:4px;overflow-x:auto;padding-top:10px;padding-bottom:10px;scrollbar-width:none}
-  nav.toc a{flex:0 0 auto;font-size:12.5px;color:var(--muted);padding:6px 11px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
-  nav.toc a:hover{color:var(--text);background:var(--panel);text-decoration:none;border-color:var(--line)}
-
-  section{padding:64px 0 8px;border-bottom:1px solid var(--line-soft)}
-  section:last-of-type{border-bottom:0}
-  .sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:8px}
-  .sec-num{font-family:var(--mono);font-size:13px;color:var(--amber);letter-spacing:.12em}
-  h2{font-size:clamp(1.5rem,2.6vw,2rem);margin:0;font-weight:600;letter-spacing:-.01em}
-  .sec-sub{color:var(--muted);max-width:820px;margin:6px 0 28px;font-size:.98rem}
-
-  .card{background:linear-gradient(180deg,var(--panel),rgba(19,26,22,.72));border:1px solid var(--line);border-radius:14px;padding:22px 24px}
-  .card + .card{margin-top:14px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
-
-  h3{font-size:1.02rem;margin:0 0 10px;font-weight:600}
-  h4{font-size:.9rem;margin:18px 0 8px;font-weight:600;color:var(--sage)}
-  p{margin:.5em 0}
-  ul,ol{margin:.5em 0;padding-left:1.3em}
-  li{margin:.28em 0}
-  .small{font-size:.88rem;color:var(--muted)}
-  .tiny{font-size:.82rem;color:var(--dim)}
-  .mono{font-family:var(--mono)}
-  .nowrap{white-space:nowrap}
-
-  .badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;letter-spacing:.04em;padding:3px 8px;border-radius:999px;border:1px solid;vertical-align:middle;white-space:nowrap}
-  .b-mech{color:var(--pass);border-color:rgba(143,191,106,.35);background:var(--pass-soft)}
-  .b-conv{color:var(--wait);border-color:rgba(216,192,122,.32);background:var(--wait-soft)}
-  .b-wire{color:var(--stop);border-color:rgba(217,119,87,.35);background:var(--stop-soft)}
-  .b-exit{color:var(--stop);border-color:rgba(217,119,87,.35);background:var(--stop-soft)}
-  .b-pass{color:var(--pass);border-color:rgba(143,191,106,.35);background:var(--pass-soft)}
-  .b-wait{color:var(--wait);border-color:rgba(216,192,122,.32);background:var(--wait-soft)}
-
-  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:20px;font-size:12.5px;color:var(--muted)}
-  .legend span{display:inline-flex;align-items:center;gap:7px}
-
-  /* 三层结构 */
-  .layers{display:grid;gap:10px;margin-top:8px}
-  .layer{display:grid;grid-template-columns:180px 1fr;gap:18px;align-items:start;border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--panel)}
-  .layer .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--amber);padding-top:3px}
-  .layer strong{display:block;margin-bottom:4px}
-  .layer .small{margin:0}
-  @media(max-width:720px){.layer{grid-template-columns:1fr;gap:6px}}
-
-  /* 时间线 */
-  .timeline{position:relative;margin-top:6px}
-  .step{display:grid;grid-template-columns:54px 1fr;gap:16px;position:relative;padding-bottom:22px}
-  .step:last-child{padding-bottom:0}
-  .step::before{content:"";position:absolute;left:26px;top:44px;bottom:0;width:1px;background:linear-gradient(180deg,var(--line),var(--line-soft))}
-  .step:last-child::before{display:none}
-  .step .dot{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-size:13px;color:var(--amber);background:var(--panel-2);border:1px solid var(--line);position:relative;z-index:1}
-  .step .body{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 18px}
-  .step .body h3{margin:0 0 6px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-  .step .body p:last-child{margin-bottom:0}
-  .exits{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-  .exit{font-size:12.5px;color:var(--muted);border:1px dashed var(--line);border-radius:8px;padding:6px 10px;background:rgba(217,119,87,.05)}
-  .exit b{color:var(--stop);font-family:var(--mono);font-weight:600;font-size:12px}
-
-  /* 闸门 */
-  .gates{counter-reset:g;display:grid;gap:9px;margin-top:6px}
-  .gate{display:grid;grid-template-columns:40px 1fr auto;gap:14px;align-items:center;border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 16px}
-  .gate .n{font-family:var(--mono);font-size:12px;color:var(--dim)}
-  .gate .what strong{display:block;font-size:.95rem}
-  .gate .what span{font-size:.83rem;color:var(--muted)}
-  .gate .res{font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:999px;white-space:nowrap}
-  .g-exit{border-left-color:var(--stop)} .g-exit .res{color:var(--stop);background:var(--stop-soft);border:1px solid rgba(217,119,87,.3)}
-  .g-esc{border-left-color:var(--amber)} .g-esc .res{color:var(--amber);background:var(--amber-soft);border:1px solid rgba(224,164,88,.3)}
-  .g-ro{border-left-color:var(--wait)} .g-ro .res{color:var(--wait);background:var(--wait-soft);border:1px solid rgba(216,192,122,.3)}
-  .g-ok{border-left-color:var(--pass)} .g-ok .res{color:var(--pass);background:var(--pass-soft);border:1px solid rgba(143,191,106,.3)}
-  @media(max-width:720px){.gate{grid-template-columns:30px 1fr}.gate .res{grid-column:2;justify-self:start}}
-
-  /* 通用流程盒 */
-  .flow{display:grid;gap:0;margin-top:6px}
-  .node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 16px;font-size:.92rem}
-  .node b{font-weight:600}
-  .node small{display:block;color:var(--muted);font-size:.8rem;margin-top:2px}
-  .arrow{height:22px;display:grid;place-items:center;color:var(--dim);font-family:var(--mono);font-size:12px}
-  .split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  @media(max-width:720px){.split{grid-template-columns:1fr}}
-
-  table{width:100%;border-collapse:collapse;font-size:.87rem;margin-top:10px}
-  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top}
-  th{color:var(--sage);font-weight:600;font-size:.82rem;letter-spacing:.06em;text-transform:uppercase}
-  tr:last-child td{border-bottom:0}
-  td code{white-space:nowrap}
-  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:4px 6px}
-  .tbl-wrap table{margin:0}
-
-  .callout{border:1px solid rgba(224,164,88,.28);background:linear-gradient(180deg,rgba(224,164,88,.07),rgba(224,164,88,.02));border-radius:12px;padding:16px 18px;margin-top:16px}
-  .callout.warn{border-color:rgba(217,119,87,.3);background:linear-gradient(180deg,rgba(217,119,87,.08),rgba(217,119,87,.02))}
-  .callout.ok{border-color:rgba(143,191,106,.28);background:linear-gradient(180deg,rgba(143,191,106,.07),rgba(143,191,106,.02))}
-  .callout h3{margin-top:0;font-size:.95rem}
-
-  .kbd-row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-  .kbd-row span{font-family:var(--mono);font-size:12px;border:1px solid var(--line);background:var(--panel-2);padding:5px 9px;border-radius:6px;color:var(--muted)}
-
-  footer{padding:48px 0 64px;color:var(--dim);font-size:.85rem}
-  footer .wrap{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between}
-
-  @media print{
-    body{background:#fff;color:#111}
-    nav.toc{display:none}
-    .card,.layer,.step .body,.gate,.node,.tbl-wrap{background:#fff;border-color:#ccc}
-    code{background:#f3f3f3;color:#111;border-color:#ddd}
-    a{color:#111}
-  }
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5}
+  header{padding:34px 28px 18px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px;font-size:1.5rem;font-weight:650;letter-spacing:-.01em}
+  header p{margin:0;color:var(--muted);font-size:.9rem;max-width:900px}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:.8rem;color:var(--muted)}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .k-mech{background:#22331f;border:1px solid #4c7a3d}
+  .k-conv{background:#332d1a;border:1px solid #8a7434}
+  .k-wire{background:#331f19;border:1px solid #8a4c3a}
+  .k-term{background:#1b2620;border:1px solid #3f5a4c;border-radius:50%!important}
+  .k-dec{background:#2a2418;border:1px solid #8a7434;transform:rotate(45deg)}
+  main{padding:22px 28px 60px;overflow-x:auto}
+  .diagram{min-width:1080px}
+  figure{margin:0 0 46px}
+  figcaption{font-family:var(--mono);font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);margin:0 0 8px}
+  svg{display:block;width:100%;height:auto;padding:10px;background:
+    radial-gradient(600px 300px at 20% 0%,rgba(224,164,88,.05),transparent 60%),
+    repeating-linear-gradient(0deg,rgba(255,255,255,.014) 0 1px,transparent 1px 32px),
+    repeating-linear-gradient(90deg,rgba(255,255,255,.014) 0 1px,transparent 1px 32px);
+    border:1px solid var(--line);border-radius:12px}
+  text{font-family:var(--sans);fill:var(--text)}
+  .t-mono{font-family:var(--mono)}
+  .t-small{font-size:12px;fill:var(--muted)}
+  .t-tiny{font-size:12px;fill:#9aab9f}
+  .t-title{font-size:13px;font-weight:600}
+  .t-amber{fill:var(--amber)}
+  .t-pass{fill:var(--pass)}
+  .t-stop{fill:var(--stop)}
+  .t-wait{fill:var(--wait)}
+  .box{fill:#141c17;stroke:#3a4a40;stroke-width:1.2;rx:8}
+  .box-mech{fill:#18251a;stroke:#4c7a3d}
+  .box-conv{fill:#241f12;stroke:#8a7434}
+  .box-wire{fill:#241512;stroke:#8a4c3a}
+  .box-term{fill:#101a15;stroke:#3f5a4c;stroke-width:1.4}
+  .box-dec{fill:#231d10;stroke:#8a7434;stroke-width:1.4}
+  .box-esc{fill:#241512;stroke:#b0654a;stroke-width:1.4}
+  .box-ok{fill:#18251a;stroke:#6d9a52;stroke-width:1.4}
+  .edge{fill:none;stroke:#5a6b60;stroke-width:1.4;marker-end:url(#arrow)}
+  .edge-esc{stroke:#b0654a;marker-end:url(#arrowEsc)}
+  .edge-ok{stroke:#6d9a52;marker-end:url(#arrowOk)}
+  .edge-wait{stroke:#a08a45;marker-end:url(#arrowWait);stroke-dasharray:5 4}
+  .edge-loop{stroke:#7d8f84;marker-end:url(#arrow);stroke-dasharray:4 4}
+  .lane{fill:#0e1511;stroke:#26332b;stroke-width:1}
+  .lane-label{font-family:var(--mono);font-size:11px;letter-spacing:.12em;fill:#93a59a;text-transform:uppercase}
+  .lbl{font-size:12px;fill:#a9bbae;font-family:var(--mono)}
+  .lbl-esc{fill:#d38a6f}
+  .lbl-ok{fill:#9ac474}
+  .lbl-wait{fill:#d8c078}
 </style>
 </head>
 <body>
-
-<header class="hero">
-  <div class="wrap">
-    <h1>真实流程图<br><span class="thin">从空仓库到一次事件运行，代码实际做了什么</span></h1>
-    <p class="eyebrow">按 scripts/ 与 workflow 的实际行为绘制</p>
-    <p class="lede">
-      这份图按仓库里的<strong>可执行代码</strong>绘制，不按文档愿景绘制。每一条分支都对应
-      <code>scripts/*.mjs</code> 里真实存在的判断；没有代码入口的承诺单独标为
-      <span class="badge b-wire">未接线</span>。
-    </p>
-    <div class="stats">
-      <span class="stat"><b>16</b> 个已注册事件</span>
-      <span class="stat"><b>17</b> 个技能</span>
-      <span class="stat"><b>8</b> 个示例 workflow</span>
-      <span class="stat"><b>11</b> 个顶层脚本</span>
-      <span class="stat"><b>1067</b> 项断言 · 本机与 ubuntu 均通过</span>
-      <span class="stat">自审计 <b>94/100 · L2</b></span>
-    </div>
-    <div class="legend">
-      <span><span class="badge b-mech">机制</span> 有代码入口，测试断言改值会改行为</span>
-      <span><span class="badge b-conv">约定</span> 靠人或 agent 自觉，代码不拦</span>
-      <span><span class="badge b-wire">未接线</span> 文档提到，但没有生产消费者</span>
-    </div>
+<header>
+  <h1>Loop Harness 真实流程图</h1>
+  <p>按 <code>scripts/</code> 与 <code>examples/github-actions/</code> 的实际代码绘制。方框 = 动作，菱形 = 判断，圆角胶囊 = 终止结局，红色 = 升级/停止，绿色 = 通过。</p>
+  <div class="legend">
+    <span><i class="k-mech"></i>机制（代码会拦）</span>
+    <span><i class="k-conv"></i>约定（靠自觉）</span>
+    <span><i class="k-wire"></i>未接线</span>
+    <span><i class="k-dec"></i>判断</span>
+    <span><i class="k-term"></i>终止</span>
   </div>
 </header>
+<main>
+<div class="diagram">
 
-<nav class="toc">
-  <div class="wrap">
-    <a href="#layers">三层结构</a>
-    <a href="#assembly">装配</a>
-    <a href="#entry">事件入口</a>
-    <a href="#runtime">运行时 8 步</a>
-    <a href="#gates">闸门判定</a>
-    <a href="#budget">预算与急停</a>
-    <a href="#breaker">熔断器</a>
-    <a href="#evidence">验证契约</a>
-    <a href="#state">状态回写</a>
-    <a href="#boundary">真实边界</a>
-  </div>
-</nav>
+<!-- ============================================================ 1 装配 -->
+<figure>
+  <figcaption>1 · 装配：空仓库 → 可运行（harness-stage.mjs）</figcaption>
+  <svg viewBox="0 0 1180 470" role="img" aria-label="装配流程图">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5a6b60"/></marker>
+      <marker id="arrowEsc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b0654a"/></marker>
+      <marker id="arrowOk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d9a52"/></marker>
+      <marker id="arrowWait" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a08a45"/></marker>
+    </defs>
 
-<!-- ============================================================ -->
-<section id="layers">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">00</span><h2>三层结构：谁负责什么</h2></div>
-    <p class="sec-sub">
-      这三层是理解全部流程的前提。下层不稳，上层只是把不可靠放大；上层没有运行器，
-      事件就止于“任务已交付”。
-    </p>
+    <!-- lane -->
+    <rect class="lane" x="20" y="24" width="1140" height="420" rx="10"/>
+    <text class="lane-label" x="36" y="46">PACK REPOSITORY · 只在这里运行</text>
 
-    <div class="layers">
-      <div class="layer">
-        <div class="tag">EVENT SPINE</div>
-        <div>
-          <strong>事件脊：决定“什么时候有什么工作”</strong>
-          <p class="small">
-            GitHub 事件（issue / PR / CI / tag）进入 workflow → 被消毒 → 调
-            <code>event-router.mjs</code> 得到 phase、skills、gates → 写成
-            <code>.loop/queue/&lt;item&gt;.json</code> → 作为 artifact 交付。
-            <span class="badge b-mech">机制</span>
-          </p>
-        </div>
-      </div>
-      <div class="layer">
-        <div class="tag">LOOP LAYER</div>
-        <div>
-          <strong>运行层：决定“工作如何连续发生”</strong>
-          <p class="small">
-            <code>harness-loop</code> 技能按 8 步跑一轮：退出检查 → 约束 → 路由 → 锁 → 预算
-            → 派发 → 闸门 → 状态。它<strong>不执行具体动作</strong>，只决定派发谁、何时停、何时交给人。
-            <span class="badge b-conv">约定</span>（技能由 agent 执行）
-          </p>
-        </div>
-      </div>
-      <div class="layer">
-        <div class="tag">HARNESS</div>
-        <div>
-          <strong>地基：决定“单次运行是否可靠”</strong>
-          <p class="small">
-            <code>AGENTS.md</code>（指令）、<code>STATE.md</code> + <code>feature_list.json</code>（状态）、
-            <code>init.sh</code>（验证入口）、<code>loop-constraints.md</code>（范围底线）、
-            <code>loop-verifier</code>（独立检查者）。
-          </p>
-        </div>
-      </div>
-    </div>
+    <!-- start -->
+    <rect class="box" x="70" y="66" width="210" height="52" rx="8"/>
+    <text class="t-title" x="86" y="88">目标仓库路径</text>
+    <text class="t-small" x="86" y="105">node scripts/harness-stage.mjs &lt;repo&gt;</text>
 
-    <div class="callout warn">
-      <h3>先记住这条边界</h3>
-      <p class="small" style="margin:0">
-        本包<strong>不含 agent 运行器</strong>。workflow 只做“感知 + 判定 + 记账”，
-        真正的修改与验证需要外部平台消费队列产物。没有平台时，循环停在
-        <code>fix-proposed</code>——这是合法结局，不是“已经自动修好了”。
-        <span class="badge b-wire">未接线</span>
-      </p>
-    </div>
-  </div>
-</section>
+    <!-- detect -->
+    <rect class="box box-mech" x="70" y="156" width="210" height="60" rx="8"/>
+    <text class="t-title" x="86" y="178">① 检测当前阶段</text>
+    <text class="t-small" x="86" y="195">loop-audit 评分 + 逐条判据</text>
+    <text class="t-tiny" x="86" y="209">只读，不写文件</text>
 
-<!-- ============================================================ -->
-<section id="assembly">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">01</span><h2>装配：从空仓库到可运行</h2></div>
-    <p class="sec-sub">
-      入口只有一个：<code>harness-stage.mjs</code>。它先审计目标仓库，算出当前阶段，
-      再按 <code>--upgrade --stage N</code> 补齐产物。阶段驱动技能只在包仓库运行。
-    </p>
+    <!-- decision stage complete -->
+    <polygon class="box-dec" points="470,150 560,196 470,242 380,196"/>
+    <text class="t-title" x="470" y="191" text-anchor="middle">判据全过？</text>
+    <text class="t-small" x="470" y="207" text-anchor="middle">--require</text>
 
-    <div class="flow">
-      <div class="node">
-        <b>① 检测</b>
-        <small><code>node scripts/harness-stage.mjs &lt;repo&gt;</code> → 跑 <code>loop-audit</code> 评分，逐条执行阶段判据，输出当前阶段与差距。只读。</small>
-      </div>
-      <div class="arrow">↓</div>
-      <div class="node">
-        <b>② 补齐</b>
-        <small><code>node scripts/harness-stage.mjs &lt;repo&gt; --upgrade --stage N</code>。跳级会被拒绝（阶段 3 要求 1、2 已完成），<code>--force</code> 是显式逃生门。</small>
-      </div>
-      <div class="arrow">↓</div>
-      <div class="node">
-        <b>③ 校验</b>
-        <small><code>--stage N --require</code>：未达成退出码 2，可直接做 CI 关卡。</small>
-      </div>
-    </div>
+    <!-- report -->
+    <rect class="box" x="70" y="250" width="210" height="56" rx="8"/>
+    <text class="t-title" x="86" y="272">输出阶段与差距</text>
+    <text class="t-small" x="86" y="289">每条失败判据带补齐动作</text>
 
-    <h3 style="margin-top:30px">每个阶段实际写什么</h3>
-    <div class="tbl-wrap">
-      <table>
-        <thead><tr><th>阶段</th><th>文件</th><th>技能（装进消费者）</th><th>脚本 / workflow</th></tr></thead>
-        <tbody>
-          <tr>
-            <td><b>1 初始化</b><br><span class="tiny">L1 只读</span></td>
-            <td>6 个模板 + 生成的 <code>init.sh</code>：<code>AGENTS.md</code>、<code>feature_list.json</code>、<code>progress.md</code>、<code>STATE.md</code>、<code>LESSONS.md</code>、<code>loop-constraints.md</code></td>
-            <td>6 个运行/控制技能 + <code>harness-loop</code>：<code>loop-constraints</code>、<code>loop-budget</code>、<code>event-router</code>、三个 triage</td>
-            <td>7 个运行脚本 + <code>lib/common.mjs</code></td>
-          </tr>
-          <tr>
-            <td><b>2 loop 机制</b><br><span class="tiny">L2 辅助修复</span></td>
-            <td>4 个模板 + 账本：<code>LOOP.md</code>、<code>loop-budget.md</code>、<code>loop-run-log.md</code>、<code>session-handoff.md</code>、<code>loop-ledger.json</code></td>
-            <td><code>loop-guard</code>、<code>minimal-fix</code>、<code>loop-verifier</code></td>
-            <td>无新增脚本</td>
-          </tr>
-          <tr>
-            <td><b>3 巩固</b><br><span class="tiny">L3 无人值守</span></td>
-            <td>无新增文档</td>
-            <td><code>lesson-harvest</code>、<code>signal-gatekeeper</code>、<code>post-merge-cleanup</code>、<code>release-drafter</code></td>
-            <td>复制 8 个 workflow 到 <code>.github/workflows/</code></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="tiny" style="margin-top:8px">
-      阶段驱动技能 <code>harness-init</code> / <code>harness-loop-init</code> / <code>harness-consolidate</code>
-      不复制进消费者：它们第一步调用 <code>harness-stage.mjs</code>，而该脚本需要包内 <code>templates/</code>，不随装配复制。
-      消费者在阶段 3 共得到 <b>14</b> 个可运行技能。
-    </p>
+    <!-- upgrade -->
+    <rect class="box box-mech" x="70" y="342" width="210" height="64" rx="8"/>
+    <text class="t-title" x="86" y="364">② --upgrade --stage N</text>
+    <text class="t-small" x="86" y="381">按阶段写文件 / 装技能</text>
+    <text class="t-small" x="86" y="396">复制运行脚本 + workflow</text>
 
-    <div class="grid2" style="margin-top:18px">
-      <div class="card">
-        <h3>技能安装（另一条路径）</h3>
-        <p class="small">
-          <code>install-skills.mjs</code> 把 <code>skills/</code> 全量复制到 agent 会扫描的目录：
-          默认 <code>~/.agents/skills/</code>（跨 agent）或 <code>&lt;repo&gt;/.agents/skills/</code>；
-          <code>--layout zcode</code> 写 <code>.zcode/</code>。
-        </p>
-        <p class="small">
-          manifest <code>.loop-harness-install.json</code> 只记录<strong>本次真正写入</strong>的技能。
-          用户自己的同名技能会被跳过，卸载时不会被删。
-        </p>
-        <p class="small"><code>--check</code> 对比已安装副本与源码；无 manifest 的目录明确报“不是本包装的”，不误报漂移。</p>
-      </div>
-      <div class="card">
-        <h3>阶段判据在检查什么</h3>
-        <ul class="small">
-          <li><b>阶段 1（8 项机械）</b>：指令/状态/进度/约束文件存在；feature 有可判定完成标准；<code>init.sh</code> <strong>真的执行</strong>并退出 0；就绪度 ≥ 40。</li>
-          <li><b>阶段 2（6 机械 + 3 人工）</b>：verifier / 约束技能在<strong>可发现路径</strong>；熔断器有非空账本；拒绝列表已本地化；回退测试、NOT RUN、triage 准确率由人确认。</li>
-          <li><b>阶段 3（7 机械 + 1 人工）</b>：事件真的接线（仓库事件 + 调 router + 消费结果）；LESSONS 有真实条目；run-log 有记录；有教训已转正；跑过一个完整周期由人确认。</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
+    <!-- decision skip -->
+    <polygon class="box-dec" points="470,344 560,390 470,436 380,390"/>
+    <text class="t-title" x="470" y="385" text-anchor="middle">跳级？</text>
+    <text class="t-small" x="470" y="401" text-anchor="middle">stage N 而 N-1 未完成</text>
 
-<!-- ============================================================ -->
-<section id="entry">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">02</span><h2>事件入口：workflow 实际做什么</h2></div>
-    <p class="sec-sub">
-      每个 workflow 结构相同：消毒输入 → 调路由 → 检查锁 → 落盘 work item → 上传 artifact。
-      它不修改代码，也不做验证。
-    </p>
+    <!-- reject -->
+    <rect class="box-esc" x="660" y="330" width="200" height="60" rx="8"/>
+    <text class="t-title t-stop" x="676" y="352">拒绝并退出 2</text>
+    <text class="t-small" x="676" y="369">提示先跑 --stage N-1</text>
+    <text class="t-tiny" x="676" y="383">--force 是显式逃生门</text>
 
-    <div class="flow">
-      <div class="node"><b>GitHub 事件到达</b><small>issues / pull_request / pull_request_review / check_suite / workflow_run / push:tags / schedule</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>确定事件名与 item</b><small>事件字段经 <code>env:</code> 传入，再用 <code>tr -c</code> 消毒；绝不把 <code>${{ github.event.* }}</code> 拼进 <code>run:</code> 正文（分支名可注入）。item 形如 <code>issue-1</code> / <code>pr-2</code> / <code>ci-&lt;sha&gt;-&lt;branch&gt;</code>。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>预算与 kill switch</b><small><code>budget-check.mjs --pattern &lt;id&gt; --json</code>。读不到结果就拒绝运行（fail-closed）；<code>mode=exit</code> 直接停。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>路由</b><small><code>event-router.mjs --event &lt;e&gt; --item &lt;i&gt; --target &lt;branch|pr&gt;</code> → <code>route.json</code>。输出 phase / skills / level / gates / next，可能带 <code>conflict: lock-held</code>。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>锁检查与落盘</b><small><code>jq -r '.conflict'</code>；<code>lock-held</code> 时跳过写队列。否则写 <code>.loop/queue/&lt;item&gt;.json</code>（id / event / phase / branch / sha / created_at）。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>交付</b><small><code>actions/upload-artifact@v4</code>。runner 文件系统是临时的——不上传就随 job 消失。</small></div>
-    </div>
+    <!-- stage1 -->
+    <rect class="box box-mech" x="660" y="66" width="220" height="92" rx="8"/>
+    <text class="t-title" x="676" y="88">阶段 1 · 7 个文件</text>
+    <text class="t-small" x="676" y="105">AGENTS / feature_list / progress</text>
+    <text class="t-small" x="676" y="120">STATE / LESSONS / loop-constraints</text>
+    <text class="t-small" x="676" y="135">+ 生成的 init.sh</text>
+    <text class="t-tiny" x="676" y="150">+ 7 运行脚本 + 7 技能</text>
 
-    <div class="callout">
-      <h3>workflow 的触发与缺口（真实）</h3>
-      <div class="tbl-wrap" style="margin-top:8px">
-        <table>
-          <thead><tr><th>workflow</th><th>触发</th><th>路由到</th><th>状态</th></tr></thead>
-          <tbody>
-            <tr><td><code>issue-intake</code></td><td><code>issues: opened/reopened/labeled</code></td><td>intake → <code>issue-triage</code></td><td><span class="badge b-mech">已验证</span></td></tr>
-            <tr><td><code>pr-review</code></td><td><code>pull_request</code> + <code>pull_request_review</code></td><td>review / fix / close</td><td><span class="badge b-mech">已验证</span></td></tr>
-            <tr><td><code>ci-sweeper</code></td><td><code>workflow_run</code> / <code>check_suite</code> 失败</td><td>fix → <code>ci-triage</code> → <code>minimal-fix</code></td><td><span class="badge b-mech">已验证</span></td></tr>
-            <tr><td><code>merge-gate</code></td><td><code>pull_request: ready_for_review</code></td><td>gate → <code>gate-check</code></td><td><span class="badge b-mech">已验证（拒绝路径）</span></td></tr>
-            <tr><td><code>post-merge</code></td><td><code>pull_request: closed</code></td><td>post-merge / close</td><td><span class="badge b-conv">静态验证</span></td></tr>
-            <tr><td><code>release-draft</code></td><td><code>push: tags</code></td><td>release → <code>release-drafter</code></td><td><span class="badge b-mech">已验证</span></td></tr>
-            <tr><td><code>daily-triage</code></td><td><code>schedule</code> 工作日 08:00</td><td>每日概览（不在事件脊上）</td><td><span class="badge b-mech">已验证</span></td></tr>
-            <tr><td><code>lesson-harvest</code></td><td><code>schedule</code> 每天 03:00</td><td>夜审（不在事件脊上）</td><td><span class="badge b-mech">已验证</span></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="small" style="margin-top:10px">
-        <code>release.published</code> 与 <code>issues.closed</code> 在 <code>ROUTES</code> 里有路由，
-        但<strong>没有生产触发器</strong>。<span class="badge b-wire">未接线</span>
-      </p>
-    </div>
-  </div>
-</section>
+    <!-- stage2 -->
+    <rect class="box box-mech" x="660" y="176" width="220" height="92" rx="8"/>
+    <text class="t-title" x="676" y="198">阶段 2 · 5 个 loop 文档</text>
+    <text class="t-small" x="676" y="215">LOOP / loop-budget / run-log</text>
+    <text class="t-small" x="676" y="230">session-handoff / loop-ledger</text>
+    <text class="t-tiny" x="676" y="245">+ loop-guard / minimal-fix / verifier</text>
 
-<!-- ============================================================ -->
-<section id="runtime">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">03</span><h2>运行时主循环：harness-loop 的 8 步</h2></div>
-    <p class="sec-sub">
-      这是“一轮”的完整路径。第 0 步的退出检查放最前，因为它是高节奏循环唯一的经济性来源：
-      没有待办就不该启动任何子智能体。
-    </p>
+    <!-- stage3 -->
+    <rect class="box box-mech" x="660" y="286" width="220" height="92" rx="8"/>
+    <text class="t-title" x="676" y="308">阶段 3 · 事件接线</text>
+    <text class="t-small" x="676" y="325">复制 8 个 workflow 到</text>
+    <text class="t-small" x="676" y="340">.github/workflows/</text>
+    <text class="t-tiny" x="676" y="355">+ 4 个阶段 3 技能</text>
 
-    <div class="timeline">
-      <div class="step">
-        <div class="dot">0</div>
-        <div class="body">
-          <h3>退出检查 <span class="badge b-mech">机制</span></h3>
-          <p class="small">按顺序检查，任一命中即退出，不继续：</p>
-          <ul class="small">
-            <li><code>budget-check --pattern &lt;id&gt;</code>：退出码 3 = 立即停（暂停或 ≥100%）；<code>report-only</code> = 不派发执行者。</li>
-            <li><code>hasEventWiring()</code>：没有“仓库事件 + 调 router + 消费结果”的 workflow → <code>no-wiring</code> 退出。</li>
-            <li><code>queue-read --json</code>：读 <code>.loop/queue/</code>，为空回落到 <code>STATE.md</code> 的 High Priority；无待办 → <code>no-op</code> 退出（&lt;5k token）。</li>
-          </ul>
-          <div class="exits">
-            <span class="exit"><b>EXIT</b> no-wiring · 项目未到阶段 3</span>
-            <span class="exit"><b>EXIT</b> no-op · 队列为空</span>
-            <span class="exit"><b>EXIT</b> exit · 暂停或超预算</span>
-          </div>
-        </div>
-      </div>
+    <!-- verify -->
+    <rect class="box box-ok" x="940" y="176" width="196" height="86" rx="8"/>
+    <text class="t-title" x="956" y="198">③ 校验</text>
+    <text class="t-small" x="956" y="215">--stage N --require</text>
+    <text class="t-small" x="956" y="231">退出 0 = 达成</text>
+    <text class="t-tiny" x="956" y="246">可直接做 CI 关卡</text>
 
-      <div class="step">
-        <div class="dot">1</div>
-        <div class="body">
-          <h3>加载约束 <span class="badge b-conv">约定</span></h3>
-          <p class="small">读 <code>loop-constraints.md</code>，输出 <code>Constraints loaded … N rules active.</code>。每条规则标了 <span class="badge b-mech">机制</span> 或 <span class="badge b-conv">约定</span>，后续动作前对照相应章节复核。</p>
-        </div>
-      </div>
+    <!-- edges -->
+    <path class="edge" d="M175,118 L175,156"/>
+    <path class="edge" d="M280,186 L380,196"/>
+    <text class="lbl" x="300" y="180">完成</text>
+    <path class="edge" d="M470,242 L470,278 L280,278"/>
+    <text class="lbl" x="480" y="260">未完成</text>
+    <path class="edge" d="M175,306 L175,342"/>
+    <path class="edge" d="M280,374 L380,390"/>
+    <path class="edge-esc" d="M560,390 L660,360"/>
+    <text class="lbl lbl-esc" x="580" y="376">是</text>
+    <path class="edge" d="M470,344 L470,300 L470,278"/>
+    <text class="lbl" x="478" y="322">否</text>
+    <path class="edge" d="M470,196 L560,196 L660,140"/>
+    <text class="lbl" x="572" y="168">阶段 1</text>
+    <path class="edge" d="M560,196 L660,222"/>
+    <text class="lbl" x="574" y="228">阶段 2</text>
+    <path class="edge" d="M560,196 L660,332"/>
+    <text class="lbl" x="574" y="316">阶段 3</text>
+    <path class="edge-ok" d="M880,120 L940,190"/>
+    <path class="edge-ok" d="M880,222 L940,222"/>
+    <path class="edge-ok" d="M880,332 L940,262"/>
+    <text class="lbl lbl-ok" x="900" y="300">校验</text>
 
-      <div class="step">
-        <div class="dot">2</div>
-        <div class="body">
-          <h3>路由事件 <span class="badge b-mech">机制</span></h3>
-          <p class="small"><code>event-router.mjs --event &lt;e&gt; --item &lt;i&gt; --target &lt;branch|pr&gt;</code>。得到 phase / skills / level / gates / next。事件不在表里 → 记 Watch List，不自创流程。</p>
-          <p class="small"><strong><code>--target</code> 不可省</strong>：它是锁键（<code>acting_on</code>），不是 work item id。省掉后不做冲突检测，锁静默失效。</p>
-        </div>
-      </div>
+    <!-- note -->
+    <text class="t-tiny" x="940" y="300">消费者不装阶段驱动技能：</text>
+    <text class="t-tiny" x="940" y="314">它们第一步调用 harness-stage.mjs，</text>
+    <text class="t-tiny" x="940" y="328">而该脚本不复制进消费者。</text>
+  </svg>
+</figure>
 
-      <div class="step">
-        <div class="dot">3</div>
-        <div class="body">
-          <h3>检查冲突锁 <span class="badge b-mech">机制</span></h3>
-          <p class="small">读 <code>STATE.md</code> 的 Active 表：若另一循环的 <code>acting_on</code> 等于本次目标 → 跳过，记 <code>outcome: no-op</code>（原因 <code>lock-held</code>）；否则写入本轮 <code>acting_on</code>。</p>
-          <p class="tiny">锁键统一为分支名或 PR 号。item 与 acting_on 混用会让锁永远不触发。</p>
-          <div class="exits"><span class="exit"><b>SKIP</b> lock-held · 本轮 no-op</span></div>
-        </div>
-      </div>
+<!-- ============================================================ 2 事件入口 -->
+<figure>
+  <figcaption>2 · 事件入口：一个 workflow 实际做什么</figcaption>
+  <svg viewBox="0 0 1180 520" role="img" aria-label="事件入口流程图">
+    <!-- lane -->
+    <rect class="lane" x="20" y="24" width="700" height="470" rx="10"/>
+    <text class="lane-label" x="36" y="46">GITHUB ACTIONS RUNNER</text>
+    <rect class="lane" x="740" y="24" width="420" height="470" rx="10"/>
+    <text class="lane-label" x="756" y="46">EXTERNAL · 本包不含</text>
 
-      <div class="step">
-        <div class="dot">4</div>
-        <div class="body">
-          <h3>预算分级 <span class="badge b-mech">机制</span></h3>
-          <p class="small">&lt;80% 正常，可派发执行者；≥80% <strong>report-only</strong>：不派发执行子智能体，只产出报告。阈值只在 <code>budget-check.mjs</code> 一处定义。</p>
-        </div>
-      </div>
+    <!-- event -->
+    <rect class="box" x="60" y="66" width="230" height="54" rx="8"/>
+    <text class="t-title" x="76" y="88">仓库事件到达</text>
+    <text class="t-small" x="76" y="105">issues / PR / CI / tag / schedule</text>
 
-      <div class="step">
-        <div class="dot">5</div>
-        <div class="body">
-          <h3>派发技能 <span class="badge b-conv">约定</span> <span class="badge b-wire">本包无运行器</span></h3>
-          <p class="small">顺序固定：先跑感知类 triage（便宜）→ 只有产出可操作条目才派发 <code>minimal-fix</code> → 修复后必须跟<strong>独立实例</strong>的 <code>loop-verifier</code>。</p>
-          <p class="small">代码改动必须在独立 worktree：<code>worktree.mjs create --event &lt;e&gt; --item &lt;i&gt; --attempt &lt;n&gt;</code>，命名 <code>loop/&lt;event&gt;-&lt;item&gt;-attemptN</code>；REJECT 后 <code>discard</code> 连分支一起删。</p>
-          <p class="tiny">没有外部平台时，这一步不会真正发生；循环停在 fix-proposed。</p>
-        </div>
-      </div>
+    <!-- sanitize -->
+    <rect class="box box-mech" x="60" y="150" width="230" height="62" rx="8"/>
+    <text class="t-title" x="76" y="172">确定事件名与 item</text>
+    <text class="t-small" x="76" y="189">事件字段经 env: 传入</text>
+    <text class="t-small" x="76" y="204">tr -c 消毒，绝不拼进 run:</text>
 
-      <div class="step">
-        <div class="dot">6</div>
-        <div class="body">
-          <h3>执行闸门 <span class="badge b-mech">机制</span></h3>
-          <p class="small"><code>gate-check.mjs</code>，六个不可省参数：<code>@</code> 清单前缀、<code>--reviewed-sha</code> + <code>--head-sha</code>、<code>--red-check</code>、<code>--evidence-file</code>（approve 时）、<code>--not-run</code>、<code>--constraints-root</code>。详见下一节。</p>
-          <div class="exits">
-            <span class="exit"><b>0</b> proceed · 继续</span>
-            <span class="exit"><b>2</b> escalate · 写升级条目</span>
-            <span class="exit"><b>3</b> exit · 立即停止</span>
-          </div>
-        </div>
-      </div>
+    <!-- budget -->
+    <rect class="box box-mech" x="60" y="242" width="230" height="58" rx="8"/>
+    <text class="t-title" x="76" y="264">预算 + kill switch</text>
+    <text class="t-small" x="76" y="281">budget-check --pattern &lt;id&gt;</text>
 
-      <div class="step">
-        <div class="dot">7</div>
-        <div class="body">
-          <h3>熔断检查 <span class="badge b-mech">机制</span></h3>
-          <p class="small">每次尝试追加到 <code>loop-ledger.json</code>，重试前跑 <code>ledger-check.mjs --ledger loop-ledger.json</code>。退出码 2 → 停止，不再重试。</p>
-          <div class="exits"><span class="exit"><b>STOP</b> stagnation / no-progress / no-ledger / placeholder-ledger …</span></div>
-        </div>
-      </div>
+    <!-- dec budget -->
+    <polygon class="box-dec" points="440,238 512,271 440,304 368,271"/>
+    <text class="t-small" x="440" y="268" text-anchor="middle">mode?</text>
+    <text class="t-tiny" x="440" y="282" text-anchor="middle">exit</text>
 
-      <div class="step">
-        <div class="dot">8</div>
-        <div class="body">
-          <h3>写状态 <span class="badge b-mech">机制</span></h3>
-          <p class="small">更新 <code>STATE.md</code>（Active / High Priority / Watch List / Last run）；有代码改动则更新 <code>feature_list.json</code>；追加<strong>一行</strong> JSON 到 <code>loop-run-log.md</code>；清理已关闭条目；填写 Post-Run Critique，必须产出一项具体调整。</p>
-          <p class="tiny">不写状态的运行等于没跑。</p>
-        </div>
-      </div>
-    </div>
+    <!-- stop -->
+    <rect class="box-esc" x="60" y="330" width="230" height="52" rx="8"/>
+    <text class="t-title t-stop" x="76" y="352">job 失败退出</text>
+    <text class="t-small" x="76" y="369">fail-closed：读不到也退出</text>
 
-    <h3 style="margin-top:28px">一轮只允许这六种结局</h3>
-    <div class="tbl-wrap">
-      <table>
-        <thead><tr><th>outcome</th><th>含义</th><th>是否指向人</th></tr></thead>
-        <tbody>
-          <tr><td><code>no-wiring</code></td><td>项目还没接事件脊，第 0 步退出</td><td>是（推进阶段，不是故障）</td></tr>
-          <tr><td><code>no-op</code></td><td>无待办或锁被持有，提前退出</td><td>否</td></tr>
-          <tr><td><code>report-only</code></td><td>产出报告，未改代码</td><td>否</td></tr>
-          <tr><td><code>fix-proposed</code></td><td>提出修复，等待验证或人工</td><td>是（需要验证者/平台）</td></tr>
-          <tr><td><code>verified</code></td><td>修复通过独立验证，进入闸门</td><td>否</td></tr>
-          <tr><td><code>escalated</code></td><td>交给人类（拒绝列表、超限、需要判断）</td><td>是</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
+    <!-- route -->
+    <rect class="box box-mech" x="368" y="150" width="290" height="62" rx="8"/>
+    <text class="t-title" x="384" y="172">event-router.mjs</text>
+    <text class="t-small" x="384" y="189">--event &lt;e&gt; --item &lt;i&gt; --target &lt;branch|pr&gt;</text>
+    <text class="t-small" x="384" y="204">→ route.json: phase / skills / gates</text>
 
-<!-- ============================================================ -->
-<section id="gates">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">04</span><h2>闸门判定：gate-check 的检查顺序</h2></div>
-    <p class="sec-sub">
-      先命中者决定结果。顺序有讲究：退出类在最前（该停时不再分析），拒绝列表在尝试上限之前（安全优先于效率）。
-    </p>
+    <!-- dec lock -->
+    <polygon class="box-dec" points="513,238 585,271 513,304 441,271"/>
+    <text class="t-small" x="513" y="268" text-anchor="middle">conflict?</text>
+    <text class="t-tiny" x="513" y="282" text-anchor="middle">lock-held</text>
 
-    <div class="gates">
-      <div class="gate g-exit">
-        <div class="n">01</div>
-        <div class="what"><strong><code>loop-pause-all</code> 生效</strong><span>只认 <code>STATE.md</code> / <code>loop-constraints.md</code> 里独占一行；散文提及不算</span></div>
-        <div class="res">exit · 3</div>
-      </div>
-      <div class="gate g-exit">
-        <div class="n">02</div>
-        <div class="what"><strong>预算 ≥ 100%</strong><span>今日花费 / 该循环自己的日上限</span></div>
-        <div class="res">exit · 3</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">03</div>
-        <div class="what"><strong>改动触及拒绝列表</strong><span>从 <code>loop-constraints.md</code> 的 <code>## Paths</code> 读取；<code>@</code> 清单必须每行一个路径</span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">04</div>
-        <div class="what"><strong>尝试次数 ≥ 3</strong><span><code>max_attempts</code>，可由 registry 覆盖</span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-ro">
-        <div class="n">05</div>
-        <div class="what"><strong>预算 ≥ 80%</strong><span>降级为 report-only，禁止派发执行者</span></div>
-        <div class="res">report-only · 0</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">06</div>
-        <div class="what"><strong>范围超限</strong><span>普通修复 &gt; 5 文件；清理类 &gt; 10 文件</span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">07</div>
-        <div class="what"><strong>gate 阶段：审查绑定</strong><span>缺任一 sha → 拦；<code>reviewed ≠ head</code> → 拦（审查后又 push）</span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">08</div>
-        <div class="what"><strong>回退测试</strong><span><code>fail</code> 一律拦；<code>not-run</code> 在 gate 阶段拦。默认值就是 <code>not-run</code>——忘传参数不得放行</span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">08b</div>
-        <div class="what"><strong>证据闸门（approve 时）</strong><span>无证据文件 / 文件不存在 / 缺 verdict 行 / 缺检查行 / 自相矛盾 FAIL / 缺 <code>### Checks not run</code> / NOT RUN 未列进该节 / 报告 commit 与 head 不符 / 全 NOT RUN / 报告自称非 APPROVE</span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">09a</div>
-        <div class="what"><strong>verdict = reject / escalate-human</strong><span>verifier 拒绝，或无法运行测试</span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-ro">
-        <div class="n">09b</div>
-        <div class="what"><strong>gate 阶段但没有 verdict</strong><span>“没验”不是“验失败”，闸门名是 <code>awaiting-verification</code></span></div>
-        <div class="res">escalate · 2</div>
-      </div>
-      <div class="gate g-ok">
-        <div class="n">✓</div>
-        <div class="what"><strong>全部通过</strong><span>输出 <code>proceed</code>，并列出 <code>checks_not_run</code>；仍禁止自动合并</span></div>
-        <div class="res">proceed · 0</div>
-      </div>
-    </div>
+    <!-- skip -->
+    <rect class="box-conv" x="368" y="330" width="290" height="52" rx="8"/>
+    <text class="t-title t-wait" x="384" y="352">跳过本轮 · outcome=no-op</text>
+    <text class="t-small" x="384" y="369">不写队列；锁被别的循环持有</text>
 
-    <div class="callout">
-      <h3>退出码的语义</h3>
-      <div class="kbd-row">
-        <span>0 = proceed / report-only</span>
-        <span>1 = 参数错误（闸门没跑，不是通过）</span>
-        <span>2 = escalate 给人</span>
-        <span>3 = 立即停止</span>
-      </div>
-      <p class="small" style="margin:0">
-        调用方必须把 1 当成“我没问对问题”，绝不能当成“闸门通过了”。
-        <code>merge-gate.yml</code> 用 <code>set +e</code> 接住 2，让 PR 评论与失败判定仍能执行；
-        只有 1 会让 job 直接失败。
-      </p>
-    </div>
-  </div>
-</section>
+    <!-- write -->
+    <rect class="box box-mech" x="60" y="404" width="290" height="62" rx="8"/>
+    <text class="t-title" x="76" y="426">写 work item</text>
+    <text class="t-small" x="76" y="443">.loop/queue/&lt;item&gt;.json</text>
+    <text class="t-small" x="76" y="458">id / event / phase / branch / sha</text>
 
-<!-- ============================================================ -->
-<section id="budget">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">05</span><h2>预算与急停：budget-check 的真实算法</h2></div>
-    <p class="sec-sub">
-      预算是估算，不是精确计量。但它必须有一个真实入口——否则“80% 降级”只是文档里的一句话。
-    </p>
+    <!-- upload -->
+    <rect class="box box-mech" x="390" y="404" width="268" height="62" rx="8"/>
+    <text class="t-title" x="406" y="426">upload-artifact</text>
+    <text class="t-small" x="406" y="443">runner 文件系统是临时的</text>
+    <text class="t-small" x="406" y="458">不上传就随 job 消失</text>
 
-    <div class="grid2">
-      <div class="card">
-        <h3>输入</h3>
-        <ul class="small">
-          <li><code>loop-budget.md</code> 的 Daily Limits 表：按<strong>行名</strong>（自然写法与连字符写法都认）建索引。</li>
-          <li><code>loop-run-log.md</code>：只解析<strong>单行</strong> JSON；只算 <code>run_id</code> 是今天、且 pattern 匹配的 <code>tokens_estimate</code>。</li>
-          <li><code>STATE.md</code> / <code>loop-constraints.md</code>：独占一行的 <code>loop-pause-all</code>。</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h3>判定顺序</h3>
-        <ol class="small">
-          <li>暂停 → <code>exit</code></li>
-          <li><strong>查不到该循环的上限</strong> → <code>exit</code>（没有上限就没有刹车）</li>
-          <li>≥ 100% → <code>exit</code></li>
-          <li>≥ 80% → <code>report-only</code></li>
-          <li>否则 <code>normal</code></li>
-        </ol>
-        <p class="tiny">退出码：0 = normal / report-only；3 = exit。</p>
-      </div>
-    </div>
+    <!-- external -->
+    <rect class="box box-wire" x="780" y="150" width="340" height="90" rx="8"/>
+    <text class="t-title t-stop" x="796" y="172">agent 平台消费队列</text>
+    <text class="t-small" x="796" y="189">读 artifact / 评论 / dispatch</text>
+    <text class="t-small" x="796" y="204">启动执行者与验证者</text>
+    <text class="t-tiny" x="796" y="221">本包不含运行器；未接时止于 fix-proposed</text>
 
-    <div class="flow" style="margin-top:16px">
-      <div class="node"><b>解析上限</b><small><code>resolveCap(caps, pattern)</code> 返回 <code>cap</code> 与 <code>source</code>：<code>exact</code>（自己有行）/ <code>alias:&lt;表名&gt;</code>（借来的）/ <code>null</code>（没有）。借来的上限在输出里可见，不静默回退。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>汇总今日花费</b><small><code>sumTodaySpend()</code>。文档明确要求<strong>一条记录一行</strong>；多行 pretty JSON 会被算成 0——这一点有断言守着。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>决定模式</b><small><code>decide()</code>：暂停 → 无上限 → 100% → 80% → normal。阈值只在 <code>DEFAULT_THRESHOLDS</code> 一处。</small></div>
-    </div>
+    <rect class="box box-wire" x="780" y="280" width="340" height="80" rx="8"/>
+    <text class="t-title t-stop" x="796" y="302">没有平台时</text>
+    <text class="t-small" x="796" y="319">循环停在 fix-proposed</text>
+    <text class="t-small" x="796" y="334">这是合法结局，不是失败</text>
 
-    <div class="callout warn">
-      <h3>已知限制：花费数字目前是 0</h3>
-      <p class="small" style="margin:0">
-        只有 <code>daily-triage</code> / <code>lesson-harvest</code> 会写 run-log，而且写的是固定估算值；
-        其余 6 个 workflow 不写。runner 文件系统又是临时的，写入需要先决定持久化方式
-        （提交分支 / PR 评论 / 平台写）。<strong>立即生效的是 kill switch 与“无上限即退出”</strong>；
-        百分比要等持久化方式定下来才有意义。<span class="badge b-wire">未接线</span>
-      </p>
-    </div>
-  </div>
-</section>
+    <!-- edges -->
+    <path class="edge" d="M175,120 L175,150"/>
+    <path class="edge" d="M175,212 L175,242"/>
+    <path class="edge" d="M290,271 L368,271"/>
+    <path class="edge-esc" d="M368,271 L290,340"/>
+    <text class="lbl lbl-esc" x="300" y="300">exit</text>
+    <path class="edge" d="M290,285 L290,330 L290,404"/>
+    <text class="lbl" x="296" y="390">normal</text>
+    <path class="edge" d="M440,238 L440,212"/>
+    <text class="lbl" x="446" y="226">ok</text>
+    <path class="edge" d="M513,304 L513,330"/>
+    <path class="edge-esc" d="M585,271 L658,271 L658,340 L658,340"/>
+    <text class="lbl lbl-esc" x="596" y="260">lock-held</text>
+    <path class="edge" d="M658,271 L658,290 L658,330"/>
+    <path class="edge" d="M513,304 L513,330 L513,404"/>
+    <path class="edge" d="M350,435 L390,435"/>
+    <path class="edge-wait" d="M658,435 L780,240"/>
+    <text class="lbl lbl-wait" x="668" y="420">交付</text>
+  </svg>
+</figure>
 
-<!-- ============================================================ -->
-<section id="breaker">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">06</span><h2>熔断器：ledger-check 的判定</h2></div>
-    <p class="sec-sub">
-      熔断器读 <code>loop-ledger.json</code>。读不到状态时必须停——“我不知道”不能被读成“一切正常”。
-    </p>
+<!-- ============================================================ 3 运行时 -->
+<figure>
+  <figcaption>3 · 运行时主循环：harness-loop 的 8 步与全部退出点</figcaption>
+  <svg viewBox="0 0 1180 900" role="img" aria-label="运行时主循环流程图">
+    <defs>
+      <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5a6b60"/></marker>
+      <marker id="a2e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b0654a"/></marker>
+      <marker id="a2o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d9a52"/></marker>
+    </defs>
 
-    <div class="gates">
-      <div class="gate g-esc">
-        <div class="n">A</div>
-        <div class="what"><strong>账本缺失 / 坏 JSON / 字段类型错</strong><span>CLI 与库层都返回 <code>no-ledger</code>，退出码 2（不再是 1）</span></div>
-        <div class="res">no-ledger · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">B</div>
-        <div class="what"><strong>按 pattern 切片后没有记录</strong><span>账本有记录但都不属于本循环 → <code>no-pattern-records</code>，不回落到“没有记录所以正常”</span></div>
-        <div class="res">no-pattern · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">C</div>
-        <div class="what"><strong>占位账本</strong><span><code>goal</code> 仍是 “Replace with…” 且已有 attempts → 示例数据不能当真实历史</span></div>
-        <div class="res">placeholder · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">D</div>
-        <div class="what"><strong>停滞</strong><span>尾部连续失败里，归一化后的同一错误签名出现 ≥ 3 次</span></div>
-        <div class="res">stagnation · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">E</div>
-        <div class="what"><strong>无进展</strong><span>尾部非 success 段 ≥ 5 次。<strong><code>noop</code> 不再洗掉计数</strong>——被锁跳过是合法结局，但不是进展</span></div>
-        <div class="res">no-progress · 2</div>
-      </div>
-      <div class="gate g-esc">
-        <div class="n">F</div>
-        <div class="what"><strong>超预算 / 超迭代</strong><span><code>tokensUsed</code> 累计 ≥ 预算；迭代数 ≥ 10</span></div>
-        <div class="res">token-budget / max-iterations · 2</div>
-      </div>
-      <div class="gate g-ok">
-        <div class="n">✓</div>
-        <div class="what"><strong>继续</strong><span>空 <code>attempts</code> 数组也算 ok：那是“还没开始跑”，不是“读不到”</span></div>
-        <div class="res">ok · 0</div>
-      </div>
-    </div>
+    <!-- start -->
+    <rect class="box box-term" x="60" y="40" width="240" height="50" rx="25"/>
+    <text class="t-title" x="180" y="62" text-anchor="middle">事件到达 · 开始一轮</text>
+    <text class="t-small" x="180" y="78" text-anchor="middle">一轮只处理一个 work item</text>
 
-    <div class="callout">
-      <h3>错误签名怎么归一化</h3>
-      <p class="small" style="margin:0">
-        抹掉 ISO 时间戳、十六进制地址、路径（折叠为 basename）、行列号，以及<strong>明确是位置或时长</strong>的数字。
-        不再把退出码、HTTP 状态码、断言期望值全部抹平——否则“500 服务端错误 → 404 路由缺失 → 超时”
-        三种根因完全不同的失败会在第 3 次被误判为同一个错误。
-      </p>
-    </div>
-  </div>
-</section>
+    <!-- step 0 -->
+    <rect class="box box-mech" x="60" y="124" width="240" height="60" rx="8"/>
+    <text class="t-title" x="76" y="146">第 0 步 · 退出检查</text>
+    <text class="t-small" x="76" y="163">暂停/预算 → 接线 → 待办</text>
+    <text class="t-tiny" x="76" y="177">成本最低，先做</text>
 
-<!-- ============================================================ -->
-<section id="evidence">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">07</span><h2>验证契约：verifier 写什么，闸门读什么</h2></div>
-    <p class="sec-sub">
-      verdict 是断言，不是证据。这条链路的价值全在“生产者与消费者对同一种格式达成一致”。
-    </p>
+    <polygon class="box-dec" points="400,118 470,154 400,190 330,154"/>
+    <text class="t-small" x="400" y="151" text-anchor="middle">任一命中？</text>
 
-    <div class="grid2">
-      <div class="card">
-        <h3>loop-verifier 产出</h3>
-        <p class="small">以带标记的 PR 评论发布，第一行必须是：</p>
-        <pre class="mono" style="font-size:12px;overflow-x:auto;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px;color:#d9c7a8">&#x3C;!-- loop-verifier-report --&#x3E;
-## Verdict: APPROVE | REJECT | ESCALATE_HUMAN
-Commit: &#x3C;被验证的 head sha&#x3E;
+    <rect class="box-esc" x="560" y="110" width="210" height="46" rx="8"/>
+    <text class="t-title t-stop" x="576" y="130">立即退出</text>
+    <text class="t-small" x="576" y="147">exit / no-wiring / no-op</text>
 
-### Evidence
-- Tests: `npm test` → PASS
-- Red check: PASS | FAIL | NOT RUN — 说明
-- Real-use validation: PASS | FAIL | NOT RUN — 说明
-- Lint: `npm run lint` → PASS
-- Scope check: PASS | FAIL — 说明
-- Denylist check: PASS | FAIL
-- Files changed: N
+    <!-- step 1 -->
+    <rect class="box box-conv" x="60" y="216" width="240" height="56" rx="8"/>
+    <text class="t-title" x="76" y="238">第 1 步 · 加载约束</text>
+    <text class="t-small" x="76" y="255">loop-constraints.md · N rules</text>
 
-### Checks not run
-- &#x3C;检查项&#x3E; — 原因</pre>
-      </div>
-      <div class="card">
-        <h3>merge-gate 怎么取</h3>
-        <ol class="small">
-          <li>取 PR 的 <code>headRefOid</code> 作为 head。</li>
-          <li>取<strong>最后一条 review</strong>，要求它就是 <code>APPROVED</code>；取它绑定的 commit 作为 reviewed。<strong>没有批准时绝不回退成 head。</strong></li>
-          <li>只接受<strong>机器人账号</strong>（<code>LOOP_BOT_LOGIN</code>，默认 <code>loop-bot</code>）发的带标记评论；PR 作者伪造不了。</li>
-          <li>red-check 状态从 PR 正文的独占行 <code>red-check: pass|fail</code> 读；读不到就是 <code>not-run</code>。</li>
-          <li>把 verdict、两个 sha、red-check、证据文件一起交给 <code>gate-check</code>；<strong>调用方不改写闸门结果</strong>。</li>
-        </ol>
-      </div>
-    </div>
+    <!-- step 2 -->
+    <rect class="box box-mech" x="60" y="304" width="240" height="60" rx="8"/>
+    <text class="t-title" x="76" y="326">第 2 步 · 路由事件</text>
+    <text class="t-small" x="76" y="343">event-router --target 不可省</text>
+    <text class="t-tiny" x="76" y="357">省掉 → 锁静默失效</text>
 
-    <div class="flow" style="margin-top:16px">
-      <div class="node"><b>证据文件进入 gate-check</b><small>解析 verdict 行与检查行；接受带命令的 <code>`cmd` → PASS</code>，也接受 verifier 模板里不带命令的 <code>Red check: FAIL</code>。箭头 <code>-&gt;</code> 与 <code>→</code> 等价。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>交叉校验</b><small>报告说 APPROVE 但有 FAIL → 拦；全 NOT RUN → 拦；<code>### Checks not run</code> 缺失 → 拦；证据里的 NOT RUN 没列进该节 → 拦；报告 <code>Commit:</code> 与 head 不符 → 拦。</small></div>
-      <div class="arrow">↓</div>
-      <div class="node"><b>输出</b><small><code>decision</code>、命中的 <code>gate</code>、可读的 <code>reason</code>、<code>checks_not_run</code>、<code>next</code>。升级与通过都带下一步动作。</small></div>
-    </div>
-  </div>
-</section>
+    <polygon class="box-dec" points="400,298 470,334 400,370 330,334"/>
+    <text class="t-small" x="400" y="331" text-anchor="middle">lock-held？</text>
 
-<!-- ============================================================ -->
-<section id="state">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">08</span><h2>状态回写：下一轮凭什么能接上</h2></div>
-    <p class="sec-sub">
-      模型会忘，仓库不会。状态文件是跨会话连续性的唯一载体；写入规则本身也是机制的一部分。
-    </p>
+    <rect class="box-conv" x="560" y="290" width="210" height="46" rx="8"/>
+    <text class="t-title t-wait" x="576" y="310">跳过 · no-op</text>
+    <text class="t-small" x="576" y="327">记录原因 lock-held</text>
 
-    <div class="grid3">
-      <div class="card">
-        <h3>STATE.md</h3>
-        <p class="small">活状态，每轮读写。</p>
-        <ul class="small">
-          <li><code>Last run</code>：时间戳</li>
-          <li><code>High Priority</code>：正在做 / 等人</li>
-          <li><code>Active</code>：work item + <code>acting_on</code> 锁</li>
-          <li><code>Watch List</code>：观察，不行动</li>
-          <li><code>Human Inbox</code>：模糊 / 跨循环</li>
-          <li><code>Post-Run Critique</code>：每轮必须产出一项调整</li>
-        </ul>
-        <p class="tiny">不得包含任何凭据；历史不堆回本文件。</p>
-      </div>
-      <div class="card">
-        <h3>loop-run-log.md</h3>
-        <p class="small">只追加，一条记录一行 JSON。</p>
-        <pre class="mono" style="font-size:11px;overflow-x:auto;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;color:#d9c7a8">{"run_id":"…","pattern":"ci-sweeper",
- "event":"check_suite.completed:failure",
- "item":"ci-a1b2-main","level":"L2",
- "duration_s":45,"items_found":4,
- "actions_taken":1,"escalations":0,
- "tokens_estimate":52000,
- "outcome":"fix-proposed"}</pre>
-        <p class="tiny">多行格式不计入预算；文档已改为单行并加断言。</p>
-      </div>
-      <div class="card">
-        <h3>feature_list.json / ledger</h3>
-        <p class="small"><code>feature_list.json</code>：功能级状态，只有验证通过且有证据才置 <code>passing</code>；id 必须唯一。</p>
-        <p class="small"><code>loop-ledger.json</code>：尝试级账本。失败时 <code>error</code> 必填，熔断器靠它检测重复失败。</p>
-        <p class="tiny">三者粒度不同，不要合并。</p>
-      </div>
-    </div>
+    <!-- step 3 -->
+    <rect class="box box-mech" x="60" y="392" width="240" height="56" rx="8"/>
+    <text class="t-title" x="76" y="414">第 3 步 · 取得锁</text>
+    <text class="t-small" x="76" y="431">写 acting_on = branch / PR</text>
 
-    <div class="callout ok">
-      <h3>一次真实运行的轨迹（沙箱实测）</h3>
-      <p class="small" style="margin:0">
-        issue #1 → <code>issues.opened</code> → intake → 写 <code>.loop/queue/issue-1.json</code> → artifact；
-        PR #2 转 ready → gate 阶段 → 没有 APPROVED → <code>head-commit</code> escalate →
-        PR 上出现一条可读的闸门评论，<code>Fail if escalated</code> 让 job 失败；
-        故意失败的 CI → <code>workflow_run.completed:failure</code> → fix → 熔断 <code>ok</code> → 落盘；
-        tag <code>v0.0.1-sandbox</code> → release → 草稿写入 step summary。
-      </p>
-    </div>
-  </div>
-</section>
+    <!-- step 4 -->
+    <rect class="box box-mech" x="60" y="478" width="240" height="56" rx="8"/>
+    <text class="t-title" x="76" y="500">第 4 步 · 预算分级</text>
+    <text class="t-small" x="76" y="517">≥80% → report-only</text>
 
-<!-- ============================================================ -->
-<section id="boundary">
-  <div class="wrap">
-    <div class="sec-head"><span class="sec-num">09</span><h2>真实边界：哪些已经生效，哪些没有</h2></div>
-    <p class="sec-sub">
-      这张表比流程图更重要。它区分“代码会拦”“靠自觉”和“只是文档写了”。
-    </p>
+    <!-- step 5 -->
+    <rect class="box box-conv" x="60" y="564" width="240" height="70" rx="8"/>
+    <text class="t-title" x="76" y="586">第 5 步 · 派发技能</text>
+    <text class="t-small" x="76" y="603">triage → minimal-fix</text>
+    <text class="t-small" x="76" y="618">→ 独立实例 loop-verifier</text>
+    <text class="t-tiny" x="76" y="630">改动必须在独立 worktree</text>
 
-    <div class="tbl-wrap">
-      <table>
-        <thead><tr><th>能力</th><th>真实状态</th><th>依据</th></tr></thead>
-        <tbody>
-          <tr><td>事件路由 + work item 落盘</td><td><span class="badge b-mech">已生效</span></td><td>沙箱 issue/PR/CI/tag 四条链路实测</td></tr>
-          <tr><td>拒绝列表 / 范围 / 尝试上限闸门</td><td><span class="badge b-mech">已生效</span></td><td><code>gate-check</code> 按顺序判定，测试覆盖</td></tr>
-          <tr><td>合并绑定审过的 commit</td><td><span class="badge b-mech">已生效</span></td><td>缺 sha / sha 不一致 / 无批准均 escalate</td></tr>
-          <tr><td>回退测试与 NOT RUN 三态</td><td><span class="badge b-mech">已生效</span></td><td>gate 阶段 <code>not-run</code> 一律拦</td></tr>
-          <tr><td>证据闸门（报告内容交叉校验）</td><td><span class="badge b-mech">已生效</span></td><td>自相矛盾 / 全 NOT RUN / commit 不符均拦</td></tr>
-          <tr><td>熔断器 fail-closed</td><td><span class="badge b-mech">已生效</span></td><td>账本缺失/坏 JSON → exit 2</td></tr>
-          <tr><td>预算阈值与 kill switch</td><td><span class="badge b-mech">已生效</span></td><td>阈值单一来源；暂停只认独占行</td></tr>
-          <tr><td>独立验证者（maker/checker）</td><td><span class="badge b-conv">约定</span></td><td>技能要求新实例；调用方是否真的新开上下文，代码不校验</td></tr>
-          <tr><td>“同一分支每小时最多一个循环修改”</td><td><span class="badge b-conv">约定</span></td><td><code>acting_on</code> 锁是机制，但“每小时”没有持久时间源</td></tr>
-          <tr><td>尝试上限在合并路径</td><td><span class="badge b-wire">未接线</span></td><td><code>merge-gate</code> 不传 <code>--attempts</code>；没有运行器写账本</td></tr>
-          <tr><td>预算百分比（真实花费）</td><td><span class="badge b-wire">未接线</span></td><td>6 个 workflow 不写 run-log；持久化方式未定</td></tr>
-          <tr><td>agent 执行与验证</td><td><span class="badge b-wire">未接线</span></td><td>本包不含运行器；队列产物需外部平台消费</td></tr>
-          <tr><td><code>release.published</code> / <code>issues.closed</code></td><td><span class="badge b-wire">未接线</span></td><td>有路由，无生产触发器</td></tr>
-          <tr><td>APPROVED + commit 匹配的通过路径</td><td><span class="badge b-wire">NOT RUN</span></td><td>单账号仓库不能批准自己的 PR，需第二个账号</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <!-- step 6 -->
+    <rect class="box box-mech" x="60" y="664" width="240" height="60" rx="8"/>
+    <text class="t-title" x="76" y="686">第 6 步 · 执行闸门</text>
+    <text class="t-small" x="76" y="703">gate-check（见下一张图）</text>
 
-    <div class="callout warn" style="margin-top:18px">
-      <h3>启用顺序（不要跳级）</h3>
-      <ol class="small" style="margin-bottom:0">
-        <li><b>L1 只读</b>：先跑一周，只报告，人工核对 triage 准确率。</li>
-        <li><b>L2 辅助</b>：有独立 verifier、拒绝列表已本地化、回退测试与 NOT RUN 真实用过；合并仍人工。</li>
-        <li><b>L3 无人值守</b>：事件接线、真实运行记录、教训已转正；并且用第二个账号补完 APPROVED 通过路径。</li>
-      </ol>
-    </div>
-  </div>
-</section>
+    <polygon class="box-dec" points="400,658 470,694 400,730 330,694"/>
+    <text class="t-small" x="400" y="691" text-anchor="middle">decision?</text>
 
-<footer>
-  <div class="wrap">
-    <span>Loop Harness · 按 <code>scripts/</code> 与 <code>examples/github-actions/</code> 的实际行为绘制</span>
-    <span>基线：1067 项断言 · 本机与 ubuntu-latest 均通过 · 自审计 94/100 L2</span>
-  </div>
-</footer>
+    <rect class="box-esc" x="560" y="650" width="210" height="46" rx="8"/>
+    <text class="t-title t-stop" x="576" y="670">escalate / exit</text>
+    <text class="t-small" x="576" y="687">写升级条目，停止重试</text>
 
+    <!-- step 7 -->
+    <rect class="box box-mech" x="60" y="754" width="240" height="60" rx="8"/>
+    <text class="t-title" x="76" y="776">第 7 步 · 熔断检查</text>
+    <text class="t-small" x="76" y="793">ledger-check · exit 2 = 停</text>
+
+    <!-- step 8 -->
+    <rect class="box box-mech" x="60" y="842" width="240" height="50" rx="8"/>
+    <text class="t-title" x="76" y="864">第 8 步 · 写状态</text>
+    <text class="t-small" x="76" y="881">STATE / feature_list / run-log</text>
+
+    <!-- end -->
+    <rect class="box box-term" x="560" y="830" width="240" height="60" rx="30"/>
+    <text class="t-title" x="680" y="854" text-anchor="middle">本轮结束</text>
+    <text class="t-small" x="680" y="871" text-anchor="middle">六种合法 outcome 之一</text>
+
+    <!-- outcomes legend -->
+    <rect class="box" x="840" y="100" width="300" height="330" rx="8"/>
+    <text class="t-title t-amber" x="858" y="124">六种合法结局</text>
+    <text class="t-small" x="858" y="150">no-wiring · 项目未接事件脊</text>
+    <text class="t-small" x="858" y="172">no-op · 无待办或锁被持有</text>
+    <text class="t-small" x="858" y="194">report-only · 只出报告</text>
+    <text class="t-small" x="858" y="216">fix-proposed · 等验证或平台</text>
+    <text class="t-small" x="858" y="238">verified · 通过独立验证</text>
+    <text class="t-small" x="858" y="260">escalated · 交给人</text>
+    <line x1="858" y1="282" x2="1122" y2="282" stroke="#2b3830"/>
+    <text class="t-tiny" x="858" y="304">不允许：“做了一些工作，</text>
+    <text class="t-tiny" x="858" y="320">感觉差不多了。”</text>
+    <line x1="858" y1="338" x2="1122" y2="338" stroke="#2b3830"/>
+    <text class="t-tiny" x="858" y="360">不写状态的运行</text>
+    <text class="t-tiny" x="858" y="376">等于没跑。</text>
+    <text class="t-tiny" x="858" y="402">第 5 步需要外部运行器；</text>
+    <text class="t-tiny" x="858" y="418">没有时止于 fix-proposed。</text>
+
+    <!-- edges -->
+    <path class="edge" d="M180,90 L180,124"/>
+    <path class="edge" d="M300,154 L330,154"/>
+    <path class="edge-esc" d="M470,154 L560,133"/>
+    <text class="lbl lbl-esc" x="486" y="140">是</text>
+    <path class="edge" d="M400,190 L400,244 L300,244"/>
+    <text class="lbl" x="408" y="220">否</text>
+    <path class="edge" d="M180,180 L180,216"/>
+    <path class="edge" d="M180,272 L180,304"/>
+    <path class="edge" d="M300,334 L330,334"/>
+    <path class="edge-esc" d="M470,334 L560,313"/>
+    <text class="lbl lbl-esc" x="486" y="318">是</text>
+    <path class="edge" d="M400,370 L400,420 L300,420"/>
+    <text class="lbl" x="408" y="398">否</text>
+    <path class="edge" d="M180,360 L180,392"/>
+    <path class="edge" d="M180,448 L180,478"/>
+    <path class="edge" d="M180,534 L180,564"/>
+    <path class="edge" d="M180,634 L180,664"/>
+    <path class="edge" d="M300,694 L330,694"/>
+    <path class="edge-esc" d="M470,694 L560,673"/>
+    <text class="lbl lbl-esc" x="486" y="678">escalate / exit</text>
+    <path class="edge" d="M400,730 L400,784 L300,784"/>
+    <text class="lbl" x="408" y="760">proceed</text>
+    <path class="edge" d="M180,724 L180,754"/>
+    <path class="edge" d="M180,814 L180,842"/>
+    <path class="edge-ok" d="M300,867 L560,860"/>
+    <text class="lbl lbl-ok" x="400" y="856">outcome</text>
+  </svg>
+</figure>
+
+<!-- ============================================================ 4 闸门 -->
+<figure>
+  <figcaption>4 · 闸门判定：gate-check 的检查顺序（先命中者决定结果）</figcaption>
+  <svg viewBox="0 0 1180 940" role="img" aria-label="闸门判定流程图">
+    <defs>
+      <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5a6b60"/></marker>
+      <marker id="a3e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b0654a"/></marker>
+      <marker id="a3o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d9a52"/></marker>
+      <marker id="a3w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a08a45"/></marker>
+    </defs>
+
+    <rect class="box box-term" x="60" y="40" width="250" height="46" rx="23"/>
+    <text class="t-title" x="185" y="60" text-anchor="middle">gate-check 输入</text>
+    <text class="t-small" x="185" y="76" text-anchor="middle">item / phase / attempts / files</text>
+
+    <!-- rows: y positions -->
+    <!-- 1 pause -->
+    <polygon class="box-dec" points="185,118 260,150 185,182 110,150"/>
+    <text class="t-small" x="185" y="147" text-anchor="middle">暂停？</text>
+    <rect class="box-esc" x="430" y="124" width="240" height="48" rx="8"/>
+    <text class="t-title t-stop" x="446" y="144">exit · 退出码 3</text>
+    <text class="t-small" x="446" y="161">只认独占一行的 loop-pause-all</text>
+
+    <!-- 2 budget 100 -->
+    <polygon class="box-dec" points="185,210 260,242 185,274 110,242"/>
+    <text class="t-small" x="185" y="239" text-anchor="middle">≥100%？</text>
+    <rect class="box-esc" x="430" y="216" width="240" height="48" rx="8"/>
+    <text class="t-title t-stop" x="446" y="236">exit · 退出码 3</text>
+    <text class="t-small" x="446" y="253">今日花费 / 该循环上限</text>
+
+    <!-- 3 denylist -->
+    <polygon class="box-dec" points="185,302 260,334 185,366 110,334"/>
+    <text class="t-small" x="185" y="331" text-anchor="middle">拒绝列表？</text>
+    <rect class="box-esc" x="430" y="308" width="240" height="48" rx="8"/>
+    <text class="t-title t-stop" x="446" y="328">escalate · 退出码 2</text>
+    <text class="t-small" x="446" y="345">@ 清单每行一个路径</text>
+
+    <!-- 4 attempts -->
+    <polygon class="box-dec" points="185,394 260,426 185,458 110,426"/>
+    <text class="t-small" x="185" y="423" text-anchor="middle">attempts ≥3？</text>
+    <rect class="box-esc" x="430" y="400" width="240" height="48" rx="8"/>
+    <text class="t-title t-stop" x="446" y="420">escalate · 退出码 2</text>
+    <text class="t-small" x="446" y="437">max_attempts（registry 可覆盖）</text>
+
+    <!-- 5 budget 80 -->
+    <polygon class="box-dec" points="185,486 260,518 185,550 110,518"/>
+    <text class="t-small" x="185" y="515" text-anchor="middle">≥80%？</text>
+    <rect class="box-conv" x="430" y="492" width="240" height="48" rx="8"/>
+    <text class="t-title t-wait" x="446" y="512">report-only · 退出码 0</text>
+    <text class="t-small" x="446" y="529">禁止派发执行子智能体</text>
+
+    <!-- 6 scope -->
+    <polygon class="box-dec" points="185,578 260,610 185,642 110,610"/>
+    <text class="t-small" x="185" y="607" text-anchor="middle">范围超限？</text>
+    <rect class="box-esc" x="430" y="584" width="240" height="48" rx="8"/>
+    <text class="t-title t-stop" x="446" y="604">escalate · 退出码 2</text>
+    <text class="t-small" x="446" y="621">普通 &gt;5；清理类 &gt;10</text>
+
+    <!-- 7 head-commit -->
+    <polygon class="box-dec" points="185,670 260,702 185,734 110,702"/>
+    <text class="t-small" x="185" y="699" text-anchor="middle">gate 阶段</text>
+    <text class="t-tiny" x="185" y="713" text-anchor="middle">sha 一致？</text>
+    <rect class="box-esc" x="430" y="676" width="240" height="48" rx="8"/>
+    <text class="t-title t-stop" x="446" y="696">escalate · 退出码 2</text>
+    <text class="t-small" x="446" y="713">缺 sha 也拦；reviewed ≠ head 也拦</text>
+
+    <!-- 8 red-check -->
+    <polygon class="box-dec" points="185,762 260,794 185,826 110,794"/>
+    <text class="t-small" x="185" y="791" text-anchor="middle">red-check？</text>
+    <rect class="box-esc" x="430" y="768" width="240" height="48" rx="8"/>
+    <text class="t-title t-stop" x="446" y="788">escalate · 退出码 2</text>
+    <text class="t-small" x="446" y="805">fail 一律拦；not-run 在 gate 拦</text>
+
+    <!-- 8b evidence -->
+    <polygon class="box-dec" points="185,854 260,886 185,918 110,886"/>
+    <text class="t-small" x="185" y="883" text-anchor="middle">证据？</text>
+    <rect class="box-esc" x="430" y="840" width="240" height="92" rx="8"/>
+    <text class="t-title t-stop" x="446" y="860">escalate · 退出码 2</text>
+    <text class="t-small" x="446" y="877">无文件 / 缺 verdict / 缺检查行</text>
+    <text class="t-small" x="446" y="893">自相矛盾 FAIL / 全 NOT RUN</text>
+    <text class="t-small" x="446" y="909">缺 Checks not run / commit 不符</text>
+    <text class="t-small" x="446" y="925">报告自称非 APPROVE</text>
+
+    <!-- proceed -->
+    <rect class="box box-ok" x="760" y="640" width="250" height="70" rx="8"/>
+    <text class="t-title t-pass" x="776" y="662">proceed · 退出码 0</text>
+    <text class="t-small" x="776" y="679">输出 checks_not_run</text>
+    <text class="t-small" x="776" y="695">仍禁止自动合并</text>
+
+    <!-- verdict branch -->
+    <rect class="box-esc" x="760" y="760" width="250" height="80" rx="8"/>
+    <text class="t-title t-stop" x="776" y="782">reject / escalate-human</text>
+    <text class="t-small" x="776" y="799">escalate · 退出码 2</text>
+    <text class="t-small" x="776" y="815">verifier 拒绝或无法跑测试</text>
+
+    <rect class="box-conv" x="760" y="864" width="250" height="60" rx="8"/>
+    <text class="t-title t-wait" x="776" y="886">awaiting-verification</text>
+    <text class="t-small" x="776" y="903">“没验” ≠ “验失败”</text>
+
+    <!-- edges -->
+    <path class="edge" d="M185,86 L185,118"/>
+    <path class="edge-esc" d="M260,150 L430,148"/>
+    <text class="lbl lbl-esc" x="310" y="142">是</text>
+    <path class="edge" d="M185,182 L185,210"/>
+    <text class="lbl" x="192" y="200">否</text>
+    <path class="edge-esc" d="M260,242 L430,240"/>
+    <text class="lbl lbl-esc" x="310" y="234">是</text>
+    <path class="edge" d="M185,274 L185,302"/>
+    <text class="lbl" x="192" y="292">否</text>
+    <path class="edge-esc" d="M260,334 L430,332"/>
+    <text class="lbl lbl-esc" x="310" y="326">是</text>
+    <path class="edge" d="M185,366 L185,394"/>
+    <text class="lbl" x="192" y="384">否</text>
+    <path class="edge-esc" d="M260,426 L430,424"/>
+    <text class="lbl lbl-esc" x="310" y="418">是</text>
+    <path class="edge" d="M185,458 L185,486"/>
+    <text class="lbl" x="192" y="476">否</text>
+    <path class="edge-wait" d="M260,518 L430,516"/>
+    <text class="lbl lbl-wait" x="310" y="510">是</text>
+    <path class="edge" d="M185,550 L185,578"/>
+    <text class="lbl" x="192" y="568">否</text>
+    <path class="edge-esc" d="M260,610 L430,608"/>
+    <text class="lbl lbl-esc" x="310" y="602">是</text>
+    <path class="edge" d="M185,642 L185,670"/>
+    <text class="lbl" x="192" y="660">否</text>
+    <path class="edge-esc" d="M260,702 L430,700"/>
+    <text class="lbl lbl-esc" x="310" y="694">是</text>
+    <path class="edge" d="M185,734 L185,762"/>
+    <text class="lbl" x="192" y="752">否</text>
+    <path class="edge-esc" d="M260,794 L430,792"/>
+    <text class="lbl lbl-esc" x="310" y="786">是</text>
+    <path class="edge" d="M185,826 L185,854"/>
+    <text class="lbl" x="192" y="844">否</text>
+    <path class="edge-esc" d="M260,886 L430,886"/>
+    <text class="lbl lbl-esc" x="310" y="880">是</text>
+    <path class="edge-ok" d="M260,886 L660,886 L660,675 L760,675"/>
+    <text class="lbl lbl-ok" x="430" y="878">全部通过</text>
+
+    <!-- verdict side -->
+    <rect class="box box-dec" x="760" y="560" width="250" height="52" rx="8"/>
+    <text class="t-title" x="776" y="582">最后一步：verdict</text>
+    <text class="t-small" x="776" y="599">approve 已过证据闸；reject 等</text>
+    <path class="edge-ok" d="M885,612 L885,640"/>
+    <path class="edge-esc" d="M1010,586 L1050,586 L1050,760"/>
+    <path class="edge-wait" d="M760,586 L700,586 L700,894 L760,894"/>
+
+    <!-- note -->
+    <text class="t-tiny" x="1050" y="60">退出码 1 = 参数错误：</text>
+    <text class="t-tiny" x="1050" y="76">闸门没跑，不是通过。</text>
+    <text class="t-tiny" x="1050" y="100">调用方必须区分：</text>
+    <text class="t-tiny" x="1050" y="116">0 / 2 / 3 是判定，</text>
+    <text class="t-tiny" x="1050" y="132">1 是“我问错了”。</text>
+  </svg>
+</figure>
+
+<!-- ============================================================ 5 熔断 -->
+<figure>
+  <figcaption>5 · 熔断器与预算：ledger-check / budget-check 的判定路径</figcaption>
+  <svg viewBox="0 0 1180 560" role="img" aria-label="熔断器与预算流程图">
+    <defs>
+      <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5a6b60"/></marker>
+      <marker id="a4e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b0654a"/></marker>
+      <marker id="a4o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d9a52"/></marker>
+      <marker id="a4w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a08a45"/></marker>
+    </defs>
+
+    <!-- ledger side -->
+    <rect class="lane" x="20" y="20" width="560" height="520" rx="10"/>
+    <text class="lane-label" x="36" y="42">LEDGER-CHECK · 熔断器</text>
+
+    <rect class="box box-term" x="60" y="64" width="220" height="44" rx="22"/>
+    <text class="t-title" x="170" y="83" text-anchor="middle">读 loop-ledger.json</text>
+    <text class="t-small" x="170" y="99" text-anchor="middle">--pattern 切片</text>
+
+    <polygon class="box-dec" points="170,140 240,172 170,204 100,172"/>
+    <text class="t-small" x="170" y="169" text-anchor="middle">可读？</text>
+    <rect class="box-esc" x="300" y="146" width="250" height="52" rx="8"/>
+    <text class="t-title t-stop" x="316" y="166">no-ledger · 2</text>
+    <text class="t-small" x="316" y="183">缺失 / 坏 JSON / 字段类型错</text>
+
+    <polygon class="box-dec" points="170,232 240,264 170,296 100,264"/>
+    <text class="t-small" x="170" y="261" text-anchor="middle">有本循环记录？</text>
+    <rect class="box-esc" x="300" y="238" width="250" height="52" rx="8"/>
+    <text class="t-title t-stop" x="316" y="258">no-pattern-records · 2</text>
+    <text class="t-small" x="316" y="275">不回落到“没有记录所以正常”</text>
+
+    <polygon class="box-dec" points="170,324 240,356 170,388 100,356"/>
+    <text class="t-small" x="170" y="353" text-anchor="middle">占位账本？</text>
+    <rect class="box-esc" x="300" y="330" width="250" height="52" rx="8"/>
+    <text class="t-title t-stop" x="316" y="350">placeholder-ledger · 2</text>
+    <text class="t-small" x="316" y="367">goal 仍是 Replace with…</text>
+
+    <polygon class="box-dec" points="170,416 240,448 170,480 100,448"/>
+    <text class="t-small" x="170" y="445" text-anchor="middle">停滞/无进展？</text>
+    <rect class="box-esc" x="300" y="422" width="250" height="52" rx="8"/>
+    <text class="t-title t-stop" x="316" y="442">stagnation / no-progress · 2</text>
+    <text class="t-small" x="316" y="459">noop 不再洗掉连续失败计数</text>
+
+    <rect class="box box-ok" x="300" y="492" width="250" height="44" rx="8"/>
+    <text class="t-title t-pass" x="316" y="512">ok · 退出码 0</text>
+    <text class="t-small" x="316" y="528">空 attempts 也算“还没开始跑”</text>
+
+    <path class="edge" d="M170,108 L170,140"/>
+    <path class="edge-esc" d="M240,172 L300,172"/>
+    <text class="lbl lbl-esc" x="258" y="166">否</text>
+    <path class="edge" d="M170,204 L170,232"/>
+    <text class="lbl" x="178" y="222">是</text>
+    <path class="edge-esc" d="M240,264 L300,264"/>
+    <text class="lbl lbl-esc" x="258" y="258">否</text>
+    <path class="edge" d="M170,296 L170,324"/>
+    <text class="lbl" x="178" y="314">是</text>
+    <path class="edge-esc" d="M240,356 L300,356"/>
+    <text class="lbl lbl-esc" x="258" y="350">是</text>
+    <path class="edge" d="M170,388 L170,416"/>
+    <text class="lbl" x="178" y="406">否</text>
+    <path class="edge-esc" d="M240,448 L300,448"/>
+    <text class="lbl lbl-esc" x="258" y="442">是</text>
+    <path class="edge-ok" d="M170,480 L170,514 L300,514"/>
+    <text class="lbl lbl-ok" x="178" y="506">否</text>
+
+    <!-- budget side -->
+    <rect class="lane" x="600" y="20" width="560" height="520" rx="10"/>
+    <text class="lane-label" x="616" y="42">BUDGET-CHECK · 预算与急停</text>
+
+    <rect class="box box-term" x="640" y="64" width="240" height="44" rx="22"/>
+    <text class="t-title" x="760" y="83" text-anchor="middle">budget-check --pattern</text>
+    <text class="t-small" x="760" y="99" text-anchor="middle">读 budget / run-log / STATE</text>
+
+    <polygon class="box-dec" points="760,140 830,172 760,204 690,172"/>
+    <text class="t-small" x="760" y="169" text-anchor="middle">暂停？</text>
+    <rect class="box-esc" x="890" y="146" width="240" height="52" rx="8"/>
+    <text class="t-title t-stop" x="906" y="166">exit · 退出码 3</text>
+    <text class="t-small" x="906" y="183">loop-pause-all 独占一行</text>
+
+    <polygon class="box-dec" points="760,232 830,264 760,296 690,264"/>
+    <text class="t-small" x="760" y="261" text-anchor="middle">有上限？</text>
+    <rect class="box-esc" x="890" y="238" width="240" height="52" rx="8"/>
+    <text class="t-title t-stop" x="906" y="258">exit · 退出码 3</text>
+    <text class="t-small" x="906" y="275">没有上限就没有刹车</text>
+
+    <polygon class="box-dec" points="760,324 830,356 760,388 690,356"/>
+    <text class="t-small" x="760" y="353" text-anchor="middle">≥100%？</text>
+    <rect class="box-esc" x="890" y="330" width="240" height="52" rx="8"/>
+    <text class="t-title t-stop" x="906" y="350">exit · 退出码 3</text>
+    <text class="t-small" x="906" y="367">今日花费达到上限</text>
+
+    <polygon class="box-dec" points="760,416 830,448 760,480 690,448"/>
+    <text class="t-small" x="760" y="445" text-anchor="middle">≥80%？</text>
+    <rect class="box-conv" x="890" y="422" width="240" height="52" rx="8"/>
+    <text class="t-title t-wait" x="906" y="442">report-only · 退出码 0</text>
+    <text class="t-small" x="906" y="459">不派发执行子智能体</text>
+
+    <rect class="box box-ok" x="890" y="492" width="240" height="44" rx="8"/>
+    <text class="t-title t-pass" x="906" y="512">normal · 退出码 0</text>
+    <text class="t-small" x="906" y="528">可派发执行者</text>
+
+    <path class="edge" d="M760,108 L760,140"/>
+    <path class="edge-esc" d="M830,172 L890,172"/>
+    <text class="lbl lbl-esc" x="848" y="166">是</text>
+    <path class="edge" d="M760,204 L760,232"/>
+    <text class="lbl" x="768" y="222">否</text>
+    <path class="edge-esc" d="M830,264 L890,264"/>
+    <text class="lbl lbl-esc" x="848" y="258">否</text>
+    <path class="edge" d="M760,296 L760,324"/>
+    <text class="lbl" x="768" y="314">是</text>
+    <path class="edge-esc" d="M830,356 L890,356"/>
+    <text class="lbl lbl-esc" x="848" y="350">是</text>
+    <path class="edge" d="M760,388 L760,416"/>
+    <text class="lbl" x="768" y="406">否</text>
+    <path class="edge-wait" d="M830,448 L890,448"/>
+    <text class="lbl lbl-wait" x="848" y="442">是</text>
+    <path class="edge-ok" d="M760,480 L760,514 L890,514"/>
+    <text class="lbl lbl-ok" x="768" y="506">否</text>
+
+    <text class="t-tiny" x="640" y="240">上限按行名解析：exact / alias / null。</text>
+    <text class="t-tiny" x="640" y="256">run-log 只解析单行 JSON。</text>
+    <text class="t-tiny" x="640" y="272">多行格式会被算成 0——有断言守着。</text>
+  </svg>
+</figure>
+
+<!-- ============================================================ 6 验证契约 -->
+<figure>
+  <figcaption>6 · 验证契约：verifier 写什么，merge-gate 与 gate-check 怎么读</figcaption>
+  <svg viewBox="0 0 1180 430" role="img" aria-label="验证契约流程图">
+    <defs>
+      <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5a6b60"/></marker>
+      <marker id="a5e" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b0654a"/></marker>
+      <marker id="a5o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d9a52"/></marker>
+    </defs>
+
+    <rect class="box box-conv" x="40" y="60" width="240" height="120" rx="8"/>
+    <text class="t-title" x="56" y="82">loop-verifier</text>
+    <text class="t-small" x="56" y="100">独立实例，默认立场 REJECT</text>
+    <text class="t-small" x="56" y="116">实际跑测试，不看 diff 猜</text>
+    <text class="t-small" x="56" y="132">回退测试：新测试必须</text>
+    <text class="t-small" x="56" y="148">在修复前代码上真的挂掉</text>
+    <text class="t-tiny" x="56" y="168">输出带标记的 PR 评论</text>
+
+    <rect class="box box-mech" x="340" y="50" width="300" height="150" rx="8"/>
+    <text class="t-title t-amber" x="356" y="72">报告格式（生产者契约）</text>
+    <text class="t-mono t-small" x="356" y="94">&lt;!-- loop-verifier-report --&gt;</text>
+    <text class="t-mono t-small" x="356" y="112">## Verdict: APPROVE | REJECT</text>
+    <text class="t-mono t-small" x="356" y="130">Commit: &lt;head sha&gt;</text>
+    <text class="t-mono t-small" x="356" y="148">### Evidence</text>
+    <text class="t-mono t-small" x="356" y="166">- Tests: `cmd` → PASS</text>
+    <text class="t-mono t-small" x="356" y="184">- Red check: FAIL — 说明</text>
+
+    <rect class="box box-mech" x="700" y="40" width="200" height="86" rx="8"/>
+    <text class="t-title" x="716" y="62">merge-gate</text>
+    <text class="t-small" x="716" y="79">只取 bot 账号的评论</text>
+    <text class="t-small" x="716" y="95">最后一条 review 必须是</text>
+    <text class="t-small" x="716" y="111">APPROVED，否则不回退 head</text>
+
+    <rect class="box box-mech" x="960" y="40" width="180" height="86" rx="8"/>
+    <text class="t-title" x="976" y="62">gate-check</text>
+    <text class="t-small" x="976" y="79">读证据文件</text>
+    <text class="t-small" x="976" y="95">交叉校验后判定</text>
+
+    <!-- decision chain -->
+    <polygon class="box-dec" points="1050,190 1120,222 1050,254 980,222"/>
+    <text class="t-small" x="1050" y="219" text-anchor="middle">自相矛盾？</text>
+    <rect class="box-esc" x="700" y="190" width="240" height="64" rx="8"/>
+    <text class="t-title t-stop" x="716" y="212">escalate · 2</text>
+    <text class="t-small" x="716" y="229">APPROVE 但有 FAIL / 全 NOT RUN</text>
+    <text class="t-small" x="716" y="245">commit 与 head 不符</text>
+
+    <polygon class="box-dec" points="1050,300 1120,332 1050,364 980,332"/>
+    <text class="t-small" x="1050" y="329" text-anchor="middle">清单完整？</text>
+    <rect class="box-esc" x="700" y="300" width="240" height="64" rx="8"/>
+    <text class="t-title t-stop" x="716" y="322">escalate · 2</text>
+    <text class="t-small" x="716" y="339">缺 Checks not run 节</text>
+    <text class="t-small" x="716" y="355">NOT RUN 未列进该节</text>
+
+    <rect class="box box-ok" x="700" y="384" width="240" height="36" rx="8"/>
+    <text class="t-title t-pass" x="716" y="407">proceed · 0</text>
+
+    <path class="edge" d="M280,120 L340,120"/>
+    <path class="edge" d="M640,120 L700,90"/>
+    <path class="edge" d="M900,83 L960,83"/>
+    <path class="edge" d="M1050,126 L1050,190"/>
+    <path class="edge-esc" d="M980,222 L940,222"/>
+    <text class="lbl lbl-esc" x="946" y="214">是</text>
+    <path class="edge" d="M1050,254 L1050,300"/>
+    <text class="lbl" x="1058" y="282">否</text>
+    <path class="edge-esc" d="M980,332 L940,332"/>
+    <text class="lbl lbl-esc" x="946" y="324">否</text>
+    <path class="edge-ok" d="M1050,364 L1050,402 L940,402"/>
+    <text class="lbl lbl-ok" x="1058" y="394">是</text>
+
+    <text class="t-tiny" x="40" y="230">verdict 是断言，不是证据。</text>
+    <text class="t-tiny" x="40" y="246">闸门是“独立验证”承诺的</text>
+    <text class="t-tiny" x="40" y="262">唯一机械执行点。</text>
+    <text class="t-tiny" x="40" y="290">生产者与消费者必须对</text>
+    <text class="t-tiny" x="40" y="306">同一种格式达成一致——</text>
+    <text class="t-tiny" x="40" y="322">否则失败会被静默忽略。</text>
+  </svg>
+</figure>
+
+<!-- ============================================================ 7 状态 -->
+<figure>
+  <figcaption>7 · 一轮运行的状态回写与下一轮接续</figcaption>
+  <svg viewBox="0 0 1180 360" role="img" aria-label="状态回写流程图">
+    <defs>
+      <marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5a6b60"/></marker>
+      <marker id="a6o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6d9a52"/></marker>
+    </defs>
+
+    <rect class="box box-term" x="40" y="150" width="180" height="60" rx="30"/>
+    <text class="t-title" x="130" y="175" text-anchor="middle">本轮结束</text>
+    <text class="t-small" x="130" y="192" text-anchor="middle">六种 outcome 之一</text>
+
+    <rect class="box box-mech" x="290" y="40" width="240" height="72" rx="8"/>
+    <text class="t-title" x="306" y="62">STATE.md</text>
+    <text class="t-small" x="306" y="79">Active / High Priority</text>
+    <text class="t-small" x="306" y="95">Watch List / Last run</text>
+
+    <rect class="box box-mech" x="290" y="136" width="240" height="72" rx="8"/>
+    <text class="t-title" x="306" y="158">loop-run-log.md</text>
+    <text class="t-small" x="306" y="175">一条记录一行 JSON</text>
+    <text class="t-small" x="306" y="191">预算的唯一数据源</text>
+
+    <rect class="box box-mech" x="290" y="232" width="240" height="72" rx="8"/>
+    <text class="t-title" x="306" y="254">feature_list.json</text>
+    <text class="t-small" x="306" y="271">有代码改动时更新</text>
+    <text class="t-small" x="306" y="287">passing 必须有证据</text>
+
+    <rect class="box box-mech" x="600" y="136" width="220" height="72" rx="8"/>
+    <text class="t-title" x="616" y="158">清理</text>
+    <text class="t-small" x="616" y="175">移除已关闭 / 已合并</text>
+    <text class="t-small" x="616" y="191">已升级超 7 天的条目</text>
+
+    <rect class="box box-conv" x="600" y="40" width="220" height="72" rx="8"/>
+    <text class="t-title" x="616" y="62">Post-Run Critique</text>
+    <text class="t-small" x="616" y="79">必须产出一项具体调整</text>
+    <text class="t-small" x="616" y="95">否则复盘退化成走过场</text>
+
+    <rect class="box box-term" x="900" y="120" width="240" height="104" rx="52"/>
+    <text class="t-title" x="1020" y="150" text-anchor="middle">下一轮开始</text>
+    <text class="t-small" x="1020" y="170" text-anchor="middle">读 STATE → 选一个 work item</text>
+    <text class="t-small" x="1020" y="186" text-anchor="middle">读 loop-constraints → 跑 init.sh</text>
+    <text class="t-tiny" x="1020" y="206" text-anchor="middle">仓库即记忆；模型会忘，仓库不会</text>
+
+    <path class="edge" d="M220,165 L290,90"/>
+    <path class="edge" d="M220,180 L290,172"/>
+    <path class="edge" d="M220,195 L290,260"/>
+    <path class="edge" d="M530,76 L600,76"/>
+    <path class="edge" d="M530,172 L600,172"/>
+    <path class="edge" d="M530,250 L560,250 L560,208 L600,190"/>
+    <path class="edge-ok" d="M820,172 L900,172"/>
+    <path class="edge" d="M820,76 L860,76 L860,130 L900,140"/>
+  </svg>
+</figure>
+
+</div>
+</main>
 </body>
 </html>
