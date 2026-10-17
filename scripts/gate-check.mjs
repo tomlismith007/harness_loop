@@ -38,12 +38,54 @@ const RED_CHECKS = ['pass', 'fail', 'not-run'];
  * STATE.md 或 loop-constraints.md 里任何对 loop-pause-all 的散文提及都不算生效——
  * 否则一次说明性文字就把循环永久停死。`--state` 指向的目录下读这两个文件。
  */
-export function isPaused(stateRoot) {
-  for (const name of ['STATE.md', 'loop-constraints.md']) {
-    const text = readText(path.join(stateRoot, name));
-    if (/^\s*loop-pause-all\s*$/m.test(text)) return { paused: true, where: name };
+export function isPaused(statePath) {
+  const { files, readable } = stateFiles(statePath);
+  for (const { name, text } of files) {
+    if (/^\s*loop-pause-all\s*$/m.test(text)) return { paused: true, where: name, readable };
   }
-  return { paused: false, where: null };
+  return { paused: false, where: null, readable };
+}
+
+/**
+ * --state 接受文件或目录。
+ *
+ * 传文件名曾经被当成目录，path.join('STATE.md','STATE.md') 读不到 → 静默 proceed。
+ * 读不到 ≠ 没暂停：一个永远生效不了的 kill switch 和一个不存在的 kill switch
+ * 在退出码上不可区分。所以两个文件都读不到时调用方必须 fail-closed。
+ */
+export function stateFiles(statePath) {
+  const target = statePath || process.cwd();
+  let st = null;
+  try { st = fs.statSync(target); } catch { /* 不存在 */ }
+  if (st && st.isFile()) {
+    const text = readText(target);
+    return { files: [{ name: path.basename(target), text }], readable: true };
+  }
+  // readable 看文件是否存在，不看内容：空 STATE.md 是合法的新装配状态，
+  // 只有"路径指错了"才是参数错误。
+  const names = ['STATE.md', 'loop-constraints.md'];
+  const files = names.map((name) => ({ name, text: readText(path.join(target, name)) }));
+  return { files, readable: names.some((name) => fs.existsSync(path.join(target, name))) };
+}
+
+/**
+ * STATE.md 的 `## Active` 表里真正在进行的 work item 数（WIP=1 的机械入口）。
+ *
+ * 占位行 `| — |` / `| - |` 不算。没有 `## Active` 节 → null（不适用，不阻断）；
+ * 有表头但零数据行 → 0。两者必须可区分，否则"没写表"会被读成"没有活动项"。
+ */
+export function activeItems(text) {
+  if (!text) return null;
+  const section = text.split(/^##\s+Active\s*$/m)[1];
+  if (section === undefined) return null;
+  const body = section.split(/^#{1,2}\s/m)[0];
+  const rows = body.split('\n').filter((l) => l.trim().startsWith('|'));
+  // 前两行是表头与分隔行
+  const data = rows.slice(2).filter((l) => {
+    const cells = l.split('|').slice(1, -1).map((c) => c.trim());
+    return cells.length > 0 && cells.some((c) => c && c !== '—' && c !== '-');
+  });
+  return data.length;
 }
 
 /**
@@ -96,6 +138,19 @@ export function checkGates(input, opts = {}) {
       allowed_actions: [],
       exit_code: 3,
       next: 'exit immediately; do not dispatch any sub-agent; note the pause in STATE.md',
+    };
+  }
+
+  // 1b. WIP=1：两个活动项同时存在 → 升级。只有 STATE.md 里真有 `## Active` 表时才判。
+  if (typeof input.activeCount === 'number' && input.activeCount > 1) {
+    return {
+      ...base,
+      decision: 'escalate',
+      gate: 'wip-limit',
+      reason: `STATE.md 的 ## Active 有 ${input.activeCount} 项在进行；一次只做一个 work item`,
+      allowed_actions: ['finish or explicitly block one item first'],
+      exit_code: 2,
+      next: '把多余的项移回 High Priority 或标记阻塞，只留一项在 ## Active',
     };
   }
 
@@ -376,6 +431,11 @@ export function checkGates(input, opts = {}) {
     decision: 'proceed',
     gate: null,
     reason: 'all gates passed',
+    // fix 阶段的 approve 是中间检查，不是合并许可。不改变退出码（现有冒烟依赖 proceed），
+    // 但必须说出来，否则"闸门过了"会被读成"可以合并"。
+    ...(phase === 'fix' && verdict === 'approve'
+      ? { warning: 'approve at fix phase is not a gate; merge requires --phase gate' }
+      : {}),
     checks_not_run: allNotRun,
     allowed_actions: ['propose PR', 'update state', 'request human merge'],
     forbidden_actions: ['auto-merge to main'],
@@ -494,8 +554,19 @@ Exit codes:
   // proceed/escalate/exit 三态——最重要的人工升级信号会在传递途中消失。
   const normalizeVerdict = (v) => String(v).trim().toLowerCase().replace(/_/g, '-');
 
+  const statePath = typeof args.state === 'string' ? args.state : process.cwd();
+  const state = stateFiles(statePath);
+  // 读不到状态文件 ≠ 没有暂停。fail-closed：让调用方修正参数，而不是让闸门放行。
+  if (!state.readable) {
+    fail(`--state ${statePath}: no STATE.md or loop-constraints.md found `
+      + `(pass a directory that contains them, or the file itself)`, 1);
+  }
+  const activeFile = state.files.find((f) => f.name === 'STATE.md');
+  const activeCount = activeFile ? activeItems(activeFile.text) : null;
+
   const input = {
     item: typeof args.item === 'string' ? args.item : null,
+    activeCount,
     phase: enumArg(args.phase, PHASES, '--phase') ?? null,
     attempts: numArg(args.attempts, '--attempts', 0),
     diffFiles,
@@ -504,8 +575,7 @@ Exit codes:
       VERDICTS, '--verdict') ?? 'none',
     // kill switch：--state 给了就自己读文件；否则只认 --pause。
     // 两者都必须真的改变退出码——文档里写着"暂停即退出"，代码里就得有入口。
-    pause: boolArg(args.pause)
-      || isPaused(typeof args.state === 'string' ? args.state : process.cwd()).paused,
+    pause: boolArg(args.pause) || isPaused(statePath).paused,
     isCleanup: boolArg(args.cleanup),
     // 拒绝列表的真相源是本仓库的 loop-constraints.md，不是脚本里的常量。
     // 维护者按文档在 ## Repo-Specific 加的路径必须真的被强制执行。

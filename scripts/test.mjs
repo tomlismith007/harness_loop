@@ -492,6 +492,9 @@ section('5. 闸门判定');
   // 单文件 PR 的 `git diff --name-only` 输出恰好一行；曾被当成"单个路径"→ proceed。
   {
     const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-diff-'));
+    // --state 默认 cwd，且读不到状态文件就 fail-closed。这些用例测的是 diff-files
+    // 解析，不是状态文件，所以给一个最小的合法状态目录。
+    fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
     const runGate = (args) => {
       try {
         const o = execFileSync(process.execPath,
@@ -925,6 +928,206 @@ section('15. 超时杀整棵树');
   ok('正常命令返回 ok', quick.ok === true);
   const missing = runWithTreeKill('definitely-not-a-command-xyz', [], { timeoutMs: 5000 });
   ok('不存在的命令被识别为 spawn 失败', missing.spawnFailed === true, JSON.stringify(missing));
+}
+
+// ---------------------------------------------------------------- 16. 升级回归（批次 1）
+
+section('16. 升级回归（批次 1）');
+{
+  const runGateIn = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+
+  // U-01：--state 接受文件；读不到必须 fail-closed，不得静默 proceed。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-state-'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), 'loop-pause-all\n');
+    eq('U-01 文件形式 --state 读到暂停 → 3',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', path.join(t, 'STATE.md')], t).code, 3);
+    eq('U-01 目录形式 --state 读到暂停 → 3',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', t], t).code, 3);
+    const empty = path.join(t, 'empty');
+    fs.mkdirSync(empty);
+    eq('U-01 目录里没有状态文件 → 参数错误 1',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', empty], t).code, 1);
+    eq('U-01 不存在的路径 → 参数错误 1',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', path.join(t, 'nope')], t).code, 1);
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // U-02：fix + approve 必须带非阻断 warning；gate + approve 无证据必须拦。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-phase-'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
+    const fixRun = runGateIn(['--item', 'p', '--phase', 'fix', '--verdict', 'approve',
+      '--diff-files', 'a.ts', '--state', t], t);
+    eq('U-02 fix+approve 仍 proceed', fixRun.code, 0);
+    ok('U-02 fix+approve 带 warning', /"warning":\s*"approve at fix phase is not a gate/.test(fixRun.out), fixRun.out);
+    const gateRun = runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve',
+      '--red-check', 'pass', '--reviewed-sha', 'a'.repeat(40), '--head-sha', 'a'.repeat(40),
+      '--diff-files', 'a.ts', '--state', t], t);
+    eq('U-02 gate+approve 无证据 → 2', gateRun.code, 2);
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // U-09：空状态文件不算"存在"；技能必须有可加载 frontmatter。
+  {
+    const stage = (target) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), target, '--json'],
+          { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    };
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-empty-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), t, '--upgrade', '--stage', '1'],
+      { encoding: 'utf8' });
+    writeRealFeatures(path.join(t, 'feature_list.json'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), '   \n\n<!-- 只有注释 -->\n');
+    const j = JSON.parse(stage(t).out);
+    const stateCheck = j.stages[0].checks.find((c) => /状态文件/.test(c.label));
+    ok('U-09 空 STATE.md 不算存在', stateCheck && stateCheck.ok === false, JSON.stringify(stateCheck));
+    fs.rmSync(t, { recursive: true, force: true });
+
+    // 无 frontmatter 的 SKILL.md 不算可加载
+    const s = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-skill-'));
+    fs.mkdirSync(path.join(s, '.claude', 'skills', 'harness-loop'), { recursive: true });
+    // 正文用结构化行：structuredText 会丢掉普通段落，纯文本会让判据"因为别的原因"失败。
+    fs.writeFileSync(path.join(s, '.claude', 'skills', 'harness-loop', 'SKILL.md'),
+      '# no frontmatter\n\n- kill switch\n- 验证\n');
+    const j2 = JSON.parse(stage(s).out);
+    const skillCheck = j2.stages[1].checks.find((c) => /harness-loop/.test(c.label));
+    ok('U-09 无 frontmatter 的技能不算已装', skillCheck && skillCheck.ok === false, JSON.stringify(skillCheck));
+    fs.rmSync(s, { recursive: true, force: true });
+  }
+
+  // U-11：缺一整个宿主副本必须被 --check 发现。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t],
+      { encoding: 'utf8' });
+    fs.rmSync(path.join(t, '.agents', 'skills', 'harness-loop'), { recursive: true, force: true });
+    let code = 0;
+    try {
+      execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t, '--check'],
+        { encoding: 'utf8' });
+    } catch (e) { code = e.status; }
+    eq('U-11 缺一个宿主副本 → --check exit 1', code, 1);
+    fs.rmSync(t, { recursive: true, force: true });
+
+    // 整个宿主目录被删掉，也必须被发现——只报 missing 会让它静默通过。
+    const t2 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host2-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t2],
+      { encoding: 'utf8' });
+    fs.rmSync(path.join(t2, '.agents'), { recursive: true, force: true });
+    let code2 = 0;
+    let out2 = '';
+    try {
+      out2 = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t2, '--check', '--json'],
+        { encoding: 'utf8' });
+    } catch (e) { code2 = e.status; out2 = e.stdout || ''; }
+    eq('U-11 整个宿主目录缺失 → --check exit 1', code2, 1);
+    ok('U-11 整个宿主目录缺失 → in_sync=false', /"in_sync":\s*false/.test(out2), out2.slice(0, 200));
+    fs.rmSync(t2, { recursive: true, force: true });
+
+    // 单宿主安装不应因为另一个宿主没装而报错。
+    const t3 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host3-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t3, '--layout', 'claude'],
+      { encoding: 'utf8' });
+    let code3 = 0;
+    try {
+      execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t3, '--check', '--layout', 'claude'],
+        { encoding: 'utf8' });
+    } catch (e) { code3 = e.status; }
+    eq('U-11 单宿主安装 --check 不误报', code3, 0);
+    fs.rmSync(t3, { recursive: true, force: true });
+
+    // 检查范围不能由调用方临时收窄：两宿主装过、删掉 .agents 之后，
+    // 即使传 --layout claude 也必须报漂移。
+    const t4 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host4-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t4],
+      { encoding: 'utf8' });
+    fs.rmSync(path.join(t4, '.agents'), { recursive: true, force: true });
+    let code4 = 0;
+    try {
+      execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t4, '--check', '--layout', 'claude'],
+        { encoding: 'utf8' });
+    } catch (e) { code4 = e.status; }
+    eq('U-11 收窄 --layout 不能藏掉已声明宿主的漂移', code4, 1);
+    fs.rmSync(t4, { recursive: true, force: true });
+  }
+
+  // U-09b：frontmatter 必须在文件开头，正文里的 name:/description: 不算。
+  {
+    const s = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-fm-'));
+    fs.mkdirSync(path.join(s, '.claude', 'skills', 'harness-loop'), { recursive: true });
+    fs.writeFileSync(path.join(s, '.claude', 'skills', 'harness-loop', 'SKILL.md'),
+      '# body\n\n- kill switch\n- 验证\n\n---\nname: fake\ndescription: fake\n');
+    let out = '';
+    try {
+      out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), s, '--json'], { encoding: 'utf8' });
+    } catch (e) { out = e.stdout || ''; }
+    const j = JSON.parse(out);
+    const check = j.stages[1].checks.find((c) => /harness-loop/.test(c.label));
+    ok('U-09 正文里的 name/description 不算 frontmatter', check && check.ok === false, JSON.stringify(check));
+    fs.rmSync(s, { recursive: true, force: true });
+  }
+
+  // U-07：STATE.md 的 Active 表出现第二行 → 拒绝（WIP=1）。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wip-'));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    fs.writeFileSync(path.join(t, 'STATE.md'),
+      '## Active\n\n| Work item | acting_on | 状态 |\n|---|---|---|\n| a | x | 进行中 |\n| b | y | 进行中 |\n');
+    eq('U-07 两个活动项 → 2',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', t], t).code, 2);
+    fs.writeFileSync(path.join(t, 'STATE.md'),
+      '## Active\n\n| Work item | acting_on | 状态 |\n|---|---|---|\n| a | x | 进行中 |\n| — | — | — |\n');
+    eq('U-07 占位行不算活动项 → 0',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', t], t).code, 0);
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 技能里的命令必须可执行：从 SKILL.md 提取命令串并在临时目录跑。
+  {
+    const skill = readText(path.join(SKILLS_DIR, 'harness-loop', 'SKILL.md'));
+    const step0 = skill.match(/node scripts\/gate-check\.mjs --item probe[^\n]*/);
+    ok('技能第 0 步命令存在', Boolean(step0), '未找到 probe 命令');
+    if (step0) {
+      const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-skillcmd-'));
+      fs.mkdirSync(path.join(t, 'scripts'), { recursive: true });
+      for (const f of ['gate-check.mjs', 'ledger-check.mjs']) {
+        fs.copyFileSync(path.join(PACK_ROOT, 'scripts', f), path.join(t, 'scripts', f));
+      }
+      fs.mkdirSync(path.join(t, 'scripts', 'lib'), { recursive: true });
+      fs.copyFileSync(path.join(PACK_ROOT, 'scripts', 'lib', 'common.mjs'), path.join(t, 'scripts', 'lib', 'common.mjs'));
+      fs.writeFileSync(path.join(t, 'STATE.md'), 'loop-pause-all\n');
+      fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+      const r = (() => {
+        try {
+          const out = execFileSync('bash', ['-c', step0[0]], { encoding: 'utf8', cwd: t });
+          return { code: 0, out };
+        } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+      })();
+      eq('技能第 0 步命令在暂停时 → exit 3', r.code, 3);
+      fs.rmSync(t, { recursive: true, force: true });
+    }
+  }
 }
 
 // ---------------------------------------------------------------- 汇总

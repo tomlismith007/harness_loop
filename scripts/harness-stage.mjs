@@ -55,8 +55,14 @@ export const STAGES = [
 
 // ---------------------------------------------------------------- 判据检查
 
+/**
+ * 文件"存在"必须是有内容的。空文件、只有空白、只有 HTML 注释，都不算——
+ * `touch` 不是装配。模板自带注释，所以先剥注释再判空。
+ */
 function hasFile(root, name) {
-  return exists(path.join(root, name));
+  const p = path.join(root, name);
+  if (!exists(p)) return false;
+  return stripHtmlComments(readText(p)).trim().length > 0;
 }
 
 /** init.sh 里是否还有占位符（未替换为真实命令） */
@@ -130,8 +136,15 @@ function skillInDiscoverablePath(root, skillName, requiredText) {
     .map((d) => path.join(root, d, skillName, 'SKILL.md'))
     .find((p) => exists(p));
   if (!file) return false;
+  const text = readText(file);
+  // 没有 name + description frontmatter 的 SKILL.md 宿主不会加载——
+  // 文件在、内容对，但永远不会被触发，等于没装。
+  // 只认文件开头的 frontmatter 块；正文里的 `name:` 或分隔线不算。
+  const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+  if (!fm) return false;
+  if (!/^name:\s*\S/m.test(fm[1]) || !/^description:\s*\S/m.test(fm[1])) return false;
   if (!requiredText) return true;
-  return textHas(structuredText(readText(file)), requiredText);
+  return textHas(structuredText(text), requiredText);
 }
 
 /** 模板里预置的拒绝列表路径（用于判断用户是否本地化过） */

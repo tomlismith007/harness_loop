@@ -18,7 +18,8 @@ GitHub issue/PR 是可选模块（`/harness-loop-issue`），不属于核心。
 3. 读 `STATE.md` 了解当前活动、人类收件箱、上次运行时间。
 4. 读 `LESSONS.md`，避免重复已记录的返工。
 5. 跑 `bash init.sh` 确认环境健康。基线失败先修基线，不要在坏状态上叠新工作。
-6. 一次只做一个 work item，从 `STATE.md` 的 High Priority 选。
+6. 一次只做一个 work item，从 `STATE.md` 的 `## High Priority` 选第一条未勾选。
+   `feature_list.json` 只用于查"这项是否已完成、证据是什么"，不是工作队列。
 
 ## 工作规则
 

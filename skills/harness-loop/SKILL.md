@@ -25,10 +25,12 @@ stage: runtime
 kill switch：`STATE.md` 或 `loop-constraints.md` 里**独占一行**的 `loop-pause-all`。
 
 ```bash
-node scripts/gate-check.mjs --item probe --phase fix --diff-files "" --state STATE.md --json
+node scripts/gate-check.mjs --item probe --phase fix --diff-files "" --state . --json
 ```
 
 退出码 `3` = 暂停生效，**立即退出**，在 `STATE.md` 写一行说明。
+`--state` 是**目录**（也可以传单个状态文件）；指向的目录里两个状态文件都读不到时
+脚本以退出码 `1` 报参数错误——读不到不等于没暂停，绝不放行。
 kill switch 只认独占一行——散文里提到不算，否则一次说明性文字就把循环永久停死。
 
 ### 第 1 步：加载约束
@@ -50,6 +52,7 @@ Constraints loaded from loop-constraints.md: N rules active.
 
 **有参数用参数**（`/harness-loop 修复登录测试`）。
 **没有参数**时读 `STATE.md` 的 `## High Priority`，取第一条未勾选的 `- [ ]`。
+`feature_list.json` 不是工作队列——它只回答"这项做完没有、证据是什么"。
 
 两种情况下都必须满足：
 
@@ -114,13 +117,20 @@ git worktree add loop/<event>-<item>-attempt<N> -b loop/<event>-<item>-attempt<N
 ```bash
 node scripts/gate-check.mjs \
   --item <item-id> \
-  --phase fix \
+  --phase gate \
   --attempts <n> \
   --diff-files @changed-files.txt \
   --verdict <approve|reject|escalate-human|none> \
   --red-check <pass|fail|not-run> \
-  --state STATE.md
+  --reviewed-sha <审查时的 commit> \
+  --head-sha "$(git rev-parse HEAD)" \
+  --evidence-file <verifier-report.md> \
+  --state .
 ```
+
+**必须用 `--phase gate`**：证据闸门与 head-commit 闸门只在 gate 阶段生效。
+用 `--phase fix` + `--verdict approve` 会得到 `proceed` 加一条 warning，但那是中间检查，
+不是合并许可。
 
 `--diff-files` 的 `@` 前缀**不可省**：裸路径会被当成"单个改动文件"，拒绝列表与范围两个闸门同时失效。
 

@@ -4,15 +4,24 @@
 
 ---
 
-## 三类状态，各司其职
+## 五个状态源，各司其职
 
-| 工件 | 作用域 | 更新者 | 回答的问题 |
-|---|---|---|---|
-| `STATE.md` | 仓库级、跨循环 | 每个循环每轮 | 现在在做什么？什么在等人？上次运行何时？ |
-| `feature_list.json` | 功能级、机器可读 | agent（有证据时） | 哪些功能做完了？证据是什么？依赖关系？ |
-| `loop-ledger.json` | 尝试级、熔断用 | 执行者每次尝试 | 试了几次？什么错误？是否停滞？ |
+| 工件 | 作用域 | 更新者 | 机械读者 | 回答的问题 |
+|---|---|---|---|---|
+| `STATE.md` | 仓库级 | 每轮 | `gate-check`（kill switch、WIP=1） | 现在做什么？什么在等人？ |
+| `feature_list.json` | 功能级 | 有证据时 | `harness-stage` 阶段 1 | 哪些功能完成了？证据是什么？ |
+| `loop-ledger.json` | 尝试级 | 每次尝试 | `ledger-check` | 试了几次？什么错误？是否停滞？ |
+| `loop-run-log.md` | 运行级 | 每轮 | `harness-stage`（存在性） | 这一轮的结果与成本？ |
+| `LESSONS.md` | 返工级 | 发生返工时 | 无（模型读） | 哪些错犯过第二次？ |
 
-**不要合并它们。** 三者粒度和更新频率不同：`STATE.md` 每轮都变，`feature_list.json` 只在有验证证据时变，`loop-ledger.json` 每次尝试都追加。
+**工作队列唯一来源 = `STATE.md` 的 `## High Priority`。** 其余四个文件不产生待办；
+`feature_list.json` 只回答"这项做完没有、证据是什么"。
+
+**不要合并它们。** 五者粒度和更新频率不同：`STATE.md` 每轮都变，`feature_list.json`
+只在有验证证据时变，`loop-ledger.json` 每次尝试都追加，`loop-run-log.md` 只追加，
+`LESSONS.md` 只在返工时写。
+
+`## Active` 表同时只能有一行非占位数据——`gate-check` 会读它，多于一行直接升级（WIP=1）。
 
 ---
 
