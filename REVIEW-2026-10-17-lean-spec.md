@@ -500,7 +500,7 @@
 | LP-10 预算模板与 kill switch | ✅ 已做 | 模板补三行定时循环；新增"模板覆盖全部 workflow pattern"断言；删除 issue 标签承诺（代码只读文件） |
 | LP-11 workflow 交付与 release | ✅ 已做 | 三个报告型 workflow 写 `$GITHUB_STEP_SUMMARY`；release-draft 删除 `release.published` 触发；测试断言 |
 | LP-12 路由与 attempts | ✅ 已做 | `LOOP.md` 技能列与 ROUTES 对齐；`docs/03` 与 `loop-constraints.md` 明确 attempts **未接线**、按 NOT RUN 对待 |
-| LP-13 真实 GitHub 演练 | ✅ 已做（部分 NOT RUN） | 私有沙箱 `tomlismith007/harness-loop-sandbox`：issue #1 → intake 路由 + work item + artifact；PR #2 → review 路由 + 落盘；ready_for_review → 无批准时 `head-commit` escalate 且 PR 评论可见；故意失败的 CI → ci-sweeper 路由 fix、熔断 `ok`、落盘；daily-triage / lesson-harvest（dispatch）与 tag `v0.0.1-sandbox` → release 草稿均成功。**NOT RUN**：APPROVED + commit 匹配的通过路径（单账号不能批准自己的 PR）；agent 平台消费队列 |
+| LP-13 真实 GitHub 演练 | ✅ 已做（部分 NOT RUN） | 私有沙箱 `tomlismith007/harness-loop-sandbox`：issue #1 → intake 路由 + work item + artifact；PR #2 → review 路由 + 落盘；ready_for_review → 无批准时 `head-commit` escalate 且 PR 评论可见；故意失败的 CI → ci-sweeper 路由 fix、熔断 `ok`、落盘；daily-triage / lesson-harvest（dispatch）与 tag `v0.0.1-sandbox` → release 草稿均成功。**NOT RUN**：APPROVED + commit 匹配的通过路径（单账号不能批准自己的 PR）；agent 平台消费队列。沙箱 issue/PR 已关闭；仓库删除需 `delete_repo` scope |
 | LP-14 Linux/消费者烟测 | ✅ 已做 | GitHub `Self-check` 在 ubuntu-latest 通过（1067/0，自审计 94/L2）；本机消费者装配烟测：8 workflow、14 技能、7 运行脚本（6 个 `--help` 可执行）、8 个预算 pattern 全部解析。WSL 无发行版，未跑本地 Linux |
 
 **本轮验证**：`node scripts/test.mjs` → **Passed: 1067 / Failed: 0**（本机与 ubuntu-latest 均通过）；

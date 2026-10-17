@@ -66,7 +66,9 @@
 - **真实 APPROVED 通过路径未验证**：需要第二个账号或组织成员在沙箱里批准。
 - **agent 平台消费队列未验证**：work item 已交付为 artifact，但没有平台消费它。
 - **run-log 持久化未决策**：workflow 写 run-log 只上传 artifact，预算 `used` 仍恒为 0。
-- **沙箱仓库是临时资源**：`tomlismith007/harness-loop-sandbox` 可在验证后删除。
+- **沙箱仓库仍在**：`tomlismith007/harness-loop-sandbox` 的 issue/PR 已关闭，但删除需要
+  `delete_repo` scope（当前 token 没有）。要么 `gh auth refresh -h github.com -s delete_repo`
+  后删除，要么保留为下次演练用。
 
 ## Next Session Startup
 
