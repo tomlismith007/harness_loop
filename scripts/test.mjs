@@ -729,6 +729,12 @@ section('13. 技能安装（双路径）');
   }
 
   eq('--check 无漂移时退出 0', run(['--check']).code, 0);
+  // 目标目录里还有别家的技能时，--check 不得把它们报成"清单残留"。
+  // 真实场景：~/.claude/skills 同时装着 brandkit、grilling 等非本包技能。
+  fs.mkdirSync(path.join(tmp, '.claude/skills/foreign-skill'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, '.claude/skills/foreign-skill/SKILL.md'), '# foreign\n');
+  eq('--check 忽略非本包技能', run(['--check']).code, 0);
+  fs.rmSync(path.join(tmp, '.claude/skills/foreign-skill'), { recursive: true, force: true });
   // 改一个已安装副本 → --check 必须报漂移
   fs.appendFileSync(path.join(tmp, '.claude/skills/harness-loop/SKILL.md'), '\nstale\n');
   eq('--check 发现漂移时退出 1', run(['--check']).code, 1);

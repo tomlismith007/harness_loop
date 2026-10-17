@@ -225,10 +225,13 @@ function checkInstalled(args) {
     if (exists(manifestPath)) {
       try { manifest = JSON.parse(readText(manifestPath)); } catch { manifest = null; }
     }
-    // 已安装副本 = 清单里记的（这份包装的）+ 目录里实际存在的
+    // 已安装副本 = 清单里记的 + 目录里存在、且**本包源码里也有**的。
+    // 不能把目录里所有技能都算进来：`~/.claude/skills` 还装着别家的技能，
+    // 它们会被误报成"源码里已不存在（清单残留）"并让 --check 退出 1。
     const present = fs.readdirSync(target.dir, { withFileTypes: true })
       .filter((e) => e.isDirectory() && exists(path.join(target.dir, e.name, 'SKILL.md')))
-      .map((e) => e.name);
+      .map((e) => e.name)
+      .filter((n) => exists(path.join(srcDir, n, 'SKILL.md')));
     const installed = [...new Set([...(manifest?.skills || []), ...present])];
 
     for (const name of installed) {
