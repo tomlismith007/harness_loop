@@ -500,12 +500,19 @@
 | LP-10 预算模板与 kill switch | ✅ 已做 | 模板补三行定时循环；新增"模板覆盖全部 workflow pattern"断言；删除 issue 标签承诺（代码只读文件） |
 | LP-11 workflow 交付与 release | ✅ 已做 | 三个报告型 workflow 写 `$GITHUB_STEP_SUMMARY`；release-draft 删除 `release.published` 触发；测试断言 |
 | LP-12 路由与 attempts | ✅ 已做 | `LOOP.md` 技能列与 ROUTES 对齐；`docs/03` 与 `loop-constraints.md` 明确 attempts **未接线**、按 NOT RUN 对待 |
-| LP-13 真实 GitHub 演练 | ⬜ 未做 | **NOT RUN**：无测试仓库/网络凭据；未跑前消费者 L2/L3 继续禁用 |
-| LP-14 Linux/消费者烟测 | ⬜ 未做 | **NOT RUN**：仅本机 Windows/MSYS；消费者装配烟测已有部分覆盖（运行脚本可执行），未在 Linux 跑 |
+| LP-13 真实 GitHub 演练 | ✅ 已做（部分 NOT RUN） | 私有沙箱 `tomlismith007/harness-loop-sandbox`：issue #1 → intake 路由 + work item + artifact；PR #2 → review 路由 + 落盘；ready_for_review → 无批准时 `head-commit` escalate 且 PR 评论可见；故意失败的 CI → ci-sweeper 路由 fix、熔断 `ok`、落盘；daily-triage / lesson-harvest（dispatch）与 tag `v0.0.1-sandbox` → release 草稿均成功。**NOT RUN**：APPROVED + commit 匹配的通过路径（单账号不能批准自己的 PR）；agent 平台消费队列 |
+| LP-14 Linux/消费者烟测 | ✅ 已做 | GitHub `Self-check` 在 ubuntu-latest 通过（1067/0，自审计 94/L2）；本机消费者装配烟测：8 workflow、14 技能、7 运行脚本（6 个 `--help` 可执行）、8 个预算 pattern 全部解析。WSL 无发行版，未跑本地 Linux |
 
-**本轮验证**：`node scripts/test.mjs` → Passed: 1058 / Failed: 0；`bash init.sh` → 通过，自审计 94/100 L2。
+**本轮验证**：`node scripts/test.mjs` → **Passed: 1067 / Failed: 0**（本机与 ubuntu-latest 均通过）；
+`bash init.sh` → 通过，自审计 94/100 L2。
 新增断言均先确认在旧行为上会红（例：无 manifest 目录 `--check` 曾退出 1、账本缺失曾退出 1、
 merge-gate 曾回退 head、全 NOT RUN 曾 proceed）。
+
+**真实演练额外发现并修复的两处**（本地测试看不到）：
+1. `merge-gate` 在 `set -e` 下被 gate-check 的判定退出码 2 中断，PR 评论与失败判定被跳过
+   ——改为 `set +e` 接住退出码，参数错误（1）仍失败。
+2. pre-commit 钩子环境下测试里的 `git init/commit` 继承了外层 `GIT_DIR`，套件崩溃，
+   并把主仓库 `.git/config` 写成 `bare=true`——测试侧剥掉 `GIT_*` 环境变量。
 
 ### 有意未做（附理由，可核对）
 

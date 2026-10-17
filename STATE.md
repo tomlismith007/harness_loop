@@ -7,10 +7,12 @@ Last run: 2026-10-17 (按 lean spec 实施 M0 收口 + M1 安全闭环)
 
 ## High Priority (loop is acting or waiting on human)
 
-- [ ] **减量 spec 实施中（2026-10-17）**：`REVIEW-2026-10-17-lean-spec.md` 的 M0 与 M1 已落地，
-  见该文件「落地状态」。M2（真实 GitHub 演练、Linux/消费者烟测）**NOT RUN**。
-- [ ] **消费者 L2/L3 继续禁用**：真实 GitHub 测试仓库未跑过（硬约束 10）。M2 完成前，
-  README 与 docs/10 标 L2 实验、L3 不宣称。
+- [x] **减量 spec 的 M0/M1/M2 已落地（2026-10-17）**：见 `REVIEW-2026-10-17-lean-spec.md` 的
+  「落地状态」。真实沙箱 `tomlismith007/harness-loop-sandbox` 已验证 issue / PR / CI /
+  定时 / 发布五条链路；Linux 套件在 ubuntu-latest 通过。
+- [ ] **仍 NOT RUN 的两项**：① APPROVED + commit 匹配的 merge-gate 通过路径
+  （单账号仓库不能批准自己的 PR，需第二个账号）；② agent 平台消费 `.loop/queue` 产物。
+  这两项完成前，消费者仓库的 L2 仍标实验、L3 不宣称。
 - [ ] **需作者决策（阻塞后续）**：见 spec §9 六项——`signal-gatekeeper` 定位、
   `progress.md`/`session-handoff.md` 去留、`init-loop-harness.mjs` 是否删除、
   run-log 持久化方式、`attempts` 闸门是否接线、kill switch 标签（已按"删除标签承诺"实施）。
@@ -82,7 +84,11 @@ Last run: 2026-10-17 (按 lean spec 实施 M0 收口 + M1 安全闭环)
     `release.published`（路由按 `push:tags` 处理会错）。
   - kill switch 删除"issue 标签"承诺（代码只读文件）；`docs/03` 明确 `attempts` 闸门
     **未接线**（无写入者），按 NOT RUN 对待。
-- **验证**：`node scripts/test.mjs` 与 `bash init.sh` 均通过；断言数见本轮 run-log。
-  新增断言全部先确认在旧行为上会红，再改实现。
-- **NOT RUN**：真实 GitHub Actions、Linux/GNU-timeout、agent 平台消费、真实 token 计费。
-- **下一步**：作者决策 spec §9；然后 M2（测试仓库演练 + Linux/消费者烟测）。
+- **验证**：`node scripts/test.mjs` → 1067/0（本机与 ubuntu-latest 均通过）；`bash init.sh`
+  通过，自审计 94/L2。新增断言全部先确认在旧行为上会红，再改实现。
+- **真实演练额外发现并修复**：
+  - `merge-gate` 在 `set -e` 下被 gate-check 的判定退出码 2 中断，PR 评论与失败判定被跳过。
+  - pre-commit 钩子下测试里的 `git init/commit` 继承外层 `GIT_DIR`，套件崩溃，
+    并把主仓库 `.git/config` 写成 `bare=true`。
+- **NOT RUN**：APPROVED 通过路径（需第二个账号）、agent 平台消费、真实 token 计费。
+- **下一步**：作者决策 spec §9；用第二个账号补 APPROVED 通过路径；决定 run-log 持久化。
