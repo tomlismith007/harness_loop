@@ -214,7 +214,7 @@ export function checkGates(input, opts = {}) {
         decision: 'escalate',
         gate: 'verification-evidence',
         reason: 'approve at the gate phase requires --evidence-file pointing at the verifier report',
-        allowed_actions: ['run loop-verifier, save its report, pass the path via --evidence-file'],
+        allowed_actions: ['run the independent verifier, save its report, pass the path via --evidence-file'],
         exit_code: 2,
         next: 'a verdict without evidence is a claim. Save the verifier report to a file and pass --evidence-file <path>.',
       };
@@ -232,7 +232,7 @@ export function checkGates(input, opts = {}) {
     }
     const report = readText(evidenceFile);
     // 报告必须自带可核对的要素：verdict 行 + 至少一条命令输出行。
-    // 这两条正则与 loop-verifier/SKILL.md 的输出格式一致——那份格式早就是现成的接口，
+    // 这两条正则与 /harness-loop 第 4 步的验证者输出格式一致——那份格式早就是现成的接口，
     // 只是此前没有任何东西读它。
     const verdictLine = report.match(/^##\s*Verdict:\s*(APPROVE|REJECT|ESCALATE_HUMAN)/m);
     // 解析出**状态值**，而不只是匹配形状。
@@ -260,9 +260,9 @@ export function checkGates(input, opts = {}) {
         decision: 'escalate',
         gate: 'verification-evidence',
         reason: `evidence file ${evidenceFile} is missing: ${missing.join('; ')}`,
-        allowed_actions: ['re-run loop-verifier and save its full report'],
+        allowed_actions: ['re-run the independent verifier and save its full report'],
         exit_code: 2,
-        next: 'the report exists but carries no verifiable verdict/command lines. See loop-verifier SKILL.md output format.',
+        next: 'the report exists but carries no verifiable verdict/command lines. See the verifier output format in /harness-loop step 4.',
       };
     }
     // 自相矛盾：报告说 APPROVE，但有一项检查 FAIL。
@@ -278,7 +278,7 @@ export function checkGates(input, opts = {}) {
         next: 'a verdict that contradicts its own evidence is worse than no verdict. Return to the fix phase.',
       };
     }
-    // `### Checks not run` 节必须存在。loop-verifier 把"没跑的检查必须列在这里、
+    // `### Checks not run` 节必须存在。验证者把"没跑的检查必须列在这里、
     // 不允许省略"定为硬规则（即使为空也要写 `—`），而此前闸门完全不读这条规则。
     const notRunSection = report.split(/^###\s+Checks not run\s*$/m)[1]?.split(/^#{2,3}\s/m)[0];
     if (notRunSection === undefined) {
@@ -300,9 +300,9 @@ export function checkGates(input, opts = {}) {
         decision: 'escalate',
         gate: 'verification-evidence',
         reason: `evidence file ${evidenceFile} is missing: ${missing.join('; ')}`,
-        allowed_actions: ['re-run loop-verifier and save its full report'],
+        allowed_actions: ['re-run the independent verifier and save its full report'],
         exit_code: 2,
-        next: 'the report exists but does not account for what was not run. See loop-verifier SKILL.md output format.',
+        next: 'the report exists but does not account for what was not run. See the verifier output format in /harness-loop step 4.',
       };
     }
     // 报告自称 REJECT / ESCALATE_HUMAN 时，命令行说 approve 不成立。
@@ -357,7 +357,7 @@ export function checkGates(input, opts = {}) {
       decision: 'escalate',
       gate: 'awaiting-verification',
       reason: 'no verifier verdict present at the gate phase',
-      allowed_actions: ['wait for the verifier report', 'run loop-verifier if none is scheduled'],
+      allowed_actions: ['wait for the verifier report', 'run the independent verifier if none is scheduled'],
       exit_code: 2,
       next: 'this is not a failure — nothing has been verified yet. Wait for the verifier, then re-run.',
     };
