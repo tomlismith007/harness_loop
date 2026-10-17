@@ -1269,6 +1269,12 @@ section('14. GitHub Actions 接线');
     ok('merge-gate 不从工作区读证据文件',
       !/--evidence-file\s+verifier-report\.md/.test(mgCode), '证据来自可被实现者提交的路径');
     ok('merge-gate 的证据路径落在 RUNNER_TEMP', /RUNNER_TEMP/.test(mgCode));
+    // gate-check 的退出码是判定（0/2/3），不是错误。`set -e` 下直接调用会让
+    // escalate 中断整个步骤，后续的 PR 评论与 Fail if escalated 全被跳过——
+    // 真实 GitHub 演练里就是这样：PR 上没有任何闸门输出，只有一个红色 job。
+    ok('merge-gate 接住 gate-check 的判定退出码（set +e）',
+      /set \+e[\s\S]{0,200}gate-check\.mjs[\s\S]{0,500}GATE_EXIT=\$\?/.test(mgCode),
+      'escalate 会中断步骤，评论与失败判定被跳过');
     // ---- 审查绑定不能靠"回退成 head" ----
     // 没有 APPROVED review 时，`${REVIEWED_SHA:-$HEAD_SHA}` 会把 head 与它自己
     // 比较，约束 7 的闸门必然通过。批准之后又 CHANGES_REQUESTED 时，

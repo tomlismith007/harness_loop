@@ -161,6 +161,11 @@ jobs:
             echo "::warning::No verifier verdict on this PR — awaiting verification, not a failure."
             VERDICT="none"
           fi
+          # gate-check 的退出码是判定的一部分（0 proceed / 2 escalate / 3 exit），
+          # 不是"脚本坏了"。`set -e` 会让 escalate 直接中断整个步骤，后面的
+          # 评论与 Fail if escalated 全被跳过——真实演练里就是这样：PR 上
+          # 没有任何闸门输出，人只看到一个红色 job。所以显式接住退出码。
+          set +e
           node scripts/gate-check.mjs \
             --item "pr-${PR_NUMBER}" \
             --phase gate \
@@ -171,7 +176,14 @@ jobs:
             --head-sha "$HEAD_SHA" \
             --red-check "$RED_CHECK" \
             $EVIDENCE > gate.json
+          GATE_EXIT=$?
+          set -e
           cat gate.json
+          # 参数错误（1）不是判定，必须让 job 失败；判定类退出码交给后续步骤。
+          if [ "$GATE_EXIT" = "1" ]; then
+            echo "::error::gate-check rejected its arguments — the gate did not run"
+            exit 1
+          fi
 
       - name: Report readiness
         env:

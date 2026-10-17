@@ -13,7 +13,7 @@
 | 文档 | 13 篇 |
 | 模板 | 13 个 |
 | 事件接线 | 8 个 GitHub Actions workflow |
-| 测试 | 1063 项断言全通过 |
+| 测试 | 1064 项断言全通过 |
 | 自审计 | 94/100，L2 |
 | 技能已安装 | 以 `node scripts/install-skills.mjs --scope user --check` 的实际输出为准 |
 
@@ -224,7 +224,7 @@ verifier 报告只接受该账号发的评论；账号名用仓库变量 `LOOP_B
 | `gate-check.mjs` | 闸门判定 | 0 = 通过；2 = 升级；3 = 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 = 继续；2 = 停止并升级（**含账本缺失或畸形**） |
 | `install-skills.mjs` | 安装技能到 ZCode 发现路径 | 0 = 成功；1 = 错误 |
-| `test.mjs` | 自检（1063 断言） | 0 = 全通过 |
+| `test.mjs` | 自检（1064 断言） | 0 = 全通过 |
 
 **退出码是给自动化用的。** 在 CI 里可以直接 `node scripts/gate-check.mjs ... || exit 1`。
 
