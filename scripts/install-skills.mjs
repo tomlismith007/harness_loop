@@ -2,9 +2,9 @@
 /**
  * install-skills.mjs — 把 loop-harness 技能安装到 agent 能发现的位置
  *
- * 两类发现路径：
- *   .agents/skills/  跨编码智能体的通用约定（ZCode 也读；别的 agent 也读）—— **默认**
- *   .zcode/skills/   只有 ZCode 发现；用于覆盖 ZCode 内的同名技能
+ * 两个发现路径（默认都装）：
+ *   .claude/skills/  Claude Code 扫描的路径
+ *   .agents/skills/  跨编码智能体的共享约定
  *
  * 本仓库的 skills/ 不在上述任何路径下，因此不会被发现。
  * 这个脚本把技能复制过去。
@@ -28,17 +28,17 @@ const MANIFEST_NAME = '.loop-harness-install.json';
 /**
  * 布局 → 点目录。
  *
- * 默认 `agents`：`.agents/skills/` 是跨编码智能体的共享约定，ZCode 也读它。
- * 只在需要"仅覆盖 ZCode 内的同名技能"时才用 `zcode`。
+ * 默认 `both`：`.claude/skills/` 是 Claude Code 扫描的路径，
+ * `.agents/skills/` 是跨 agent 的共享约定。两处都装，任何宿主都能发现。
  */
 const LAYOUTS = {
+  claude: ['.claude'],
   agents: ['.agents'],
-  zcode: ['.zcode'],
-  both: ['.agents', '.zcode'],
+  both: ['.claude', '.agents'],
 };
 
-/** 默认布局。跨 agent 通用优先，避免技能只在单一工具里可用 */
-const DEFAULT_LAYOUT = 'agents';
+/** 默认布局：两个宿主路径都装 */
+const DEFAULT_LAYOUT = 'both';
 
 /** 所有技能目录名 */
 function listSkillNames() {
@@ -141,16 +141,14 @@ function install(args) {
     for (const r of results) process.stdout.write(`  ${r.status.padEnd(16)} ${r.name}\n`);
   }
 
-  const shared = dest.layout === 'agents' || dest.layout === 'both';
   process.stdout.write(`
 Next steps:
   1. Restart the session (or reload) so skills are discovered
-  2. Verify:  /harness-loop   or   /loop-constraints
+  2. Verify:  /harness-init   or   /harness-loop
   3. The pack itself stays at ${PACK_ROOT} — skills there are the source of truth
      Re-run this script after editing a skill to push updates.
-${shared
-    ? `\nLayout: .agents/skills — the shared convention. ZCode reads it, and so do other\n        agents that follow the same convention.`
-    : `\nLayout: .zcode/skills — discovered by ZCode only. Skills here shadow same-named\n        skills from .agents/ for ZCode. Re-run with --layout agents for the shared path.`}
+
+Layout: ${dest.layout} — ${dest.dirs.map((d) => `${d.dot}/skills`).join(' + ')}.
 `);
 
   return { totalInstalled, totalUnchanged, totalSkipped };
@@ -329,9 +327,9 @@ function main() {
   if (args.help) {
     process.stdout.write(`install-skills — make loop-harness skills discoverable by agents
 
-Discovery paths:
-  .zcode/skills/   ZCode only
-  .agents/skills/  shared convention — ZCode and other agents that read it
+Discovery paths (both installed by default):
+  .claude/skills/  Claude Code
+  .agents/skills/  shared convention — other agents that read it
 
 The pack's own skills/ directory is NOT discovered, so skills must be installed
 to one of those locations before they can be triggered.
@@ -348,10 +346,10 @@ Usage:
 Options:
   --scope user          Install to ~/<layout>/skills/ (available in every project)
   --target DIR          Install to <DIR>/<layout>/skills/ (workspace scope)
-  --layout WHICH        agents (default) | zcode | both
-                          agents  → .agents/skills  (shared with other agents; ZCode reads it too)
-                          zcode   → .zcode/skills   (ZCode only — to shadow a same-named skill)
-                          both    → install to both
+  --layout WHICH        both (default) | claude | agents
+                          both    → .claude/skills + .agents/skills
+                          claude  → .claude/skills only
+                          agents  → .agents/skills only
   --list                Show what is installed at the destination
   --check               Compare installed copies against the source; exit 1 on drift.
                         The host loads the INSTALLED copy, so a stale install means the

@@ -2,12 +2,15 @@
 /**
  * gate-check.mjs — 闸门判定
  *
- * 按优先级检查九类闸门，输出 decision: proceed | report-only | escalate | exit。
- * 退出码：0 = proceed/report-only，1 = 参数错误，2 = escalate，3 = exit。
+ * 按优先级检查闸门，输出 decision: proceed | escalate | exit。
+ * 退出码：0 = proceed，1 = 参数错误，2 = escalate，3 = exit（kill switch）。
+ *
+ * 预算百分比已移除：本地 loop 没有真实的 token 计量，百分比是虚构的。
+ * kill switch 保留，并且现在由本脚本自己读文件（--state），不再依赖调用方传参。
  *
  * 用法：
  *   node scripts/gate-check.mjs --item pr-123 --phase gate --attempts 1 \
- *     --diff-files @changed.txt --verdict approve --budget-pct 45
+ *     --diff-files @changed.txt --verdict approve --state STATE.md
  *
  *   node scripts/gate-check.mjs --item pr-123 --diff-files a.ts,b.ts --verdict approve
  */
@@ -15,51 +18,46 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, readRegistryDefaults, DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg } from './lib/common.mjs';
+import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg } from './lib/common.mjs';
 
 export const DEFAULTS = {
   maxFilesPerFix: 5,
   maxFilesPerCleanup: 10,
   maxAttempts: 3,
-  budgetReportOnly: 80,
-  budgetExit: 100,
 };
-
-// patterns/registry.yaml 的 defaults 覆盖内置值。配置文件存在却没人读，
-// 等于"看起来被强制、实际是装饰"——改它就得真的改变行为。
-function registryDefaults(registryPath) {
-  const fromFile = readRegistryDefaults(registryPath);
-  if (!fromFile) return {};
-  const out = {};
-  for (const [k, v] of Object.entries(fromFile)) {
-    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
-  }
-  return out;
-}
 
 // 白名单。未识别的值一律参数错误退出，绝不放行——
 // 拼错的 --verdict 等价于"批准"是这个闸门曾经最大的漏洞。
-// close 必须在列表里：event-router 把 issues.closed / pull_request.closed:unmerged /
-// release.published 路由到 phase='close'，而它此前不在枚举里——照技能走必然退出 1，
-// 而退出 1（参数错误）不属于 proceed/report-only/escalate/exit 四态，调用方没有规定动作。
-const PHASES = ['intake', 'review', 'fix', 'verify', 'gate', 'post-merge', 'release', 'close'];
+const PHASES = ['fix', 'gate'];
 const VERDICTS = ['approve', 'reject', 'escalate-human', 'none'];
 const RED_CHECKS = ['pass', 'fail', 'not-run'];
+
+/**
+ * kill switch：只认独占一行的标记。
+ *
+ * STATE.md 或 loop-constraints.md 里任何对 loop-pause-all 的散文提及都不算生效——
+ * 否则一次说明性文字就把循环永久停死。`--state` 指向的目录下读这两个文件。
+ */
+export function isPaused(stateRoot) {
+  for (const name of ['STATE.md', 'loop-constraints.md']) {
+    const text = readText(path.join(stateRoot, name));
+    if (/^\s*loop-pause-all\s*$/m.test(text)) return { paused: true, where: name };
+  }
+  return { paused: false, where: null };
+}
 
 /**
  * 判定闸门。
  *
  * 检查顺序（先命中者决定结果）：
  *   1. pause
- *   2. budget >= 100
- *   3. denylist
- *   4. attempts >= max
- *   5. budget >= 80
- *   6. scope (files > max)
- *   7. head-commit (TOCTOU)
- *   8. red-check
- *   8b. verification-evidence (approve 必须带可核对的 verifier 报告)
- *   9. verification
+ *   2. denylist
+ *   3. attempts >= max
+ *   4. scope (files > max)
+ *   5. head-commit (TOCTOU)
+ *   6. red-check
+ *   7. verification-evidence (approve 必须带可核对的 verifier 报告)
+ *   8. verification
  */
 export function checkGates(input, opts = {}) {
   const cfg = { ...DEFAULTS, ...opts };
@@ -69,7 +67,6 @@ export function checkGates(input, opts = {}) {
     attempts = 0,
     diffFiles = [],
     verdict = 'none',
-    budgetPct = 0,
     pause = false,
     isCleanup = false,
     reviewedSha = null,
@@ -86,7 +83,6 @@ export function checkGates(input, opts = {}) {
     phase,
     attempts,
     files_changed: diffFiles.length,
-    budget_pct: budgetPct,
     verdict,
   };
 
@@ -103,20 +99,7 @@ export function checkGates(input, opts = {}) {
     };
   }
 
-  // 2. 预算 100%
-  if (budgetPct >= cfg.budgetExit) {
-    return {
-      ...base,
-      decision: 'exit',
-      gate: 'budget',
-      reason: `token spend ${budgetPct}% reached the daily cap (${cfg.budgetExit}%)`,
-      allowed_actions: [],
-      exit_code: 3,
-      next: 'exit immediately; write one line to STATE.md; pause schedulers',
-    };
-  }
-
-  // 3. 拒绝列表
+  // 2. 拒绝列表
   const hits = [];
   for (const f of diffFiles) {
     const pattern = matchesDenylist(f, denylist);
@@ -135,7 +118,7 @@ export function checkGates(input, opts = {}) {
     };
   }
 
-  // 4. 尝试上限
+  // 3. 尝试上限
   if (attempts >= cfg.maxAttempts) {
     return {
       ...base,
@@ -148,21 +131,7 @@ export function checkGates(input, opts = {}) {
     };
   }
 
-  // 5. 预算 80%
-  if (budgetPct >= cfg.budgetReportOnly) {
-    return {
-      ...base,
-      decision: 'report-only',
-      gate: 'budget',
-      reason: `token spend ${budgetPct}% reached report-only threshold (${cfg.budgetReportOnly}%)`,
-      allowed_actions: ['read', 'analyze', 'write report', 'update STATE.md'],
-      forbidden_actions: ['spawn implementer', 'edit code', 'open PR'],
-      exit_code: 0,
-      next: 'produce report only; do not dispatch execution sub-agents',
-    };
-  }
-
-  // 6. 范围
+  // 4. 范围
   const fileLimit = isCleanup ? cfg.maxFilesPerCleanup : cfg.maxFilesPerFix;
   if (diffFiles.length > fileLimit) {
     return {
@@ -178,7 +147,7 @@ export function checkGates(input, opts = {}) {
     };
   }
 
-  // 7. TOCTOU：合并必须绑定审查过的 commit
+  // 5. TOCTOU：合并必须绑定审查过的 commit
   // 审查期间若有人又 push，head 变了，合并必须失败——否则未审查的代码会进 main。
   // 缺 sha 也要拦：这条是唯一绝不能跳的闸，"参数不全就绕过"等于没有闸。
   if (phase === 'gate') {
@@ -417,9 +386,9 @@ export function checkGates(input, opts = {}) {
 function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
-    'item', 'phase', 'attempts', 'diffFiles', 'verdict', 'budgetPct', 'pause', 'cleanup',
-    'reviewedSha', 'headSha', 'redCheck', 'constraintsRoot', 'notRun', 'registry',
-    'evidenceFile', 'json', 'help',
+    'item', 'phase', 'attempts', 'diffFiles', 'verdict', 'pause', 'cleanup',
+    'reviewedSha', 'headSha', 'redCheck', 'constraintsRoot', 'notRun',
+    'evidenceFile', 'state', 'json', 'help',
   ], 'gate-check');
   if (args.help) {
     process.stdout.write(`gate-check — enforce loop gates before acting
@@ -429,11 +398,12 @@ Usage:
 
 Options:
   --item <id>            Work item id (e.g. pr-123)
-  --phase <phase>        intake|review|fix|verify|gate|post-merge|release|close
+  --phase <phase>        fix | gate
   --attempts <n>         Attempts so far (default: 0)
   --diff-files <list>    A changed path, or @path to a file with one path per line
   --verdict <v>          approve | reject | escalate-human | none (default: none)
-  --budget-pct <n>       Today's token spend as % of daily cap (default: 0)
+  --state <dir>          Read loop-pause-all from STATE.md / loop-constraints.md there
+                         (default: cwd). The kill switch is a real gate, not a doc.
   --pause                Set if loop-pause-all is active
   --cleanup              Treat as a cleanup change (higher file limit)
   --reviewed-sha <sha>   Commit SHA that was reviewed (required at --phase gate)
@@ -449,10 +419,10 @@ Options:
   --help                 Show this help
 
 Exit codes:
-  0  proceed or report-only
+  0  proceed
   1  invalid argument (unknown phase/verdict/red-check, or non-numeric threshold)
   2  escalate to human
-  3  exit immediately
+  3  exit immediately (kill switch)
 `);
     return;
   }
@@ -475,17 +445,27 @@ Exit codes:
       // 逗号分隔是显式约定（usage 里写着的），保留。去掉的是"文件存在就当清单读"——
       // 那让同一命令串因文件系统状态不同而含义不同。
       diffFiles = args.diffFiles.split(',').map((s) => s.trim()).filter(Boolean);
-      // 但"指向一个多行文件"是另一个情形：调用方显然想传清单却漏了 @。
-      // 静默按单一路径处理会把 N 个文件塌缩成 1 个（`files_changed: 1`），
-      // 于是拒绝列表与范围**两个**闸门同时失效——首行无害的清单能藏住后面的
-      // `auth/**`。实测：20 条路径的清单 → proceed；加 @ → escalate/scope。
-      // 单行文件仍按单一路径处理，所以"同一命令串因文件系统状态改变含义"这条
-      // 顾虑不成立——变的只是"多行"这个显式可判定的形态。
+      // 但"指向一个清单文件却漏了 @"是另一个情形。静默按单一路径处理会把 N 个
+      // 文件塌缩成 1 个（`files_changed: 1`），于是拒绝列表与范围**两个**闸门
+      // 同时失效——首行无害的清单能藏住后面的 `auth/**`。
+      //
+      // 判据是"内容像路径清单"，不是"行数 > 1"：单文件 PR 的
+      // `git diff --name-only` 输出恰好只有一行，而 `--diff-files one.txt`
+      // （内容 `auth/login.ts`）此前被判为单一路径 → proceed，拒绝列表静默失效。
+      // 直接检查文件内容是否为路径形态；源码文件（含空格/符号）不会命中。
       if (diffFiles.length === 1 && fs.existsSync(diffFiles[0])) {
         const lines = readText(diffFiles[0]).split('\n').map((s) => s.trim()).filter(Boolean);
-        if (lines.length > 1) {
-          fail(`--diff-files points at ${diffFiles[0]}, which contains ${lines.length} paths. `
-            + `Prefix it with "@" to treat it as a list.`);
+        // 路径形态：只含路径字符，且带 / 或 .。源码行里的引号、括号、等号、空格
+        // 都会让它落选，所以不会把"恰好单行的源文件"误判成清单。
+        // 双条件：所有行都像路径，**且**至少一行看起来不是那个文件自身。
+        // 否则 `--diff-files src/app.ts`（文件内容恰好是 `const x = 1` 之外的
+        // 单行路径）会被自己的内容判成清单——gate-check 曾经把自己的输入当成清单。
+        const looksLikePath = (s) => /^[A-Za-z0-9_.@/-]+$/.test(s) && /[/.]/.test(s);
+        const selfPath = diffFiles[0].split(path.sep).join('/');
+        if (lines.length && lines.every(looksLikePath)
+          && !lines.every((l) => l === selfPath || selfPath.endsWith('/' + l))) {
+          fail(`--diff-files points at ${diffFiles[0]}, which looks like a path list `
+            + `(${lines.length} path(s), first: ${lines[0]}). Prefix it with "@" to treat it as a list.`);
         }
       }
     }
@@ -506,9 +486,9 @@ Exit codes:
     return n;
   };
 
-  // loop-verifier 的输出格式是 APPROVE / REJECT / ESCALATE_HUMAN，而这里的枚举是
+  // 验证者的输出格式是 APPROVE / REJECT / ESCALATE_HUMAN，而这里的枚举是
   // 小写连字符。两处各按自己的文档执行时必然得到"参数错误"，而参数错误不属于
-  // proceed/report-only/escalate/exit 四态——最重要的人工升级信号会在传递途中消失。
+  // proceed/escalate/exit 三态——最重要的人工升级信号会在传递途中消失。
   const normalizeVerdict = (v) => String(v).trim().toLowerCase().replace(/_/g, '-');
 
   const input = {
@@ -519,8 +499,10 @@ Exit codes:
     verdict: enumArg(
       args.verdict === undefined ? undefined : normalizeVerdict(args.verdict),
       VERDICTS, '--verdict') ?? 'none',
-    budgetPct: numArg(args.budgetPct, '--budget-pct', 0),
-    pause: boolArg(args.pause),
+    // kill switch：--state 给了就自己读文件；否则只认 --pause。
+    // 两者都必须真的改变退出码——文档里写着"暂停即退出"，代码里就得有入口。
+    pause: boolArg(args.pause)
+      || isPaused(typeof args.state === 'string' ? args.state : process.cwd()).paused,
     isCleanup: boolArg(args.cleanup),
     // 拒绝列表的真相源是本仓库的 loop-constraints.md，不是脚本里的常量。
     // 维护者按文档在 ## Repo-Specific 加的路径必须真的被强制执行。
@@ -534,8 +516,7 @@ Exit codes:
       : [],
   };
 
-  // registry.yaml 的 defaults 作为阈值来源；--registry 指定别的文件，CLI 参数仍可覆盖单项。
-  const result = checkGates(input, registryDefaults(typeof args.registry === 'string' ? args.registry : undefined));
+  const result = checkGates(input);
 
   printJson(result);
   process.exit(result.exit_code);
