@@ -12,7 +12,7 @@ Last run: 2026-10-18 (只读审计，产出在 audits/)
 - [x] 技能已装到 `~/.claude/skills` 与 `~/.agents/skills`（各 4 个）；`~/.zcode/skills` 的 v1 陈旧副本已删除。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整。
 - [x] **批次 0：docs 事实修正**（完成标准：4 个死链清零；`docs/03` 闸门表与代码 9 个 gate 名一致；`init.sh` 绿）— commit `a181285`，独立验证 4 轮后 APPROVE
-- [ ] **批次 1：修坏掉的机制**（U-01/02/09/11 + U-07 文档；完成标准见 `audits/upgrade-plan-2026-10-18.md` §3）
+- [x] **批次 1：修坏掉的机制**（U-01/02/09/11 + U-07；完成标准见 `audits/upgrade-plan-2026-10-18.md` §3）— commit `0d88b94`，独立验证 3 轮后 APPROVE
 - [ ] **批次 2：收紧闸门与状态**（U-03/04/06/07检查/08/10；完成标准见同上 §3）
 
 ## Active
