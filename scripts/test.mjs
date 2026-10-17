@@ -412,6 +412,26 @@ section('5. 闸门判定');
       Array.isArray(derived.checks_not_run) && derived.checks_not_run.includes('Real-use validation'));
     ok('FAIL 状态真的被解析（不是形状匹配）', /FAIL/.test(selfContra.reason));
 
+    // 验证者技能文档里的格式是 `- Red check: PASS — 说明`：没有命令、没有箭头。
+    // 闸门此前要求每行都有 `` `cmd` → ``，于是**按技能格式写出的报告一律被拒**。
+    // 格式的真相源是技能文档；闸门必须接受它自己文档里的写法。
+    const docFormat = checkGates({
+      item: 'p', ...GATE,
+      evidenceFile: write('doc-format.md', [
+        '## Verdict: APPROVE', '', '### Evidence',
+        '- Tests: `npm test` → PASS — 2 tests, 2 pass, 0 fail, exit 0',
+        '- Red check: PASS — 回退后新测试失败',
+        '- Scope check: PASS — 只改了 2 个文件',
+        '- Denylist check: PASS',
+        '', '### Checks not run', '- —',
+      ]),
+    });
+    // 真实报告会在状态值后面写说明。行尾锚定让它们全部匹配不上，
+    // 于是一份完全合规的报告被拒——沙箱真机验证时就是这样失败的。
+    eq('状态值后面带说明文字的报告被接受', docFormat.decision, 'proceed');
+    ok('带说明的 Red check 也被解析',
+      docFormat.decision === 'proceed', docFormat.reason);
+
     const rejFile = write('rej.md', [
       '## Verdict: REJECT', '', '### Evidence',
       '- Tests: `npm test` → FAIL', '', '### Checks not run', '- —',

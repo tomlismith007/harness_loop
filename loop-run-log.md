@@ -36,3 +36,5 @@
 ## Log
 
 <!-- 每轮追加。最新在下方。 -->
+
+{"run_id": "2026-10-17T12:00:00Z", "item": "sandbox-verification", "duration_s": 0, "files_changed": 0, "attempts": 1, "outcome": "verified", "notes": "在 /d/loop-harness-test 跑完一轮：装配、回退测试、独立子智能体验证、闸门、熔断、状态写入。抓出 gate-check 证据正则的行尾锚定 bug。"}

@@ -1,15 +1,15 @@
 # Loop State
 
-Last run: 2026-10-17 (v2 简化：17 技能 → 4，11 脚本 → 5)
+Last run: 2026-10-17 (v2 简化 + 靶场真机验证)
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表。
 **每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
 
-- [ ] **在真实项目上跑一次 `/harness-loop`**（完成标准：一个 work item 走完 7 步，`loop-run-log.md` 有记录，验证者与执行者不同实例）。
+- [x] **在靶场 `/d/loop-harness-test` 跑过一轮 `/harness-loop`**：`sum([])` bug，回退测试失败→修复→独立子智能体验证 APPROVE→闸门 proceed→账本与 run-log 落盘。真机验证抓出一个闸门 bug（证据正则不接受技能文档里的格式），已修并加断言。
 - [ ] **真机验证（硬约束 10）**：`harness-loop-issue` 的 `gh` 读取未在任何真实 GitHub 仓库上跑过（完成标准：对一个测试仓库运行，`STATE.md` 出现带完成标准的条目）。
-- [ ] 把技能重新安装到 `~/.claude/skills` 与 `~/.agents/skills`：`node scripts/install-skills.mjs --scope user`（本机 `~/.zcode/skills` 仍是 v1 的陈旧副本，含已删除技能）。
+- [x] 技能已装到 `~/.claude/skills` 与 `~/.agents/skills`（各 4 个）；`~/.zcode/skills` 的 v1 陈旧副本已删除。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整。
 
 ## Active

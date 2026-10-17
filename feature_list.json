@@ -44,7 +44,8 @@
         "替换 goal 并本地化拒绝列表后退出 0"
       ],
       "evidence": [
-        "test.mjs 第 14 节：占位账本 → 退出 2；替换 goal + 本地化后 → 退出 0"
+        "test.mjs 第 14 节：占位账本 → 退出 2；替换 goal + 本地化后 → 退出 0",
+        "靶场装配：阶段 1 --require 0、阶段 2 --require 0（替换 goal + 本地化拒绝列表后）"
       ],
       "notes": ""
     },
@@ -61,7 +62,8 @@
         "node scripts/test.mjs 第 4、5 节"
       ],
       "evidence": [
-        "test.mjs 第 4 节熔断 30+ 条、第 5 节闸门 60+ 条；变异回退确认（删 red-check 分支 → 3 条红）"
+        "test.mjs 第 4 节熔断 30+ 条、第 5 节闸门 60+ 条；变异回退确认（删 red-check 分支 → 3 条红）",
+        "靶场 /d/loop-harness-test 真机一轮：回退测试有效、独立验证者 APPROVE、gate-check proceed、ledger-check ok、run-log 落盘"
       ],
       "notes": ""
     },

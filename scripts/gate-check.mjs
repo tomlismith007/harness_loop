@@ -247,7 +247,10 @@ export function checkGates(input, opts = {}) {
     //
     // 箭头同时接受 U+2192 与 ASCII `->`：同一份报告在两种输入法下必须等价，
     // 否则一个字符的差异会静默改变闸门结果。
-    const EVIDENCE_LINE = /^\s*-\s*(Tests|Red check|Real-use validation|Lint|Scope check|Denylist check):\s*`[^`]+`\s*(?:→|->)\s*(PASS|FAIL|NOT RUN)\s*$/gm;
+    // 状态值后面允许跟说明文字（`— 2 tests, 2 pass`）。技能文档里的格式就是这样写的，
+    // 行尾锚定会让真实报告全部匹配不上——沙箱真机验证时一份合规报告被拒。
+    // 命令部分可选：`Red check: PASS — …` 没有命令，也是文档里的写法。
+    const EVIDENCE_LINE = /^\s*-\s*(Tests|Red check|Real-use validation|Lint|Scope check|Denylist check):\s*(?:`[^`]+`\s*(?:→|->)\s*)?(PASS|FAIL|NOT RUN)\b/gm;
     const checks = [...report.matchAll(EVIDENCE_LINE)].map((m) => ({ name: m[1], status: m[2] }));
     const missing = [];
     if (!verdictLine) missing.push('a "## Verdict: APPROVE|REJECT|ESCALATE_HUMAN" line');
