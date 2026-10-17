@@ -39,3 +39,4 @@
 
 {"run_id": "2026-10-17T12:00:00Z", "item": "sandbox-verification", "duration_s": 0, "files_changed": 0, "attempts": 1, "outcome": "verified", "notes": "在 /d/loop-harness-test 跑完一轮：装配、回退测试、独立子智能体验证、闸门、熔断、状态写入。抓出 gate-check 证据正则的行尾锚定 bug。"}
 {"run_id": "2026-10-18T02:00:00Z", "item": "skill-upgrade-audit", "duration_s": 0, "files_changed": 0, "attempts": 1, "outcome": "report-only", "notes": "只读审计 A@38ddcd2 / B@54f8c56 / CN@c5e9ef0，产出 5 份 audits/ 文档；未改现有文件。发现 kill switch 调用形式与 --phase fix 两个真 bug，见 audits/audit-2026-10-18.md D-01/D-02。"}
+{"run_id": "2026-10-18T03:30:00Z", "item": "upgrade-batch-0", "duration_s": 0, "files_changed": 8, "attempts": 4, "outcome": "verified", "notes": "docs 事实修正：死链、闸门数 8→9、L3 表述、归一化描述、原语数法。独立子智能体 4 轮验证（REJECT×3 → APPROVE）；init.sh 335/0。commit a181285。"}
