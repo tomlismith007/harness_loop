@@ -73,14 +73,18 @@
       "area": "runtime",
       "title": "harness-loop-issue 只读发现并写入带完成标准的待办",
       "user_visible_behavior": "运行 /harness-loop-issue 后，STATE.md 的 High Priority 出现带完成标准的条目；不应用标签、不评论、不关闭、不修复",
-      "status": "not_started",
+      "status": "passing",
       "verification": [
         "在一个测试 GitHub 仓库上运行 /harness-loop-issue",
         "确认 STATE.md 新增条目每条都有完成标准",
         "确认没有任何写操作（gh api 调用记录里只有 GET）"
       ],
-      "evidence": [],
-      "notes": "未在真实 GitHub 仓库上验证（硬约束 10）。"
+      "evidence": [
+        "在 tomlismith007/harness-loop-sandbox 上运行：gh issue list / gh pr list 只读读取",
+        "STATE.md 写入 1 条带完成标准的待办（#3），loop-run-log.md 追加 outcome=report-only",
+        "验证只读：issue #3 的 state=OPEN、labels=[]、commentCount=0，无任何写操作"
+      ],
+      "notes": "真机验证于 2026-10-17；未覆盖 CI 红 PR 的分类路径（沙箱无 open PR）。"
     }
   ]
 }

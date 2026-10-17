@@ -8,7 +8,7 @@ Last run: 2026-10-17 (v2 简化 + 靶场真机验证)
 ## High Priority (loop is acting or waiting on human)
 
 - [x] **在靶场 `/d/loop-harness-test` 跑过一轮 `/harness-loop`**：`sum([])` bug，回退测试失败→修复→独立子智能体验证 APPROVE→闸门 proceed→账本与 run-log 落盘。真机验证抓出一个闸门 bug（证据正则不接受技能文档里的格式），已修并加断言。
-- [ ] **真机验证（硬约束 10）**：`harness-loop-issue` 的 `gh` 读取未在任何真实 GitHub 仓库上跑过（完成标准：对一个测试仓库运行，`STATE.md` 出现带完成标准的条目）。
+- [x] **`/harness-loop-issue` 真机验证**：在 `tomlismith007/harness-loop-sandbox` 上运行，写入 1 条带完成标准的待办；确认只读（issue 状态/标签/评论均未变）。CI 红 PR 的分类路径未覆盖（沙箱无 open PR）。
 - [x] 技能已装到 `~/.claude/skills` 与 `~/.agents/skills`（各 4 个）；`~/.zcode/skills` 的 v1 陈旧副本已删除。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整。
 
