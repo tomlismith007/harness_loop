@@ -27,7 +27,7 @@
 | `id` | string | `pr-123`、`issue-456`、`ci-<sha>-<job>` |
 | `event` | string | 产生它的事件名 |
 | `phase` | enum | `intake` / `review` / `fix` / `verify` / `gate` / `post-merge` / `release` / `escalated` |
-| `level` | enum | `L0` / `L1` / `L2` / `L3` |
+| `level` | enum | `L1` / `L2`（由 `harness-stage` 判据给出；本框架不授予 L3） |
 | `attempts` | number | 已尝试次数（上限 3） |
 | `acting_on` | string | 锁：正在操作的分支或 PR |
 | `skills` | string[] | 本阶段要用的技能 |
@@ -181,10 +181,10 @@
 |---|---|---|
 | `stagnation` | 3 × 同一错误 | 错误签名相同出现 3 次 |
 | `no-progress` | 5 次连续失败 | 连续失败无成功 |
-| `token-budget` | 显式或从 pattern 推导 | 超预算 |
+| `token-budget` | 显式传入 `--token-budget` | 超预算（当前无人传入，见 `docs/03` 第 5 节） |
 | `max-iterations` | 10 | 总迭代数上限 |
 
-**错误签名归一化**：抹掉 ISO 时间戳、十六进制地址、路径（折叠为 basename）、行列号、其余数字。这样"同一个错误"能被识别出来。
+**错误签名归一化**：抹掉 ISO 时间戳、十六进制地址、路径（折叠为 basename）、行列号、位置/时长类数字。退出码、HTTP 状态码、断言期望值等裸数字**保留**——否则根因不同的失败会被误判为同一错误。细节见 `docs/05-failure-modes.md` 第六节。
 
 **退出码**：`0` = 继续；`2` = 停止，交给人类。
 

@@ -102,6 +102,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 | 6 | `red-check` | 回退测试 `fail` / `not-run` | escalate |
 | 7 | `verification-evidence` | `approve` 无证据、证据自相矛盾、缺 `Checks not run` 节 | escalate |
 | 8 | `verification` | 验证者 `reject` / `escalate-human` | escalate |
+| 9 | `awaiting-verification` | gate 阶段没有 verdict | escalate（与"验失败"区分） |
 
 ---
 
@@ -175,8 +176,9 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 
 ## 来源与致谢
 
-- **Harness Engineering** — [walkinglabs/learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering)（五子系统、feature list 原语、终止校验）。
-- **Loop Engineering** — [LibraScorpion/loop-engineering-cn](https://github.com/LibraScorpion/loop-engineering-cn)（六原语、模式库、熔断器、L0–L3 就绪度）。
+- **Harness Engineering** — [walkinglabs/learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering)（五子系统、feature list 原语、三层终止校验；这些是课程理念，仓库内另有 `harness-creator` 技能与审计脚本，但理念本身没有机械执行点）。
+- **Loop Engineering** — [cobusgreyling/loop-engineering](https://github.com/cobusgreyling/loop-engineering)（五构件 + 记忆层、模式库、熔断器、L0–L3 就绪度、护栏演练）。
+  中文翻译快照：[LibraScorpion/loop-engineering-cn](https://github.com/LibraScorpion/loop-engineering-cn)（上游的中文 fork，2026-07-15 快照，不含 `loop-gate` / `loop-drill` / untrusted-input）。
 
 harness-loop 的增量在于**把两者焊在同一条工作流上**：harness 提供单次运行的可靠性，loop 提供连续运行的自主性，人给的待办（或可选的 GitHub 事件）保证两者作用于同一批真实工作。
 
