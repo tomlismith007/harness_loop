@@ -660,6 +660,16 @@ const STAGE3_SKILLS = [
 ];
 
 /**
+ * 只在 harness 包仓库运行的阶段驱动技能。
+ *
+ * 它们的第一步就是 `node scripts/harness-stage.mjs <target>`，而装配明确不把
+ * harness-stage.mjs 复制进消费者（它需要包内的 templates/ 才能工作）。把它们
+ * 装进消费者，等于给用户一个第一步就 ERR_MODULE_NOT_FOUND 的入口。
+ * 消费者要装的是运行/控制技能；阶段推进由包仓库（或用户级安装）执行。
+ */
+const PACK_ONLY_SKILLS = new Set(['harness-init', 'harness-loop-init', 'harness-consolidate']);
+
+/**
  * 技能安装目录。
  *
  * 必须写进 agent 实际会扫描的路径——`.agents/skills/`（跨 agent 的共享约定）。
@@ -668,6 +678,10 @@ const STAGE3_SKILLS = [
 const SKILL_DEST_DIR = path.join('.agents', 'skills');
 
 function copySkillDir(name, target, results) {
+  if (PACK_ONLY_SKILLS.has(name)) {
+    results.push({ status: 'pack-only', path: name });
+    return;
+  }
   const src = path.join(SKILLS_DIR, name, 'SKILL.md');
   if (!exists(src)) return;
   const dest = path.join(target, SKILL_DEST_DIR, name, 'SKILL.md');

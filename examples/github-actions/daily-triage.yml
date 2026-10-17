@@ -91,6 +91,9 @@ jobs:
           -
           EOF
           cat .loop/daily/TRIAGE.md
+          # runner 文件系统是临时的；不交付的话报告随 job 消失。
+          # step summary 保留 90 天，且不需要 artifact 下载就能读。
+          cat .loop/daily/TRIAGE.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Append run log
         run: |

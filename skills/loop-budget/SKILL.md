@@ -33,23 +33,11 @@ stage: 1
 
 ## 结束运行
 
-向 `loop-run-log.md` 追加一个 JSON 对象：
+向 `loop-run-log.md` 追加**一行** JSON（`budget-check.mjs` 只解析单行记录；
+多行格式会被静默算成 0 花费）：
 
 ```json
-{
-  "run_id": "<ISO8601>",
-  "pattern": "<pattern-id>",
-  "event": "<事件名>",
-  "item": "<item-id>",
-  "level": "<L0-L3>",
-  "duration_s": 0,
-  "items_found": 0,
-  "actions_taken": 0,
-  "escalations": 0,
-  "tokens_estimate": 0,
-  "worktree": "<path 或 null>",
-  "outcome": "no-op | report-only | fix-proposed | verified | escalated"
-}
+{"run_id":"<ISO8601>","pattern":"<pattern-id>","event":"<事件名>","item":"<item-id>","level":"<L0-L3>","duration_s":0,"items_found":0,"actions_taken":0,"escalations":0,"tokens_estimate":0,"worktree":"<path 或 null>","outcome":"no-op | report-only | fix-proposed | verified | escalated"}
 ```
 
 ## 成本参考（用于估算）

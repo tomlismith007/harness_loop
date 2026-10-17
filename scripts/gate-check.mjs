@@ -266,6 +266,9 @@ export function checkGates(input, opts = {}) {
     // 这两条正则与 loop-verifier/SKILL.md 的输出格式一致——那份格式早就是现成的接口，
     // 只是此前没有任何东西读它。
     const verdictLine = report.match(/^##\s*Verdict:\s*(APPROVE|REJECT|ESCALATE_HUMAN)/m);
+    // 报告可以声明它验证的是哪个 commit。给了就必须与 --head-sha 一致，
+    // 否则"批准"针对的是旧代码——审查后又 push 的改动会借旧报告过关。
+    const reportCommit = report.match(/^\s*Commit:\s*([0-9a-f]{7,40})\s*$/mi)?.[1];
     // 解析出**状态值**，而不只是匹配形状。
     //
     // 曾经这条只问"有没有一行长得像证据"，于是：
@@ -279,7 +282,15 @@ export function checkGates(input, opts = {}) {
     // 箭头同时接受 U+2192 与 ASCII `->`：同一份报告在两种输入法下必须等价，
     // 否则一个字符的差异会静默改变闸门结果。
     const EVIDENCE_LINE = /^\s*-\s*(Tests|Red check|Real-use validation|Lint|Scope check|Denylist check):\s*`[^`]+`\s*(?:→|->)\s*(PASS|FAIL|NOT RUN)\s*$/gm;
-    const checks = [...report.matchAll(EVIDENCE_LINE)].map((m) => ({ name: m[1], status: m[2] }));
+    // verifier 自己的输出模板里，Red check / Scope check / Denylist check 是
+    // "状态 + 说明"，没有命令反引号。只认带命令的行，会让按模板写的
+    // `APPROVE` + `Red check: FAIL` 被静默忽略——证据契约必须覆盖生产者的实际格式。
+    // 这三项不要求命令，因为它们的证据是检查结论而不是一条命令的输出。
+    const STATUS_ONLY_LINE = /^\s*-\s*(Red check|Scope check|Denylist check):\s*(PASS|FAIL|NOT RUN)\b/gm;
+    const checks = [
+      ...[...report.matchAll(EVIDENCE_LINE)].map((m) => ({ name: m[1], status: m[2] })),
+      ...[...report.matchAll(STATUS_ONLY_LINE)].map((m) => ({ name: m[1], status: m[2] })),
+    ];
     const missing = [];
     if (!verdictLine) missing.push('a "## Verdict: APPROVE|REJECT|ESCALATE_HUMAN" line');
     if (checks.length === 0) {
@@ -334,6 +345,31 @@ export function checkGates(input, opts = {}) {
         allowed_actions: ['re-run loop-verifier and save its full report'],
         exit_code: 2,
         next: 'the report exists but does not account for what was not run. See loop-verifier SKILL.md output format.',
+      };
+    }
+    // 报告声明的 commit 必须是当前 head。只比对 reviewed-sha 不够：
+    // verifier 可能验的是更早的提交，而报告仍被当作当前 head 的证据。
+    if (reportCommit && headSha && !headSha.startsWith(reportCommit) && !reportCommit.startsWith(headSha)) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `verifier report covers commit ${reportCommit.slice(0, 7)}, but head is ${String(headSha).slice(0, 7)}`,
+        allowed_actions: ['re-run verification on the current head'],
+        exit_code: 2,
+        next: 'a report for an older commit cannot approve the new head. Re-verify.',
+      };
+    }
+    // 全 NOT RUN 的报告不能支持 APPROVE：什么都没跑，"通过"没有依据。
+    if (checks.every((c) => c.status === 'NOT RUN')) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: 'evidence says APPROVE but every check is NOT RUN — nothing was actually verified',
+        allowed_actions: ['run at least the tests, then re-verify'],
+        exit_code: 2,
+        next: 'an approval built entirely on checks that were not run is a claim, not evidence.',
       };
     }
     // 报告自称 REJECT / ESCALATE_HUMAN 时，命令行说 approve 不成立。

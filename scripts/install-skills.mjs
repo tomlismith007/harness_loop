@@ -215,6 +215,7 @@ function checkInstalled(args) {
   const srcDir = path.join(PACK_ROOT, 'skills');
   const drifted = [];
   const missing = [];
+  const notOurs = [];
   let checked = 0;
 
   for (const target of dest.dirs) {
@@ -227,11 +228,14 @@ function checkInstalled(args) {
     if (exists(manifestPath)) {
       try { manifest = JSON.parse(readText(manifestPath)); } catch { manifest = null; }
     }
-    // 已安装副本 = 清单里记的（这份包装的）+ 目录里实际存在的
-    const present = fs.readdirSync(target.dir, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && exists(path.join(target.dir, e.name, 'SKILL.md')))
-      .map((e) => e.name);
-    const installed = [...new Set([...(manifest?.skills || []), ...present])];
+    // 没有清单 = 这个目录不是本包装的。目录里可能有用户自己的技能，
+    // 把它们当"本包的副本"比对，会把无关技能全报成漂移（实测 18 个）。
+    if (!manifest) {
+      notOurs.push(target.dir);
+      continue;
+    }
+    // 已安装副本 = 清单里记的（这份包装的）。清单是"本包装了什么"的唯一记录。
+    const installed = [...new Set(manifest.skills || [])];
 
     for (const name of installed) {
       const src = path.join(srcDir, name, 'SKILL.md');
@@ -251,11 +255,15 @@ function checkInstalled(args) {
   }
 
   if (args.json) {
-    printJson({ checked, drifted, missing, in_sync: drifted.length === 0 });
+    printJson({ checked, drifted, missing, not_installed_by_pack: notOurs, in_sync: drifted.length === 0 });
   } else {
     process.stdout.write(`Checked ${checked} installed skill(s)\n`);
     if (missing.length) {
       process.stdout.write(`\nNo install directory at: ${missing.join(', ')}\n`);
+    }
+    if (notOurs.length) {
+      process.stdout.write(`\nNot installed by this pack (no manifest): ${notOurs.join(', ')}\n`);
+      process.stdout.write(`Skills there were left out of the comparison.\n`);
     }
     if (drifted.length) {
       process.stdout.write(`\nDRIFT — the host runs the installed copy, not the source:\n`);

@@ -48,10 +48,14 @@ jobs:
           # 取 PR 当前 head 与最近一次 APPROVED review 绑定的 commit；
           # 两者不一致时闸门会 escalate（审查后又 push 了）。
           HEAD_SHA="$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)"
+          # 取最后一条 review，并**要求它就是 APPROVED**。
+          # 只取"最后一条 APPROVED"会让批准之后的 CHANGES_REQUESTED 被忽略；
+          # 没有 APPROVED 时也绝不能回退成 head——那等于拿 head 与它自己比较，
+          # 约束 7 的闸门必然通过。空值交给 gate-check 按 fail-closed 升级。
           REVIEWED_SHA="$(gh pr view "$PR_NUMBER" \
-            --json reviews -q '[.reviews[] | select(.state=="APPROVED")] | last | .commit.oid // empty')"
+            --json reviews -q '[.reviews[]] | last | select(.state=="APPROVED") | .commit.oid // empty')"
           echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          echo "reviewed=${REVIEWED_SHA:-$HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "reviewed=$REVIEWED_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Resolve red-check state
         id: red
@@ -100,6 +104,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.LOOP_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # 报告作者的登录名。用 LOOP_BOT_TOKEN 时是机器人账号；回退到
+          # GITHUB_TOKEN 时是 github-actions[bot]——两者必须显式区分，
+          # 否则作者过滤会把真实报告也挡掉，或把伪造报告放进来。
+          LOOP_BOT_LOGIN: ${{ vars.LOOP_BOT_LOGIN || 'loop-bot' }}
         run: |
           # verifier 的产出以带标记的 PR 评论形式存在，**绝不从检出目录读取**。
           # 此前读的是工作区里的 verifier-report.md，而实现者可以把任何文件
@@ -107,8 +115,12 @@ jobs:
           # 无法伪造的来源。
           set -euo pipefail
           REPORT="$RUNNER_TEMP/verifier-report.md"
+          # 只接受 bot 账号发的报告。此前只按标记取"最后一条评论"，
+          # 于是 PR 作者（或任何能评论的人）可以伪造一条 APPROVE 覆盖真实报告。
+          BOT_LOGIN="${LOOP_BOT_LOGIN:-loop-bot}"
           gh pr view "$PR_NUMBER" --json comments \
-            | jq -r '[.comments[] | select(.body | startswith("<!-- loop-verifier-report -->"))] | last | .body // ""' \
+            | jq -r --arg bot "$BOT_LOGIN" \
+              '[.comments[] | select(.author.login == $bot) | select(.body | startswith("<!-- loop-verifier-report -->"))] | last | .body // ""' \
             > "$REPORT.raw"
           if [ ! -s "$REPORT.raw" ] || [ "$(cat "$REPORT.raw")" = "null" ]; then
             echo "verdict=awaiting" >> "$GITHUB_OUTPUT"

@@ -5,8 +5,8 @@ name: Loop — Release Draft
 on:
   push:
     tags: ['v*']
-  release:
-    types: [published]
+  # release: published 不再订阅：路由步无条件按 push:tags 处理，订阅它只会
+  # 把 close 阶段的事件当成 release 事件。要接它，先让路由按 github.event_name 分叉。
 
 permissions:
   contents: read
@@ -130,6 +130,8 @@ jobs:
           Review required before publishing.
           EOF
           echo "Draft written to RELEASE_NOTES_DRAFT.md"
+          # 草稿必须交付，否则 job 一结束就消失。
+          cat RELEASE_NOTES_DRAFT.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Escalate if sensitive
         run: |

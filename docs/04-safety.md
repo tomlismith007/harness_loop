@@ -133,7 +133,7 @@ billing/**
 
 | 层级 | 方式 |
 |---|---|
-| 单轮 | `loop-pause-all` 标签或 `STATE.md` 标志 → 循环立即退出 |
+| 单轮 | `STATE.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` → 循环立即退出（**没有 issue 标签通道**：代码只读文件） |
 | 调度层 | 删除调度器 / 禁用 workflow |
 | 全局 | 撤销连接器 token |
 

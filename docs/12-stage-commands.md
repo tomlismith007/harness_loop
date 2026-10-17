@@ -22,12 +22,19 @@
 ## 一次性准备
 
 ```bash
-# 把技能装到 ZCode 能发现的位置（只需一次，全局生效）
+# 把技能装到 agent 能发现的位置（只需一次，全局生效）
 node scripts/install-skills.mjs --scope user
 
-# 验证
+# 查看装了什么
 node scripts/install-skills.mjs --scope user --list
+
+# 核对宿主加载的副本是否与源码一致（改过技能后必跑）
+node scripts/install-skills.mjs --scope user --check
 ```
+
+**用户级优先于工作区级。** 阶段驱动技能（`harness-init` / `harness-loop-init` /
+`harness-consolidate`）只在包仓库运行，不随装配写进消费者仓库——它们第一步调用
+`scripts/harness-stage.mjs`，而该脚本不复制进消费者。
 
 **装完重启会话。** 之后 `/harness-init` 这类命令才能用。
 
@@ -67,7 +74,7 @@ node scripts/harness-stage.mjs /path/to/repo
 node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
 ```
 
-生成 7 个文件 + 9 个阶段 1 技能目录。**不生成 loop 机制文档**（`LOOP.md` / `loop-budget.md` / `loop-run-log.md` / `session-handoff.md` / `loop-ledger.json`）——那些属于阶段 2。
+生成 7 个文件 + 8 个阶段 1 技能目录（阶段驱动技能只在包仓库运行，不装进消费者）。**不生成 loop 机制文档**（`LOOP.md` / `loop-budget.md` / `loop-run-log.md` / `session-handoff.md` / `loop-ledger.json`）——那些属于阶段 2。
 
 **第 3 步：手工改两处**（脚本改不了，必须人做）
 
@@ -124,7 +131,7 @@ cat STATE.md                                   # 看 High Priority 与 Watch Lis
 阶段 1 必须完成：
 
 ```bash
-node scripts/harness-stage.mjs /path/to/repo   # 阶段 1 应为 [COMPLETE] 10/10
+node scripts/harness-stage.mjs /path/to/repo   # 阶段 1 应为 [COMPLETE] 8/8
 ```
 
 ### 该用哪些技能
@@ -268,7 +275,7 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 3
 
 ```bash
 node scripts/event-router.mjs --list
-node scripts/event-router.mjs --event check_suite.completed:failure --item pr-7
+node scripts/event-router.mjs --event check_suite.completed:failure --item pr-7 --target pr-7
 ```
 
 **第 4 步：跑通一个完整周期**
@@ -338,10 +345,10 @@ node scripts/harness-stage.mjs /path/to/repo
 node scripts/loop-audit.mjs /path/to/repo --suggest
 
 # 3. 事件该路由到哪
-node scripts/event-router.mjs --event <事件名> --item <id>
+node scripts/event-router.mjs --event <事件名> --item <id> --target <branch|pr-id>
 
 # 4. 这次改动能不能过闸门
-node scripts/gate-check.mjs --item <id> --phase gate --diff-files <文件> --verdict approve
+node scripts/gate-check.mjs --item <id> --phase gate --diff-files @<清单文件> --verdict approve
 
 # 5. 还能重试吗
 node scripts/ledger-check.mjs --ledger loop-ledger.json
@@ -368,7 +375,7 @@ node scripts/harness-stage.mjs <repo> --stage 1 --require
 
 # 阶段 2
 node scripts/harness-stage.mjs <repo> --upgrade --stage 2
-node scripts/gate-check.mjs --item <id> --phase gate --diff-files <f> --verdict approve --red-check pass
+node scripts/gate-check.mjs --item <id> --phase gate --diff-files @<清单文件> --verdict approve --red-check pass
 node scripts/ledger-check.mjs --ledger loop-ledger.json
 node scripts/harness-stage.mjs <repo> --stage 2 --require
 

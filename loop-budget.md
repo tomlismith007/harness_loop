@@ -63,7 +63,10 @@
 
 ## Kill Switch
 
-- 标志：`loop-pause-all`（issue 标签，或 `STATE.md` 中的标志）
+- 标志：`loop-pause-all`，写在 `STATE.md` 或 `loop-constraints.md` 里**独占一行**。
+- **没有 issue 标签通道。** `budget-check.mjs` 只读这两个文件；在 runner 里也没有
+  可靠的标签读取路径。文档曾声称"打标签即可暂停"，而代码从不读标签——照文档操作
+  循环不会停。要停请改文件，或直接禁用调度器。
 - 恢复：仅在 `STATE.md` 中清除该标志后，人工重启调度器。
 
 ## Estimate

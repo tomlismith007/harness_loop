@@ -127,6 +127,8 @@ jobs:
           -
           EOF
           cat .loop/nightly/REVIEW.md
+          # 报告必须交付，否则 job 一结束就消失（runner 文件系统是临时的）。
+          cat .loop/nightly/REVIEW.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remind about promotion threshold
         run: |

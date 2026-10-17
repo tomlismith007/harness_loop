@@ -149,6 +149,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 | kill switch | **机械** | 读 `STATE.md` / `loop-constraints.md` 的独占行标记 |
 | **改动是否与 work item 相关** | **人工** | 脚本不知道 work item 的目标，无法判定"范围蔓延" |
 | **verdict 是否诚实** | **半机械** | 闸门能核对报告格式与自相矛盾，但无法验证测试真的跑过 |
+| **attempts 上限** | **机械，但无写入者** | `gate-check` 会拦 `attempts >= 3`，但本包不含写账本的运行器；`merge-gate` 不传 `--attempts`。没有外部平台写账本时，这条闸门在本包的生产路径上不生效——**NOT RUN**，不要当成已启用 |
 
 ---
 

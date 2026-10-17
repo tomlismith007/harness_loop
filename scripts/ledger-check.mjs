@@ -350,11 +350,29 @@ Exit codes:
   }
 
   const ledgerPath = typeof args.ledger === 'string' ? args.ledger : 'loop-ledger.json';
-  if (!fs.existsSync(ledgerPath)) {
-    fail(`ledger not found: ${ledgerPath}`);
-  }
+  // 账本缺失/损坏必须与熔断触发走同一条退出码（2 = 停止并升级）。
+  // 此前这里 fail() 退出 1，而调用方只拦 2——账本坏掉时熔断器静默放行，
+  // 而文档写的是"2 = 停止并升级（含账本缺失或畸形）"。
+  const thresholdsForUnreadable = breakerDefaults(
+    typeof args.registry === 'string' ? args.registry : undefined);
+  const unreadable = (why) => {
+    const result = unreadableLedger(why, {
+      maxIterations: thresholdsForUnreadable.maxIterations ?? DEFAULT_BREAKER.maxIterations,
+      stagnationThreshold: thresholdsForUnreadable.stagnationThreshold ?? DEFAULT_BREAKER.stagnationThreshold,
+      noProgressThreshold: thresholdsForUnreadable.noProgressThreshold ?? DEFAULT_BREAKER.noProgressThreshold,
+      tokenBudget: null,
+    });
+    if (args.escalation) process.stdout.write(renderEscalation(null, result));
+    else if (args.json) printJson(result);
+    else {
+      process.stdout.write(`Loop guard — verdict: ${result.verdict}\n`);
+      process.stdout.write(`  reason: ${result.unreadable_reason}\n\n${result.next}\n`);
+    }
+    process.exit(result.exit_code);
+  };
+  if (!fs.existsSync(ledgerPath)) unreadable(`ledger not found: ${ledgerPath}`);
   const ledger = readJson(ledgerPath);
-  if (!ledger) fail(`ledger is not valid JSON: ${ledgerPath}`);
+  if (!ledger) unreadable(`ledger is not valid JSON: ${ledgerPath}`);
 
   // Number('abc') 是 NaN，而 checkLedger 里的 ?? 只接 null/undefined——NaN 会原样
   // 穿过去，让所有阈值比较恒为 false，等于把所有熔断器关掉。必须 fail-closed。

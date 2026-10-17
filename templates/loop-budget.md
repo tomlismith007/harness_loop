@@ -12,6 +12,13 @@
 | Merge Gate | 48 | 100k | 1 |
 | Post-Merge Cleanup | 1 | 200k | 2 |
 | Release Drafter | 1 | 100k | 1 |
+| daily-triage | 1 | 50k | 0 |
+| lesson-harvest | 1 | 60k | 0 |
+| signal-gatekeeper | — | 30k | 0 |
+
+**阶段 3 的定时 workflow 会按 `daily-triage` / `lesson-harvest` 查上限。**
+缺行时 `budget-check` 返回 `cap: null` → `mode: exit`，workflow 的 fail-closed 守卫
+会让它每天在自己的预算检查里失败。
 
 ## Thresholds
 

@@ -622,6 +622,57 @@ section('6. 闸门判定');
     // 6. 反向：把状态值分组收紧成只有 PASS，第 1 条必须变红
     ok('FAIL 状态真的被解析（不是形状匹配）', /FAIL/.test(selfContra.reason), selfContra.reason);
 
+    // 7. verifier 模板里的"状态 + 说明"行（无命令反引号）也必须被读到。
+    //    只认带命令的行时，按技能模板写的 `APPROVE` + `Red check: FAIL` 会被忽略。
+    const tplFail = checkGates({
+      item: 'p', ...GATE,
+      evidenceFile: write('tplfail.md', [
+        '## Verdict: APPROVE', '', '### Evidence',
+        '- Tests: `npm test` → PASS',
+        '- Red check: FAIL — 回退后测试仍然通过',
+        '- Scope check: FAIL — 改了无关文件',
+        '- Denylist check: FAIL',
+        '', '### Checks not run', '- —',
+      ]),
+    });
+    eq('模板格式的 FAIL 行 → escalate', tplFail.decision, 'escalate');
+    ok('模板格式的 FAIL 被指名', /Red check|Scope check|Denylist check/.test(tplFail.reason), tplFail.reason);
+
+    // 8. 全 NOT RUN 的 APPROVE 不能通过
+    const allNotRun = checkGates({
+      item: 'p', ...GATE,
+      evidenceFile: write('allnotrun.md', [
+        '## Verdict: APPROVE', '', '### Evidence',
+        '- Tests: `npm test` → NOT RUN',
+        '- Red check: NOT RUN — 没有可回退的修复',
+        '', '### Checks not run',
+        '- Tests — 环境不可用',
+        '- Red check — 没有可回退的修复',
+      ]),
+    });
+    eq('全 NOT RUN 的 APPROVE → escalate', allNotRun.decision, 'escalate');
+    ok('全 NOT RUN 的理由被说明', /NOT RUN|nothing was actually verified/.test(allNotRun.reason), allNotRun.reason);
+
+    // 9. 报告声明的 commit 与当前 head 不一致 → escalate
+    const staleReport = checkGates({
+      item: 'p', ...GATE,
+      evidenceFile: write('stale.md', [
+        '## Verdict: APPROVE', 'Commit: def4567', '', '### Evidence',
+        '- Tests: `npm test` → PASS', '', '### Checks not run', '- —',
+      ]),
+    });
+    eq('报告 commit 与 head 不一致 → escalate', staleReport.decision, 'escalate');
+    ok('过期报告的理由指名 commit', /commit/.test(staleReport.reason), staleReport.reason);
+    // 一致时仍然通过（短 sha 前缀匹配）
+    const freshReport = checkGates({
+      item: 'p', ...GATE,
+      evidenceFile: write('fresh.md', [
+        '## Verdict: APPROVE', 'Commit: abc123', '', '### Evidence',
+        '- Tests: `npm test` → PASS', '', '### Checks not run', '- —',
+      ]),
+    });
+    eq('报告 commit 与 head 一致 → proceed', freshReport.decision, 'proceed');
+
     // 非 gate 阶段不强制证据，否则 fix 阶段无法工作
     eq('fix 阶段 approve 不需要证据',
       checkGates({ item: 'p', phase: 'fix', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve' }).decision, 'proceed');
@@ -865,6 +916,14 @@ section('12. 根 harness 文件');
 
   const constraints = fs.readFileSync(path.join(PACK_ROOT, 'loop-constraints.md'), 'utf8');
   ok('constraints 有拒绝列表', /拒绝列表/.test(constraints));
+  // 规则必须标 [机制] 或 [约定]：混在一起时，读者无法区分"代码会拦"和"靠自觉"。
+  // 这正是审计发现的"边界不清"的具体形态。
+  {
+    const ruleLines = constraints.split('\n').filter((l) => /^-\s+/.test(l.trim()));
+    const unlabeled = ruleLines.filter((l) => !/\[(机制|约定)[^\]]*\]/.test(l));
+    ok('loop-constraints.md 的每条规则都标了 [机制] 或 [约定]',
+      unlabeled.length === 0, unlabeled.slice(0, 5).map((l) => l.trim().slice(0, 50)).join('; '));
+  }
   ok('constraints 有 80% 预算规则', /80%/.test(constraints));
   ok('constraints 有尝试上限 3', /3 次/.test(constraints));
 
@@ -1045,6 +1104,16 @@ section('13. 文档完整性');
     ok(`技能数实测 ${skillsOnDisk}（供文档比对）`, skillsOnDisk === 17, String(skillsOnDisk));
   }
 
+  // ---- feature id 必须唯一 ----
+  // `stage-001` 曾出现两次，于是"按 id 查 feature"的消费方拿到不确定的结果，
+  // 而阶段 1 判据也因此失败。没有任何断言守过唯一性。
+  {
+    const fl = JSON.parse(fs.readFileSync(path.join(PACK_ROOT, 'feature_list.json'), 'utf8'));
+    const ids = fl.features.map((f) => f.id);
+    const dup = ids.filter((id, i) => ids.indexOf(id) !== i);
+    ok('feature_list.json 的 id 唯一', dup.length === 0, `重复: ${[...new Set(dup)].join(', ')}`);
+  }
+
   // ---- 文档引用的每个 --flag 必须在脚本里真实存在 ----
   // 这条断言一次覆盖三类问题：--diff-files 少了 @、--reviewed-sha 没传、
   // --inject 根本不存在。它们的共同点是"文档说了、脚本没有"或"脚本要了、文档没给"，
@@ -1090,6 +1159,38 @@ section('13. 文档完整性');
     };
     scan(PACK_ROOT, 0);
     ok('文档引用的每个 --flag 都在脚本中存在', unknown.length === 0, unknown.slice(0, 8).join('; '));
+
+    // ---- 命令示例必须能被照抄执行 ----
+    // 两个真实事故：`--diff-files changed-files.txt` 少了 @ 会让拒绝列表闸门
+    // 把整个清单当成一个路径；`event-router` 少了 --target 会让锁静默失效。
+    // 这两类错误在文档里"看起来完全正常"，所以只能机械核对调用形态。
+    const badExamples = [];
+    const scanExamples = (d, depth) => {
+      if (depth > 3) return;
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (['.git', '.mimosa', 'node_modules'].includes(e.name)) continue;
+        const f = path.join(d, e.name);
+        if (e.isDirectory()) { scanExamples(f, depth + 1); continue; }
+        if (!/\.md$/.test(e.name) || /^REVIEW-\d{4}-\d{2}-\d{2}/.test(e.name)) continue;
+        const text = fs.readFileSync(f, 'utf8');
+        for (const m of text.matchAll(/node\s+scripts\/gate-check\.mjs((?:[^\n]*\\\n)*[^\n]*)/g)) {
+          const line = m[1].replace(/\\\n/g, ' ');
+          const df = line.match(/--diff-files\s+(\S+)/);
+          if (df && !df[1].startsWith('@') && !df[1].includes(',')) {
+            badExamples.push(`${path.relative(PACK_ROOT, f)} → --diff-files ${df[1]}（清单文件需要 @ 前缀）`);
+          }
+        }
+        for (const m of text.matchAll(/node\s+scripts\/event-router\.mjs((?:[^\n]*\\\n)*[^\n]*)/g)) {
+          const line = m[1].replace(/\\\n/g, ' ');
+          if (/--event\s+\S+/.test(line) && !/--target\s+\S+/.test(line)) {
+            badExamples.push(`${path.relative(PACK_ROOT, f)} → event-router 少了 --target（锁键不可省）`);
+          }
+        }
+      }
+    };
+    scanExamples(PACK_ROOT, 0);
+    ok('文档中的 gate-check/event-router 示例可照抄执行', badExamples.length === 0,
+      badExamples.slice(0, 8).join('; '));
 
     // 这条断言必须真的能抓到问题——用一个不存在的标志验证扫描逻辑本身。
     // （若扫描正则写坏，unknown 会恒为空，断言就变成装饰品。）
@@ -1168,6 +1269,19 @@ section('14. GitHub Actions 接线');
     ok('merge-gate 不从工作区读证据文件',
       !/--evidence-file\s+verifier-report\.md/.test(mgCode), '证据来自可被实现者提交的路径');
     ok('merge-gate 的证据路径落在 RUNNER_TEMP', /RUNNER_TEMP/.test(mgCode));
+    // ---- 审查绑定不能靠"回退成 head" ----
+    // 没有 APPROVED review 时，`${REVIEWED_SHA:-$HEAD_SHA}` 会把 head 与它自己
+    // 比较，约束 7 的闸门必然通过。批准之后又 CHANGES_REQUESTED 时，
+    // "最后一条 APPROVED" 也会忽略后续拒绝。
+    ok('merge-gate 无批准时不回退成 head', !/\$\{REVIEWED_SHA:-\$HEAD_SHA\}/.test(mgCode),
+      '无批准时 reviewed 被回退成 head');
+    ok('merge-gate 要求最后一条 review 就是 APPROVED',
+      /\.reviews\[\]\][^\n]*last[^\n]*select\(\.state=="APPROVED"\)/.test(mgCode),
+      '只取最后一条 APPROVED，忽略后续拒绝');
+    // ---- 报告来源必须可归属 ----
+    ok('merge-gate 只接受 bot 账号的 verifier 报告',
+      /select\(\.author\.login == \$bot\)/.test(mgCode), '报告作者未校验');
+    ok('merge-gate 的报告作者可配置', /LOOP_BOT_LOGIN/.test(mgCode));
     // "没验"与"验失败"必须可区分，且**由闸门自己给出**——调用方改写
     // gate-check 的输出会让"闸门说了什么"与"报告显示了什么"变成两份真相源。
     ok('merge-gate 不自行重写闸门结果',
@@ -1323,6 +1437,19 @@ section('14. GitHub Actions 接线');
     ok('熔断触发时真的停下（exit 1）',
       breakerWired.every((f) => /ledger-check[\s\S]{0,600}?exit 1/.test(stripHeredocs(textOf(f)))),
       breakerWired.join('; '));
+    // 账本缺失/损坏是 exit 2（no-ledger），调用方只拦 2 的旧写法会放行。
+    // 断言要锚在真实调用形态上：`CODE` 的判断必须覆盖所有非 0，而不是只等于 2。
+    ok('熔断调用方对账本缺失（exit 2）也会停',
+      breakerWired.every((f) => /\[ "\$CODE" != "0" \]/.test(stripHeredocs(textOf(f)))),
+      breakerWired.join('; '));
+    // 锁被持有时熔断不该运行：那一步必须是 no-op。
+    ok('熔断步骤在 lock-held 时被跳过',
+      breakerWired.every((f) => {
+        const steps = stripHeredocs(textOf(f)).split(/\n(?=\s*- (?:name|uses):)/);
+        const b = steps.find((s) => /ledger-check\.mjs[^\n]*--pattern[^\n]*--json/.test(s));
+        return b && /^\s*if:.*conflict\s*!=\s*'lock-held'/m.test(b);
+      }),
+      breakerWired.join('; '));
 
     // 每个 workflow 必须传自己的 pattern id，否则会解析不到上限。
     // 从 budget-check 的调用行里抽出 --pattern 值，逐一验证能解析到 cap。
@@ -1335,6 +1462,19 @@ section('14. GitHub Actions 接线');
     }
     ok('每个 workflow 的 --pattern 都能解析到该循环自己的上限',
       badPattern.length === 0, badPattern.join('; '));
+
+    // 阶段 3 装配用的是 templates/loop-budget.md，不是根仓库这份。
+    // 曾经模板只有 6 行，于是装配后的 daily-triage / lesson-harvest 每天
+    // 在自己的预算检查里 mode=exit——而根仓库的测试全绿，因为它只查根文件。
+    {
+      const tplCaps = parseBudgetCaps(fs.readFileSync(path.join(TEMPLATE_DIR, 'loop-budget.md'), 'utf8'));
+      const tplMissing = ymls
+        .map((f) => textOf(f).match(/budget-check\.mjs\s+--pattern\s+([A-Za-z0-9_-]+)/)?.[1])
+        .filter(Boolean)
+        .filter((p) => resolveCap(tplCaps, p).cap === null);
+      ok('模板预算表覆盖全部 workflow 的 pattern（阶段 3 装配后不会自杀）',
+        tplMissing.length === 0, [...new Set(tplMissing)].join('; '));
+    }
 
     // fail-closed：`|| true` 吞掉退出码之后必须有显式的"读不到就拒绝"守卫，
     // 否则脚本崩溃会被静默当成"预算正常"。
@@ -1353,6 +1493,31 @@ section('14. GitHub Actions 接线');
       return !/MODE.*=.*"exit"|mode.*=.*exit/.test(t);
     });
     ok('每个 workflow 都对 exit 模式有动作', noAction.length === 0, noAction.join('; '));
+  }
+
+  // ---- 报告型 workflow 必须交付产物 ----
+  // runner 文件系统是临时的：写进工作区的报告不上传就随 job 消失。
+  // daily-triage / lesson-harvest / release-draft 都曾只写文件不交付。
+  {
+    const ymls = expected.filter((x) => x.endsWith('.yml'));
+    const reports = {
+      'daily-triage.yml': '.loop/daily/TRIAGE.md',
+      'lesson-harvest.yml': '.loop/nightly/REVIEW.md',
+      'release-draft.yml': 'RELEASE_NOTES_DRAFT.md',
+    };
+    for (const [f, reportPath] of Object.entries(reports)) {
+      const t = fs.readFileSync(path.join(dir, f), 'utf8');
+      ok(`${f} 交付了报告（否则随 job 消失）`,
+        new RegExp(`cat ${reportPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} >> "\\$GITHUB_STEP_SUMMARY"`).test(t)
+        || /upload-artifact/.test(t) && t.includes(reportPath),
+        '报告只写进临时文件系统');
+    }
+    // release.published 曾被订阅，但路由无条件按 push:tags 处理——
+    // 订阅一个会路由错的事件，比不订阅更糟。
+    const rd = fs.readFileSync(path.join(dir, 'release-draft.yml'), 'utf8');
+    const onBlock = rd.split(/^permissions:/m)[0];
+    ok('release-draft 不订阅会路由错的事件', !/release:\s*\n\s*types:\s*\[published\]/.test(onBlock),
+      '订阅了 release.published，但路由按 push:tags 处理');
   }
 
   // ---- 规则断言：落盘 work item 的 workflow 必须参与 acting_on 锁 ----
@@ -1497,7 +1662,6 @@ section('15. 端到端装配');
     '.agents/skills/loop-verifier/SKILL.md',
     '.agents/skills/issue-triage/SKILL.md',
     '.agents/skills/ci-triage/SKILL.md',
-    '.agents/skills/harness-loop-init/SKILL.md',
   ];
   for (const f of expectCreated) {
     ok(`装配生成: ${f}`, fs.existsSync(path.join(tmp, f)));
@@ -1543,6 +1707,9 @@ section('15. 端到端装配');
   // 运行时编排任何阶段都装
   ok('L1 装运行时编排 harness-loop',
     fs.existsSync(path.join(tmpL1, '.agents', 'skills', 'harness-loop', 'SKILL.md')));
+  // 阶段驱动技能只在包仓库运行；init-loop-harness 同样不得写进消费者。
+  ok('L1 不装阶段驱动技能 harness-loop-init',
+    !fs.existsSync(path.join(tmpL1, '.agents', 'skills', 'harness-loop-init', 'SKILL.md')));
   fs.rmSync(tmpL1, { recursive: true, force: true });
   // 不得写进没有任何 agent 会扫描的裸 skills/
   ok('不写裸 <repo>/skills/（无人扫描的路径）', !fs.existsSync(path.join(tmp, 'skills')));
@@ -2026,6 +2193,19 @@ section('19. 技能安装（ZCode 发现路径）');
     // 还原：重装后应恢复干净
     run(['--target', tmp, '--force']);
     eq('重装后 --check 恢复干净', run(['--target', tmp, '--check']).code, 0);
+
+    // ---- 没有清单的目录不是本包装的，不得把用户技能报成残留 ----
+    // 实测：对 ~/.agents/skills（无清单、18 个用户技能）跑 --check，
+    // 旧实现把 18 个全报成"清单残留"并退出 1。
+    const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-install-foreign-'));
+    const foreignSkill = path.join(foreign, '.agents', 'skills', 'user-owned', 'SKILL.md');
+    fs.mkdirSync(path.dirname(foreignSkill), { recursive: true });
+    fs.writeFileSync(foreignSkill, '# user owned skill\n');
+    const f1 = run(['--target', foreign, '--check']);
+    eq('无清单目录 --check 退出 0（不是本包装的）', f1.code, 0);
+    ok('无清单目录不把用户技能报成漂移', !/user-owned/.test(f1.out), f1.out.slice(0, 300));
+    ok('无清单目录明确说明不是本包装的', /Not installed by this pack/.test(f1.out), f1.out.slice(0, 300));
+    fs.rmSync(foreign, { recursive: true, force: true });
   }
 
   // uninstall
@@ -2196,8 +2376,9 @@ section('20. 三阶段驱动器');
     eq('消费者内 ledger-check 可运行',
       runInConsumer('ledger-check.mjs', ['--ledger', consumerLedger]).code, 0);
     // 缺账本时必须报错退出 1，而不是静默通过——这与库层的 no-ledger fail-closed 一致
-    eq('消费者内缺账本时 ledger-check 报错',
-      runInConsumer('ledger-check.mjs', ['--ledger', path.join(empty, 'nope.json')]).code, 1);
+    // 缺账本 = no-ledger = 停止并升级（exit 2）。调用方只拦 2，所以这里不能是 1。
+    eq('消费者内缺账本时 ledger-check 停止并升级（exit 2）',
+      runInConsumer('ledger-check.mjs', ['--ledger', path.join(empty, 'nope.json')]).code, 2);
     eq('消费者内 gate-check 可运行',
       runInConsumer('gate-check.mjs', ['--item', 'x', '--phase', 'fix',
         '--diff-files', 'a.ts', '--verdict', 'approve']).code, 0);
@@ -2235,6 +2416,16 @@ section('20. 三阶段驱动器');
   ok('阶段 2 补上 loop-verifier', fs.existsSync(path.join(empty, '.agents', 'skills', 'loop-verifier', 'SKILL.md')));
   ok('阶段 2 补上 minimal-fix', fs.existsSync(path.join(empty, '.agents', 'skills', 'minimal-fix', 'SKILL.md')));
   ok('阶段 2 补上 loop-guard', fs.existsSync(path.join(empty, '.agents', 'skills', 'loop-guard', 'SKILL.md')));
+
+  // ---- 阶段驱动技能只在包仓库运行 ----
+  // 它们第一步调用 scripts/harness-stage.mjs，而装配不复制该脚本（它依赖包内
+  // templates/）。装进消费者 = 用户第一步拿到 ERR_MODULE_NOT_FOUND。
+  for (const s of ['harness-init', 'harness-loop-init', 'harness-consolidate']) {
+    ok(`消费者不安装阶段驱动技能 ${s}`,
+      !fs.existsSync(path.join(empty, '.agents', 'skills', s, 'SKILL.md')));
+    const src = fs.readFileSync(path.join(SKILLS_DIR, s, 'SKILL.md'), 'utf8');
+    ok(`${s} 正文声明只在包仓库运行`, /只在 harness 包仓库运行/.test(src));
+  }
 
   // ---- 跳级保护 ----
   // AGENTS.md 与 docs/11 都写"不要跳级"，但 --upgrade 曾经允许空仓库直冲 --stage 3
@@ -2969,6 +3160,21 @@ section('21. 预算与 kill switch（budget-check）');
   eq('loop-constraints.md 的标记同样生效', fromConstraints.json.paused, true);
   ok('来源指向 loop-constraints.md', /loop-constraints/.test(String(fromConstraints.json.paused_where)));
 
+  // ---- 文档规定的 run-log 格式必须能被解析器读到 ----
+  // 文档曾给多行 pretty JSON，而 sumTodaySpend 只解析单行——照文档写会被静默算成 0。
+  {
+    const { sumTodaySpend } = await import('./budget-check.mjs');
+    const oneLine = `{"run_id":"${today}T00:00:00Z","pattern":"pr-review-triage","tokens_estimate":250000}`;
+    eq('单行记录被计入', sumTodaySpend(oneLine, 'pr-review-triage', today).used, 250000);
+    const multi = JSON.stringify(JSON.parse(oneLine), null, 2);
+    eq('多行记录不计入（文档必须写单行）', sumTodaySpend(multi, 'pr-review-triage', today).used, 0);
+    // 文档必须明确写"一条记录一行"，否则读者会照旧写多行
+    for (const f of ['loop-run-log.md', 'docs/06-cost-and-observability.md', 'skills/loop-budget/SKILL.md']) {
+      const t = fs.readFileSync(path.join(PACK_ROOT, f), 'utf8');
+      ok(`${f} 声明 run-log 一条记录一行`, /一条记录一行|追加\*\*一行\*\*/.test(t), '未声明单行格式');
+    }
+  }
+
   // ---- 没有上限时必须退出，不能静默放行 ----
   fs.writeFileSync(path.join(tmp, 'loop-constraints.md'), '# C\n');
   fs.writeFileSync(budgetPath, '# Budget\n\n（没有 Daily Limits 表）\n');
@@ -3057,13 +3263,24 @@ section('22. worktree 隔离与队列读取');
           [path.join(PACK_ROOT, 'scripts', 'worktree.mjs'), ...args], { encoding: 'utf8', cwd: tmp }) };
       } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
     };
-    execFileSync('git', ['init', '-q'], { cwd: tmp });
-    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: tmp });
+    // 测试自己调 git 时也必须剥掉 GIT_DIR / GIT_INDEX_FILE。
+    // pre-commit 钩子里 git 会把它们指向**外层仓库**；子进程继承后，
+    // 在临时目录里 `git init` 会去重init 外层仓库，`git commit` 报
+    // "fatal: this operation must be run in a work tree"——整个套件在钩子里崩溃，
+    // 于是"装了 pre-commit 钩子"等于"无法提交"。这条断言是在 commit 时被当场抓出来的。
+    const gitClean = (args, cwd) => {
+      const env = { ...process.env };
+      for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR']) delete env[k];
+      return execFileSync('git', args, { encoding: 'utf8', cwd, env });
+    };
+    gitClean(['init', '-q'], tmp);
+    gitClean(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], tmp);
 
     const c = runWt(['create', '--event', 'ci', '--item', 'ci-1', '--attempt', '1']);
     eq('worktree create 退出 0', c.code, 0);
     ok('worktree 目录已创建', fs.existsSync(path.join(tmp, 'loop', 'ci-ci-1-attempt1')));
-    const branches = execFileSync('git', ['branch', '--list'], { encoding: 'utf8', cwd: tmp });
+    const branches = gitClean(['branch', '--list'], tmp);
     ok('分支名遵循 minimal-fix 约定', branches.includes('ci-ci-1-attempt1'), branches);
 
     ok('list 报告该 worktree', runWt(['list']).out.includes('loop/ci-ci-1-attempt1'));
@@ -3071,7 +3288,7 @@ section('22. worktree 隔离与队列读取');
     const d = runWt(['discard', '--event', 'ci', '--item', 'ci-1', '--attempt', '1']);
     eq('worktree discard 退出 0', d.code, 0);
     ok('worktree 目录已清理', !fs.existsSync(path.join(tmp, 'loop', 'ci-ci-1-attempt1')));
-    const after = execFileSync('git', ['branch', '--list'], { encoding: 'utf8', cwd: tmp });
+    const after = gitClean(['branch', '--list'], tmp);
     ok('分支已清理（不留残留分支）', !after.includes('ci-ci-1-attempt1'), after);
 
     // 命名消毒：item 里的路径字符不得逃出预期位置
@@ -3087,8 +3304,8 @@ section('22. worktree 隔离与队列读取');
     // 这条断言是在 commit 时被 pre-commit 钩子当场抓出来的。
     {
       const h = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wt-hook-'));
-      execFileSync('git', ['init', '-q'], { cwd: h });
-      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: h });
+      gitClean(['init', '-q'], h);
+      gitClean(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init'], h);
       const hookEnv = { ...process.env, GIT_DIR: path.join(PACK_ROOT, '.git'), GIT_INDEX_FILE: path.join(PACK_ROOT, '.git', 'index') };
       const r = (() => {
         try {
@@ -3167,13 +3384,9 @@ section('22. worktree 隔离与队列读取');
 section('17. registry 与路由一致性');
 {
   const registryText = fs.readFileSync(path.join(PACK_ROOT, 'patterns', 'registry.yaml'), 'utf8');
-  // 每个 registry pattern 的 events 都应该在路由表中注册
-  const eventsInRegistry = [...registryText.matchAll(/events:\s*\[([^\]]+)\]/g)]
-    .flatMap((m) => m[1].split(',').map((s) => s.trim()));
-  ok(`registry 声明了事件（${eventsInRegistry.length} 个）`, eventsInRegistry.length > 0);
-  for (const ev of eventsInRegistry) {
-    ok(`registry 事件已注册路由: ${ev}`, Boolean(ROUTES[ev]));
-  }
+  // registry 只保留有消费者的段（stages/defaults）。循环定义不再复制到这里，
+  // 所以这里断言的是"没有第三份"，而不是"每份都一致"。
+  ok('registry 不含无消费者的循环定义', !/^patterns:/m.test(registryText));
 
   // ---- LOOP.md ↔ ROUTES 双向一致 ----
   // LOOP.md 自称"调度与路由的唯一真相源"，event-router 也自称"与 LOOP.md 保持一致"，
@@ -3210,6 +3423,32 @@ section('17. registry 与路由一致性');
       }
     }
     ok('LOOP.md 的事件 phase 与 ROUTES 一致', phaseDrift.length === 0, phaseDrift.join('; '));
+
+    // ---- 技能数组也必须一致 ----
+    // 只比 phase 时，`workflow_run.completed:failure` 的 LOOP.md 少列 minimal-fix、
+    // `pull_request.closed:unmerged` 的技能列与代码相反，两处漂移都没有任何断言。
+    // 文档写什么，agent 就派发什么——技能列错了，派发就错了。
+    const skillDrift = [];
+    for (const line of tableSection.split('\n')) {
+      if (!line.trim().startsWith('|')) continue;
+      const cells = line.split('|').slice(1, -1).map((c) => c.trim());
+      if (cells.length < 4) continue;
+      const evs = [...cells[0].matchAll(/`([^`]+)`/g)]
+        .flatMap((m) => m[1].split('/').map((s) => s.trim()))
+        .filter((e) => /^[a-z_]+(\.[a-z_]+)*(:[a-z-]+)?$/.test(e));
+      for (const ev of evs) {
+        if (!ROUTES[ev]) continue;
+        // gate-check 是脚本而不是技能目录，两边都不该把它算进技能数组。
+        const docSkills = [...cells[3].matchAll(/`([a-z][a-z0-9-]+)`/g)]
+          .map((m) => m[1])
+          .filter((s) => s !== 'gate-check' && !s.endsWith('.mjs'));
+        const codeSkills = (ROUTES[ev].skills || []).filter((s) => s !== 'gate-check');
+        if (JSON.stringify(docSkills) !== JSON.stringify(codeSkills)) {
+          skillDrift.push(`${ev}: LOOP.md=[${docSkills.join(',')}] / ROUTES=[${codeSkills.join(',')}]`);
+        }
+      }
+    }
+    ok('LOOP.md 的技能数组与 ROUTES 一致', skillDrift.length === 0, skillDrift.join('; '));
   }
   for (const ev of Object.keys(ROUTES)) {
     ok(`ROUTES 中的事件在 LOOP.md 有登记: ${ev}`, splitLoopEvents.includes(ev));
@@ -3217,10 +3456,11 @@ section('17. registry 与路由一致性');
   // 全局默认值存在
   ok('registry 有 defaults 段', /^defaults:/m.test(registryText));
   ok('registry auto_merge 为 false', /auto_merge:\s*false/.test(registryText));
-  ok('registry 有优先级表', /^priority:/m.test(registryText));
-  // 非事件驱动循环已登记
-  ok('registry 登记 lesson-harvest', /id:\s*lesson-harvest/.test(registryText));
-  ok('registry 登记 signal-gatekeeper', /id:\s*signal-gatekeeper/.test(registryText));
+  // 循环定义只有 LOOP.md 与 ROUTES 两处。registry 不再复制 patterns:/priority:——
+  // 那两份没有任何消费者，只会与真源漂移。
+  ok('registry 不再复制循环定义', !/^patterns:/m.test(registryText) && !/^priority:/m.test(registryText));
+  // 只认键定义，不认说明注释（注释里提到旧键名是为了解释为什么删掉）。
+  ok('registry 不再复制预算阈值', !/^\s*budget_(?:report_only|exit)_pct:/m.test(registryText));
 
   // ---- registry 的 stages: 块必须与代码的判据数一致 ----
   // 这个块此前没有任何消费者，于是"mechanical_checks: 10"在阶段 1 判据

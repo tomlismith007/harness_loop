@@ -150,7 +150,7 @@
    → 否：接线问题，不是 agent 问题
 
 2. 路由正确吗？
-   → node scripts/event-router.mjs --event <事件> 看输出
+   → node scripts/event-router.mjs --event <事件> --target <branch|pr-id> 看输出
    → 否：LOOP.md 路由表错误
 
 3. 约束加载了吗？

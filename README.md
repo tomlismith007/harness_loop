@@ -2,6 +2,11 @@
 
 **围绕 issue/PR 事件运转的编码智能体工程框架。** 把 harness engineering（让单次运行可靠）与 loop engineering（让连续运行自主）缝成一套可复制、可审计、可暂停的系统，并让 issue 与 PR 成为全部工作的唯一事件来源。
 
+> **边界先说清**：本包是**装配工具 + 事件桥 + 判定脚本**，不含 agent 运行器。
+> 默认承诺是 **L1 只读分诊**；L2（worktree 中提出修复）为实验能力；L3（无人值守）
+> 在真实运行器与真实 GitHub 演练完成前不宣称可用。事件 workflow 只做感知、判定、记账；
+> 没有平台消费产物时，循环止于 `fix-proposed`——合法结局，不是已自动修复。
+
 > 你不再逐步写提示词。你设计一套系统：它监听仓库事件、发现工作、派发子智能体、独立验证、并把需要你判断的事放进收件箱。
 
 ---
@@ -140,11 +145,11 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
 node scripts/loop-audit.mjs /path/to/repo --suggest
 
 # 4. 让路由告诉你这条事件该做什么
-node scripts/event-router.mjs --event pull_request_review.changes_requested --item pr-123
+node scripts/event-router.mjs --event pull_request_review.changes_requested --item pr-123 --target pr-123
 
-# 5. 合并前的闸门判定（--diff-files 接受逗号列表，或每行一个路径的文件）
+# 5. 合并前的闸门判定（--diff-files 接受逗号列表，或 @文件 每行一个路径）
 node scripts/gate-check.mjs --item pr-123 --phase gate --attempts 1 \
-  --diff-files changed-files.txt --verdict approve --budget-pct 45
+  --diff-files @changed-files.txt --verdict approve --budget-pct 45
 
 # 6. 重试前的熔断检查（退出码 2 = 停止并升级给人）
 node scripts/ledger-check.mjs --ledger loop-ledger.json
@@ -159,7 +164,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 | **① 单次审计** | `node scripts/loop-audit.mjs . --suggest` | 想知道现有仓库离"agent 可靠工作"还差什么 |
 | **② 装配新项目** | `node scripts/harness-stage.mjs . --upgrade --stage 1` | 从零建立阶段 1 地基（7 个文件）。想直接装配到 L2/L3 用 `init-loop-harness.mjs --level L2`，但它没有闸门 |
 | **③ 技能对话式调用** | 装完技能后说"帮我把这个 PR 验证一下" | 人在场，让 agent 按框架的规则干活 |
-| **④ 事件驱动自动化** | 接 `examples/github-actions/` 的 workflow | 想让 issue/PR/CI 事件自动触发循环 |
+| **④ 事件驱动自动化** | 接 `examples/github-actions/` 的 workflow | 想让 issue/PR/CI 事件触发**感知与判定**；修改/验证需要另接运行器 |
 | **⑤ 定时循环** | 夜审 `lesson-harvest.yml` + 每日 triage | 想让系统自己积累经验、自己发现问题 |
 
 **③ 是最容易上手的**——不需要接 CI，只要装了技能，agent 就会按框架的约束干活（加载约束、独立验证、拒绝列表、NOT RUN 声明）。
@@ -169,7 +174,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 框架自带测试套件，覆盖闸门判定、熔断逻辑、拒绝列表匹配、事件路由、模板与技能完整性、端到端装配：
 
 ```bash
-node scripts/test.mjs           # 1042 项断言
+node scripts/test.mjs           # 1063 项断言
 node scripts/test.mjs --verbose # 显示每一项
 ```
 

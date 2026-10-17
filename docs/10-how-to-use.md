@@ -13,9 +13,9 @@
 | 文档 | 13 篇 |
 | 模板 | 13 个 |
 | 事件接线 | 8 个 GitHub Actions workflow |
-| 测试 | 1042 项断言全通过 |
+| 测试 | 1063 项断言全通过 |
 | 自审计 | 94/100，L2 |
-| 技能已安装 | ✅ `~/.zcode/skills/` + `~/.agents/skills/` |
+| 技能已安装 | 以 `node scripts/install-skills.mjs --scope user --check` 的实际输出为准 |
 
 **为什么自审计是 L2 而不是 L3**：因为这套框架**自己还没跑过一个真实循环**。审计刻意区分"结构性就绪"和"真的跑过"——配置齐全不等于验证过。这是设计使然，不是缺陷。
 
@@ -161,9 +161,14 @@ cp examples/github-actions/*.yml /path/to/repo/.github/workflows/
 
 **关键设计**：workflow **不执行 agent 逻辑**，只做两件事——调用 `event-router.mjs` 确定阶段与技能，把结果写进 `.loop/queue/`。真正的 agent 执行由你的 agent 平台消费这些产物完成。
 
+**边界**：本包**不含 agent 运行器**。没有平台消费产物时，循环止于 `fix-proposed`——
+这是合法结局，不是"已自动修复"。`release.published` / `issues.closed` 没有生产触发器；
+`attempts` 闸门需要外部平台写 `loop-ledger.json` 才生效。
+
 **为什么这样设计**：路由逻辑与执行平台解耦。换平台（Claude Code → Codex → 本地调度器）时事件脊不用重写。
 
 **必须设置的**：`LOOP_BOT_TOKEN`（独立机器人账号，最小权限，**不授予 merge**）。
+verifier 报告只接受该账号发的评论；账号名用仓库变量 `LOOP_BOT_LOGIN` 指定（默认 `loop-bot`）。
 
 ### 用法 ⑤ 定时循环
 
@@ -219,7 +224,7 @@ cp examples/github-actions/*.yml /path/to/repo/.github/workflows/
 | `gate-check.mjs` | 闸门判定 | 0 = 通过；2 = 升级；3 = 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 = 继续；2 = 停止并升级（**含账本缺失或畸形**） |
 | `install-skills.mjs` | 安装技能到 ZCode 发现路径 | 0 = 成功；1 = 错误 |
-| `test.mjs` | 自检（724 断言） | 0 = 全通过 |
+| `test.mjs` | 自检（1063 断言） | 0 = 全通过 |
 
 **退出码是给自动化用的。** 在 CI 里可以直接 `node scripts/gate-check.mjs ... || exit 1`。
 

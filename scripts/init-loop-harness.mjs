@@ -163,7 +163,9 @@ What gets created:
     'harness-loop', 'loop-constraints', 'loop-budget', 'event-router',
     'issue-triage', 'pr-review-triage', 'ci-triage',
   ];
-  const stage2Skills = ['harness-loop-init', 'loop-guard', 'minimal-fix', 'loop-verifier'];
+  // 阶段驱动技能只在包仓库运行（它们第一步调用 harness-stage.mjs，而装配不复制它）。
+  // 消费者只需要运行/控制技能。
+  const stage2Skills = ['loop-guard', 'minimal-fix', 'loop-verifier'];
   const stage3Skills = ['signal-gatekeeper', 'lesson-harvest', 'post-merge-cleanup', 'release-drafter'];
 
   for (const s of stage1Skills) copySkill(s, target, level, results);

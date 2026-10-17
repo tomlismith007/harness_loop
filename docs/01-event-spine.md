@@ -115,7 +115,7 @@ loop-pause-all      → exit
 `scripts/event-router.mjs` 接受事件名，输出阶段、技能、闸门和下一步：
 
 ```bash
-node scripts/event-router.mjs --event pull_request_review.changes_requested --item pr-123
+node scripts/event-router.mjs --event pull_request_review.changes_requested --item pr-123 --target pr-123
 ```
 
 输出：

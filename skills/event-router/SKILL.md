@@ -17,46 +17,17 @@ stage: 1
 ## 用法
 
 ```bash
-node scripts/event-router.mjs --event <事件名> [--item <item-id>]
+node scripts/event-router.mjs --event <事件名> --item <item-id> --target <branch|pr-id>
 ```
 
 ## 路由表
 
-### Issue 事件
+**可执行真相源是 `scripts/event-router.mjs` 的 `ROUTES`。** 对外登记表在 `LOOP.md`，
+两处由 `test.mjs` 第 17 节双向核对（事件名、phase、技能数组）。
 
-| 事件 | 阶段 | 技能 | 等级 |
-|---|---|---|---|
-| `issues.opened` | intake | `issue-triage` | L1 |
-| `issues.reopened` | intake | `issue-triage`（标记 regression 候选） | L1 |
-| `issues.labeled` | intake | `issue-triage` | L1 |
-| `issues.closed` | close | `post-merge-cleanup` | L1 |
-
-### PR 事件
-
-| 事件 | 阶段 | 技能 | 等级 |
-|---|---|---|---|
-| `pull_request.opened` | review | `pr-review-triage` | L1 |
-| `pull_request.synchronize` | review | `pr-review-triage` | L1 |
-| `pull_request_review.changes_requested` | fix | `minimal-fix` → `loop-verifier` | L2 |
-| `pull_request_review.approved` | gate | `gate-check`（脚本 `scripts/gate-check.mjs`） | L2 |
-| `pull_request.ready_for_review` | gate | `gate-check`（脚本 `scripts/gate-check.mjs`） | L2 |
-| `pull_request.closed:merged` | post-merge | `post-merge-cleanup` | L1 |
-| `pull_request.closed:unmerged` | close | 记录到运行日志 | — |
-
-### CI 事件
-
-| 事件 | 阶段 | 技能 | 等级 |
-|---|---|---|---|
-| `check_suite.completed:failure` | fix | `ci-triage` → `minimal-fix` | L2 |
-| `check_suite.completed:success` | verify | 更新状态 | — |
-| `workflow_run.completed:failure` | fix | `ci-triage` | L2 |
-
-### Release 事件
-
-| 事件 | 阶段 | 技能 | 等级 |
-|---|---|---|---|
-| `push:tags` | release | `release-drafter` | L1 |
-| `release.published` | close | 归档相关 work item | — |
+本技能不再手抄第三份表——手抄表曾与 `ROUTES` 漂移而测试全绿：
+`workflow_run.completed:failure` 少列了 `minimal-fix`，`pull_request.closed:unmerged`
+的技能列与代码相反。改路由时改 `ROUTES` 与 `LOOP.md`，不要在这里加表。
 
 ## 输出
 

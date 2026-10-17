@@ -80,21 +80,10 @@
 
 ### 每轮追加一条 JSON
 
+**一条记录一行。** `budget-check.mjs` 只解析单行 JSON；多行格式会被静默算成 0 花费。
+
 ```json
-{
-  "run_id": "2026-10-13T08:15:00Z",
-  "pattern": "pr-review-triage",
-  "event": "pull_request_review.changes_requested",
-  "item": "pr-123",
-  "level": "L2",
-  "duration_s": 45,
-  "items_found": 4,
-  "actions_taken": 1,
-  "escalations": 0,
-  "tokens_estimate": 52000,
-  "worktree": "loop/pr-123-fix-1",
-  "outcome": "fix-proposed"
-}
+{"run_id":"2026-10-13T08:15:00Z","pattern":"pr-review-triage","event":"pull_request_review.changes_requested","item":"pr-123","level":"L2","duration_s":45,"items_found":4,"actions_taken":1,"escalations":0,"tokens_estimate":52000,"worktree":"loop/pr-123-fix-1","outcome":"fix-proposed"}
 ```
 
 ### `outcome` 枚举

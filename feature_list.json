@@ -165,7 +165,7 @@
       "notes": "修前 SKILL_DIRS 不含 .zcode/.agents，导致安装成功也报 0 found，且 L2 永远不可达（level=L2 要求 verifierPresent）"
     },
     {
-      "id": "stage-001",
+      "id": "stage-004",
       "priority": 8,
       "area": "stage",
       "title": "阶段 1 只产出 harness 地基，不产出 loop 机制文档",

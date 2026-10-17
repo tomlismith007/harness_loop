@@ -539,8 +539,8 @@ export function readRegistryDefaults(registryPath) {
     maxAttempts: num('max_attempts'),
     maxFilesPerFix: num('max_files_per_fix'),
     maxFilesPerCleanup: num('max_files_per_cleanup'),
-    budgetReportOnly: num('budget_report_only_pct'),
-    budgetExit: num('budget_exit_pct'),
+    // 预算阈值不在 registry 里：它只由 budget-check.mjs 的 DEFAULT_THRESHOLDS
+    // 定义。此前这里也读一份，于是同一输入可能被两个脚本判成不同模式。
     stagnation: breakerNum('stagnation'),
     noProgress: breakerNum('no_progress'),
     maxIterations: breakerNum('max_iterations'),

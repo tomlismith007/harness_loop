@@ -124,8 +124,20 @@ stage: 2
 
 ## 输出格式
 
+发布到 PR 评论时，**第一行必须是标记**，紧接着写报告正文：
+
+```
+<!-- loop-verifier-report -->
+## Verdict: APPROVE | REJECT | ESCALATE_HUMAN
+Commit: <被验证的 head sha>
+```
+
+`<!-- loop-verifier-report -->` 是 merge-gate 找到报告的唯一标记；`Commit:` 让闸门核对
+报告验的是不是当前 head。缺任一项，闸门会当作"没有可用的验证报告"。
+
 ```markdown
 ## Verdict: APPROVE | REJECT | ESCALATE_HUMAN
+Commit: <被验证的 head sha>
 
 ### Evidence
 - Tests: `<命令>` → PASS | FAIL | NOT RUN

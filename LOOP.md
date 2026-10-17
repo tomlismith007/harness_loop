@@ -40,12 +40,12 @@ node scripts/harness-stage.mjs . --upgrade    # 补齐下一阶段
 | `workflow_run.completed:failure` | PR/main | fix | `ci-triage` → `minimal-fix` | L2 | infra/env 失败；3 次上限 |
 | `pull_request.ready_for_review` | PR | gate | `gate-check`（脚本，非技能目录） | L2 | **合并始终人工** |
 | `pull_request.closed:merged` | main | post-merge | `post-merge-cleanup` | L1 | 大范围清理 |
-| `pull_request.closed:unmerged` | PR | close | `post-merge-cleanup` | L1 | 关闭需人工确认 |
+| `pull_request.closed:unmerged` | PR | close | — | L1 | 只记录结果，不派发技能 |
 | `push:tags` | main | release | `release-drafter` | L1 | 发布始终人工 |
 | `release.published` | main | close | — | L1 | 归档相关 work item |
 
-> 这张表与 `scripts/event-router.mjs` 的 `ROUTES` 由测试双向核对（`test.mjs` 第 17 节）。
-> 加事件时两处一起改，否则断言会挂。
+> 这张表与 `scripts/event-router.mjs` 的 `ROUTES` 由测试双向核对（`test.mjs` 第 17 节：
+> 事件名、phase、**技能数组**）。加事件时两处一起改，否则断言会挂。
 
 **路由规则**（由 `scripts/event-router.mjs` 机械执行）：
 
@@ -63,12 +63,12 @@ gate 阶段判定为 blocked → 进入 escalated（人类收件箱）
 
 | 循环 | 事件 | 节奏 | 等级 | 状态文件 | 最大尝试 | 每日 token 上限 |
 |---|---|---|---|---|---|---|
-| Issue Intake | `issues.*` | 2h 或事件驱动 | L1 报告 | `STATE.md` | — | 80k |
-| PR Review Triage | `pull_request.*` | 10–15m 或事件驱动 | L1→L2 | `STATE.md` | 3 | 300k |
-| CI Sweeper | `check_suite.*` | 15m 或事件驱动 | L2 辅助 | `STATE.md` | 3 | 500k |
-| Merge Gate | `pull_request.ready_for_review` | 事件驱动 | L2 | `STATE.md` | 3 | 100k |
-| Post-Merge Cleanup | `pull_request.closed:merged` | 1d（非高峰） | L1→L2 | `STATE.md` | 2 | 200k |
-| Release Drafter | `push:tags` | 1d 或事件驱动 | L1 草稿 | `STATE.md` | 1 | 100k |
+| Issue Intake | `issues.*` | 2h 或事件驱动 | L1 报告 | `STATE.md` | — | 见 `loop-budget.md` |
+| PR Review Triage | `pull_request.*` | 10–15m 或事件驱动 | L1→L2 | `STATE.md` | 3 | 见 `loop-budget.md` |
+| CI Sweeper | `check_suite.*` | 15m 或事件驱动 | L2 辅助 | `STATE.md` | 3 | 见 `loop-budget.md` |
+| Merge Gate | `pull_request.ready_for_review` | 事件驱动 | L2 | `STATE.md` | 3 | 见 `loop-budget.md` |
+| Post-Merge Cleanup | `pull_request.closed:merged` | 1d（非高峰） | L1→L2 | `STATE.md` | 2 | 见 `loop-budget.md` |
+| Release Drafter | `push:tags` | 1d 或事件驱动 | L1 草稿 | `STATE.md` | 1 | 见 `loop-budget.md` |
 
 ### 非事件驱动循环
 
@@ -148,7 +148,7 @@ post_merge_sweep:    cron: "0 22 * * *"      # 非高峰
 - 运行历史：`loop-run-log.md`（每轮追加一条 JSON）
 - 熔断账本：`loop-ledger.json`（每次尝试追加，`scripts/ledger-check.mjs` 读取）
 - 就绪度：`node scripts/loop-audit.mjs . --suggest`
-- 紧急停止：`loop-pause-all`（标签或 `STATE.md` 标志）
+- 紧急停止：`loop-pause-all`（`STATE.md` / `loop-constraints.md` 里独占一行；没有标签通道）
 
 ## 安全与闸门
 

@@ -12,6 +12,8 @@
 真正的 agent 执行由 agent 平台（Claude Code / Codex / 本地调度器）消费这些产物完成。
 
 **没有 agent 运行器时，本目录的 workflow 只能完成"感知 + 判定 + 记账"，不能完成"修改 + 验证"。**
+`release.published`、`issues.closed` 目前**没有生产触发器**；`attempts` 闸门需要外部平台
+写 `loop-ledger.json` 才会生效。这些是未接线项，不是已支持项。
 这不是缺陷，是边界：在 workflow 里造一个 agent 调度器需要另一套授权、沙箱与凭据管理，
 超出本包职责。未接运行器时循环止于 `fix-proposed`——**合法结局，不是失败**。
 
@@ -26,7 +28,7 @@
 | `ci-sweeper.yml` | `workflow_run`, `check_suite` | `ci-triage` (fix) |
 | `merge-gate.yml` | `pull_request: ready_for_review` | `scripts/gate-check.mjs` (gate) |
 | `post-merge.yml` | `pull_request: closed` | `post-merge-cleanup` (post-merge) |
-| `release-draft.yml` | `push: tags`, `release` | `release-drafter` (release) |
+| `release-draft.yml` | `push: tags` | `release-drafter` (release) |
 | `daily-triage.yml` | `schedule` | 每日兜底概览 |
 | `lesson-harvest.yml` | `schedule`（凌晨 3 点） | `lesson-harvest`（夜审，**不在事件脊上**） |
 
@@ -53,7 +55,7 @@
 workflow 里的路由调用可以直接本地跑：
 
 ```bash
-node scripts/event-router.mjs --event pull_request_review.changes_requested --item pr-123
+node scripts/event-router.mjs --event pull_request_review.changes_requested --item pr-123 --target pr-123
 ```
 
 若输出不符合预期，先修 `LOOP.md` 的路由表，再改 workflow。

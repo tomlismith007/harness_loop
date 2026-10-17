@@ -4,22 +4,13 @@
 
 ## Format
 
+**一条记录一行。** `budget-check.mjs` 只解析单行 JSON；多行 pretty JSON 会被静默算成 0 花费。
+
 ```json
-{
-  "run_id": "2026-10-13T08:15:00Z",
-  "pattern": "pr-review-triage",
-  "event": "pull_request_review.changes_requested",
-  "item": "pr-123",
-  "level": "L2",
-  "duration_s": 45,
-  "items_found": 4,
-  "actions_taken": 1,
-  "escalations": 0,
-  "tokens_estimate": 52000,
-  "worktree": "loop/pr-123-fix-1",
-  "outcome": "fix-proposed"
-}
+{"run_id":"2026-10-13T08:15:00Z","pattern":"pr-review-triage","event":"pull_request_review.changes_requested","item":"pr-123","level":"L2","duration_s":45,"items_found":4,"actions_taken":1,"escalations":0,"tokens_estimate":52000,"worktree":"loop/pr-123-fix-1","outcome":"fix-proposed"}
 ```
+
+> 文件里已有的多行记录是旧格式，保留作历史；预算统计只计单行记录。
 
 **`outcome` 枚举**：`no-op` | `report-only` | `fix-proposed` | `verified` | `escalated` | `no-wiring` | `manual`
 
@@ -91,3 +82,9 @@
 {"run_id":"2026-10-17T00:00:00Z","pattern":"review-remediation","event":"manual.audit","item":"m1-evidence-gate-merge-gate-crlf-wiring-breaker","level":"L2","duration_s":0,"items_found":5,"actions_taken":13,"escalations":0,"tokens_estimate":0,"outcome":"manual","notes":"按 spec 的 M1 阶段落地 MP-01…MP-05，断言 979 → 1018（+39），两环境 hasGnu true/false 均 Failed:0。四条 M1 出口条件全部实测翻正：queue-read 从 0 条变 7 条（note 不再谎称无待办）；APPROVE+Tests->FAIL 的证据从 proceed exit 0 变 escalate exit 2；hasEventWiring('.') 从 true 变 false；ci-sweeper 的 run: 真的执行 ledger-check（原只在 heredoc 说明文本里）。MP-01 六组对抗输入逐条翻正，ASCII -> 与 U+2192 现在等价，证据里的 NOT RUN 被推导进 checks_not_run 而不再只回显入参。MP-02 修两处：verdict 不再硬编码（原 --verdict none 导致从未放行过任何 PR），证据不再从检出目录读（实现者能提交任何文件进 PR）——改为 verifier 的带标记 PR 评论；并给 gate-check 加 awaiting-verification 独立闸门名，区分'没验'（待办）与'验失败'（阻断），调用方不重写闸门结果。MP-03 用 readText 一处归一化代替逐处打补丁。MP-04 收窄后暴露第二层假阳性：本仓库仍返回 wired:true，因为判定落到 LOOP.md 的 declared 回退（含 cron: 与'事件驱动'两个词）——与 P1-06 同一形状换一层，修法是 declared 只在没有 .github/workflows 时认；修完阶段 3 判据 1 转为 FAIL，与 STATE.md 自述'尚未跑过任何一轮真实事件'终于一致。MP-05 的 noop 修法：consecutiveFailures 改为统计尾部非 success 段。5 次变异全部确认落地，其中 2 次抓出我自己的无牙齿断言：(4) 我的'纯 CI'fixture 压根没调 event-router，失败原因错了所以去掉 REPO_EVENT 判断仍全绿——改成 self-check 的真实形态后立刻变红；(5) --pattern 断言用跨行通配匹配到了熔断分支的 --escalation 调用而非判定调用，改成锚定 --pattern 与 --json 同行后变红。另修：test.mjs 文档断言数正则写死三位数字，计数跨 1000 后匹配不上。对审查报告的修正：P2-01 不成立——loop-audit.mjs:130 对捕获值调了 .trim() 而 . 本就不吃 \r，报告与我第三轮的复核都在孤立地测正则、没走代码路径，又是只测一半就归因。未做：MP-06 起全部；真机验证（硬约束 10，MP-02 改的是厂商接入）；Linux 真机未验。"}
 
 {"run_id":"2026-10-17T12:00:00Z","pattern":"review-remediation","event":"manual.audit","item":"m1-status-tracking","level":"L2","duration_s":0,"items_found":14,"actions_taken":3,"escalations":0,"tokens_estimate":0,"outcome":"manual","notes":"记录 M1 的未做项并提交。沿用 REVIEW-2026-10-14-consolidated-plan.md 6.2 的既有约定（列了条目却没人记录哪些真的做了，已完成就不可验证），给新 spec 加了落地状态章节：M1 状态表（MP-01 至 MP-05 已做，逐项附证据）+ 有意未做表（每项写为什么没做与怎么核实）+ 与审查报告的偏离记录。未做项共 14 条：MP-06 至 MP-09、MP-12 至 MP-19（其中 MP-10/MP-11 已提前做——MP-10 是 M1 出口条件的一部分，MP-11 是纯文档零风险）；真机验证 NOT RUN（MP-02 改的是厂商接入，8 个 workflow 从未在真实 GitHub 仓库跑过，按 spec 6.3 未跑则不得启用 L2）；Linux 真机未验（本机两环境是 PATH 顺序差异不是真 Linux）；harness-stage --upgrade 写入路径未验。另记录 3 项需作者决策才能继续的（MP-06 持久化方式、MP-07 实现还是降级为约定、MP-15 接入还是删除）。加了一条测试守这个状态表：每个 MP 必须有状态行、每个未做项必须有理由与核实方式（变异回退确认有牙齿——把 MP-19 那行的理由与核实方式清空后断言变红）。断言 1018 → 1042，两环境均 Failed: 0。"}
+
+{"run_id":"2026-10-17T03:23:14Z","pattern":"manual-lean-audit","event":"manual.audit","item":"skills-boundary-and-simplification","level":"L1","duration_s":null,"items_found":8,"actions_taken":0,"escalations":0,"tokens_estimate":null,"outcome":"report-only","notes":"只读代码审计；bash init.sh: 1042/0，源仓库自审计 94/L2，但无真实循环。发现消费者阶段技能入口断裂、合并闸门证据来源/格式可被绕过、阶段 3 预算模板缺行及状态/文档重复。未改代码，未跑真实 GitHub、agent 平台、真实计费或 Linux；减量方案待作者确认。token 用量未计量，null 不是零成本。"}
+
+{"run_id":"2026-10-17T04:17:12Z","pattern":"manual-lean-plan","event":"manual.audit","item":"lean-spec-m0-m1-m2","level":"L1","duration_s":null,"items_found":14,"actions_taken":1,"escalations":0,"tokens_estimate":null,"outcome":"report-only","notes":"把减量审计落成 REVIEW-2026-10-17-lean-spec.md：M0 收口 6 项（边界标注、单一装配入口、删重复真相源、活状态收敛、配置去装饰、安装检查），M1 安全闭环 6 项（合并闸门审查绑定、verifier 证据契约、熔断 fail-closed、预算模板/kill switch、workflow 产物交付、路由与 attempts），M2 真实演练 2 项（GitHub 测试仓库、Linux/消费者烟测）；另列 12 项不做与 6 项待决策。本轮只写计划、未改代码；真实 GitHub/Linux/agent 平台消费均 NOT RUN，未计 token。"}
+
+{"run_id":"2026-10-17T08:33:54Z","pattern":"lean-implementation","event":"manual.audit","item":"lean-spec-m0-m1","level":"L2","duration_s":null,"items_found":14,"actions_taken":14,"escalations":0,"tokens_estimate":null,"outcome":"verified","notes":"按 REVIEW-2026-10-17-lean-spec.md 落地 M0 与 M1。M0：阶段驱动技能不再装进消费者并声明只在包仓库运行；删除 event-router 手抄路由表；删除 registry 的 patterns/priority 与 6 个无消费者键；install-skills --check 无 manifest 时不再误报用户技能；修正文档数字/@/--target 并加可照抄断言；STATE 657→75 行；重复 feature id 修正并加唯一性断言；loop-constraints 每条规则标 [机制]/[约定] 并加断言；run-log 文档改单行并加解析断言。M1：ledger-check 账本缺失/坏 JSON 改为 no-ledger exit 2，ci-sweeper 拦所有非 0 且 lock-held 跳过熔断；gate-check 接受 verifier 模板的无命令状态行、全 NOT RUN escalate、报告 Commit 与 head 比对；merge-gate 无批准不回退 head、要求最后一条 review 为 APPROVED、只接受 bot 评论；模板预算表补三行并加覆盖断言；报告型 workflow 交付 step summary，release-draft 删除会路由错的 release.published 触发；kill switch 删除 issue 标签承诺，docs/03 标注 attempts 未接线。断言 1042→1063，两环境本机均 Failed:0；bash init.sh 通过，自审计 94/L2。新增断言均先确认旧行为会红。NOT RUN：真实 GitHub Actions、Linux/GNU-timeout、agent 平台消费、真实 token 计费。"}
