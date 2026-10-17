@@ -19,7 +19,7 @@
 一个能自我触发的系统：发现任务、派发任务、验证结果、持久化状态。最小形式是「目标 + 验证方法 + 停止条件」。
 
 **Loop Harness**
-本框架。harness 五子系统提供单次运行的可靠性，loop 六原语提供连续运行的自主性，issue/PR 事件脊保证两者作用于同一批真实工作。
+本框架。harness 五子系统提供单次运行的可靠性，loop 六原语提供连续运行的自主性，issue/PR 事件或人给的待办保证两者作用于同一批真实工作。
 
 ---
 
@@ -31,7 +31,7 @@
 | **Tools** | agent 能做什么、不能做什么 | 权限配置 + 拒绝列表 |
 | **Environment** | 可复现的运行环境 | `init.sh`、锁文件 |
 | **State** | 当前进度、证据、下一步 | `feature_list.json`、`STATE.md` |
-| **Feedback** | 怎么知道做对了 | 验证命令、`loop-verifier` |
+| **Feedback** | 怎么知道做对了 | 验证命令、独立验证者 |
 
 **Repository as System of Record（仓库即真相源）**
 所有必要上下文必须落在仓库里。agent 看不到的东西，实际上不存在。
@@ -212,5 +212,5 @@ Prompt Engineering（指令）→ Context Engineering（信息）→ Loop Engine
 ## 相关阅读
 
 - 心智模型 → [00-mind-model.md](00-mind-model.md)
-- 事件脊 → [01-event-spine.md](01-event-spine.md)
+- 归档的 v1 事件脊 → [archive/01-event-spine.md](archive/01-event-spine.md)
 - 状态模型 → [02-state-model.md](02-state-model.md)

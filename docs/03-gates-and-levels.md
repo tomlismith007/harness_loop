@@ -1,6 +1,6 @@
 # 03 · 闸门与等级：什么条件下允许做什么
 
-本文档定义 L0–L3 就绪度等级、五类闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 与 `scripts/loop-audit.mjs` 的规格说明。
+本文档定义 L0–L3 就绪度等级、五类闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
 
 ---
 
@@ -70,7 +70,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ### 4. 验证闸门（Verification Gate）
 
-**判定**：`loop-verifier` 是否实际运行了测试并给出 `APPROVE`。
+**判定**：独立验证者是否实际运行了测试并给出 `APPROVE`。
 
 | 条件 | 动作 |
 |---|---|
@@ -145,8 +145,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 | 文件数超限 | **机械** | `gate-check.mjs` 数 diff 清单 |
 | head-commit 一致 | **机械** | 字符串比对两个 sha |
 | 回退测试结论 | **机械** | 读 `--red-check` 的值 |
-| 预算比例 | **机械** | `budget-check.mjs` 按 pattern 读 per-loop 上限 |
-| kill switch | **机械** | 读 `STATE.md` / `loop-constraints.md` 的独占行标记 |
+| kill switch | **机械** | `gate-check.mjs --state` 读 `STATE.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` |
 | **改动是否与 work item 相关** | **人工** | 脚本不知道 work item 的目标，无法判定"范围蔓延" |
 | **verdict 是否诚实** | **半机械** | 闸门能核对报告格式与自相矛盾，但无法验证测试真的跑过 |
 
@@ -161,7 +160,7 @@ node scripts/gate-check.mjs \
   --attempts 1 \
   --diff-files @changed.txt \
   --verdict approve \
-  --budget-pct 45 \
+  --state . \
   --reviewed-sha "$(git rev-parse HEAD)" \
   --head-sha "$(git rev-parse HEAD)" \
   --red-check pass \
@@ -172,15 +171,15 @@ node scripts/gate-check.mjs \
 
 | 写法 | 后果 |
 |---|---|
-| `--diff-files changed.txt`（少了 `@`） | 裸路径被当成"单个改动文件"，**拒绝列表闸门静默失效** |
+| `--diff-files changed.txt`（少了 `@`） | 脚本发现内容是路径清单 → **参数错误退出 1**。此前单行清单会被当成单一路径，拒绝列表静默失效 |
 | `--pause false` | `--pause` 是布尔标志，`false` 会被当成位置参数 → `pause=true` → **永久紧急刹车**。要显式传假用 `--pause=false`，或干脆省略（省略即假） |
-| `--verdict ESCALATE_HUMAN` | 大小写与连字符会被归一化，两种写法都接受（`loop-verifier` 的输出格式是大写下划线） |
+| `--verdict ESCALATE_HUMAN` | 大小写与连字符会被归一化，两种写法都接受（验证者的输出格式是大写下划线） |
 
-预算比例与 kill switch 由 `scripts/budget-check.mjs` 提供（按 pattern 读该循环自己的上限）：
+kill switch 由 `gate-check.mjs` 自己读取（`--state` 指向的目录下查 `STATE.md` 与 `loop-constraints.md`）：
 
 ```bash
-node scripts/budget-check.mjs --pattern merge-gate --json
-# exit 0 = normal/report-only；exit 3 = 立即退出
+node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state .
+# exit 0 = proceed；exit 3 = 立即退出（kill switch 生效）
 ```
 
 输出：
@@ -191,7 +190,6 @@ node scripts/budget-check.mjs --pattern merge-gate --json
   "phase": "gate",
   "attempts": 1,
   "files_changed": 1,
-  "budget_pct": 45,
   "verdict": "approve",
   "decision": "escalate",
   "gate": "denylist",
@@ -217,74 +215,17 @@ node scripts/budget-check.mjs --pattern merge-gate --json
 
 ---
 
-## `scripts/loop-audit.mjs` 评分维度
+## 等级与阶段
 
-审计工具检查仓库的就绪度。**满分 100，等级阈值 L1: 38 / L2: 58 / L3: 78。**
+v2 移除了 0–100 的就绪度评分（它被技能存在性抬高，分数高不等于机制在跑）。
+等级改由 `harness-stage.mjs` 的机械判据直接给出：
 
-### 评分维度
+| 等级 | 判据 |
+|---|---|
+| L1 | 阶段 1 的 7 项全过：6 个地基文件 + `init.sh` 真的能跑通 |
+| L2 | 阶段 2 的 5 项机械判据全过：账本、运行日志、验证入口、真实命令、本地化拒绝列表 |
 
-| 维度 | 分值 | 检查方式 |
-|---|---|---|
-| 基线 | 10 | 起始分 |
-| 状态文件 | 18 | `STATE.md` 或模式专属状态文件存在 |
-| triage 技能 | 14 | 至少一个 triage 类技能存在 |
-| verifier 技能 | 14 | `loop-verifier` 存在（maker/checker 分离） |
-| 循环配置 | 9 | `LOOP.md` 存在 |
-| 指令文件 | 9 | `AGENTS.md` 或 `CLAUDE.md` 存在 |
-| 多技能 | 14 | ≥2 个循环技能 |
-| 单技能 | 7 | 恰好 1 个 |
-| 约束文件 | 4 | `loop-constraints.md` 存在 |
-| 约束技能 | 2 | `loop-constraints` 技能存在 |
-| 安全文档 | 8 | `LOOP.md` 含闸门/拒绝列表关键词 + `docs/04-safety.md` 存在 |
-| 预算文档 | 3 | `loop-budget.md` |
-| 预算技能 | 2 | `loop-budget` 技能 |
-| 运行日志 | 3 | `loop-run-log.md` |
-| 熔断检测 | 3 | 账本文件或熔断关键词 |
-| 升级机制 | 3 | 升级/人工介入关键词 |
-| 工具范围 | 3 | 最小权限声明 |
-| GitHub 集成 | 10 | `.github/` 与 workflows |
-| MCP | 3 | 连接器配置 |
-| Worktree | 3 | worktree 隔离证据 |
-| 循环活动 | 6 | 动态证据（见下） |
-
-### 等级判定（顺序短路）
-
-```
-L3: score >= 78 且 verifier 存在 且 状态文件存在 且 l3Ready
-L2: score >= 58 且 triage 技能存在 且 verifier 存在
-L1: score >= 38 且 状态文件存在
-否则 L0
-```
-
-**L2 也要求 verifier 存在。** 这一条不是可选优化：L2 的定义是"由独立 verifier 验证的辅助修复"。没有 verifier 却授予 L2，等于批准自我验证——与"写代码的人不能验证自己的代码"直接冲突。缺 verifier 时封顶在 L1，并在报告中说明原因。
-
-其中：
-- `costReady` = 预算文档 且 运行日志 且 `LOOP.md` 含预算章节
-- `hasRealActivity` = 循环活动动态证据存在
-- `l3Ready` = `costReady` 且 `hasRealActivity`
-
-**L3 封顶告警**：分数 ≥78 且 verifier + 状态齐备，但缺成本可观测性 → 封顶 L2。分数 ≥78 且前三项齐备但无实证运行记录 → 封顶 L2。**结构性齐备不等于跑过。**
-
-### 循环活动动态证据（只认真实运行痕迹）
-
-审计刻意**不**把"文件存在"当作活动证据——那是结构性就绪，已由其他检查项计分。这里的目的是回答"它真的跑过吗"。以下四条任一成立才算：
-
-1. 状态文件里有**真实的 `Last run` 时间戳**（`never`、`—`、`TBD` 等占位符不算）
-2. `loop-run-log.md` 的 `## Log` 章节里有**真实的运行记录**（含 `run_id` 的 JSON；格式说明里的示例 JSON 不算）
-3. 状态文件的 Active 表里有**真实 work item 行**（占位行 `—` 不算）
-4. git 历史里有引用循环产物的提交
-
-**为什么这么严**：一个刚装配完、从未运行过的仓库，结构性分数可以很高。如果审计因此授予 L3，就等于鼓励"配置齐全但从未验证"的无人值守运行——这正是 `docs/05` 里最危险的失效模式之一。
-
-### CLI
-
-```bash
-node scripts/loop-audit.mjs .                    # 文本报告
-node scripts/loop-audit.mjs . --json             # JSON
-node scripts/loop-audit.mjs . --suggest          # 附改进建议与复制命令
-```
-
-**退出码**：`0` = 分数 ≥ 40；`2` = 分数 < 40（可用于 CI 关卡）。
+没有 L3。无人值守不是靠分数授予的——它需要事件接线与长期运行记录，本框架不再假装能机械判定。
 
 ---
 

@@ -31,7 +31,7 @@
 | | |
 |---|---|
 | **症状** | 循环重构无关模块、"修复"设计问题、改拒绝列表路径 |
-| **原因** | `minimal-fix` 技能过宽松；无路径允许/拒绝列表；triage 把架构工作列入 High Priority |
+| **原因** | 执行者段落过宽松；无路径允许/拒绝列表；triage 把架构工作列入 High Priority |
 | **对策** | 技能中强制执行拒绝列表；"尽可能小的差异" + verifier 检查被改动文件；triage 只报告信号不创造事项 |
 
 **量化信号**：单次修复改动 > 5 个文件，或 diff 中含与 work item 无关的文件。
@@ -150,8 +150,8 @@
    → 否：接线问题，不是 agent 问题
 
 2. 路由正确吗？
-   → node scripts/event-router.mjs --event <事件> 看输出
-   → 否：LOOP.md 路由表错误
+   → 看 STATE.md 的 High Priority 是否只有一项
+   → 否：待办来源不唯一
 
 3. 约束加载了吗？
    → 看运行日志开头有没有 "Constraints loaded from loop-constraints.md: N rules active."
@@ -227,7 +227,7 @@
 | 4 | 在 L1 质量达标前启用 L3 | 第一周 L1 仅报告，先衡量 triage 准确性 |
 | 5 | 共享状态却没有结构规范 | 每模式一个状态文件，或清晰分区 + 清理规则 |
 | 6 | MCP 拥有无限制写入权限 | L1 只用只读连接器 |
-| 7 | 没有紧急停止开关 | 在 `LOOP.md` 与预算文件中记录暂停机制 |
+| 7 | 没有紧急停止开关 | 在 `STATE.md` 或 `loop-constraints.md` 写独占一行的 `loop-pause-all` |
 | 8 | 用代码修复间歇性故障 | 分类 → 隔离或重试策略 → 升级环境故障 |
 | 9 | 没有路径许可清单却自动合并 | 明确允许列表（`loop-auto-merge-allowlist.md`，尚未创建——只在真要开启自动合并时才需要；默认 `auto_merge: false` 所以当前安全）；拒绝列表路径人工合并 |
 | 10 | 没有运行日志（只有 STATE.md） | 追加到 `loop-run-log.md` |

@@ -1,6 +1,6 @@
 # Loop Constraints
 
-> `loop-constraints` 技能在**每一轮开始时**读取本文件，并在任何动作之前加载全部规则。
+> `/harness-loop` 在**每一轮开始时**读取本文件，并在任何动作之前加载全部规则。
 > 本文件中的约束是**绑定的**——agent 必须遵守。冲突时本文件优先于任何其他指令。
 
 ## 加载确认
@@ -54,7 +54,7 @@ billing/**
 
 ## Verification
 
-- 执行者**不得**标记自己的 work item 为完成。`loop-verifier` 判定。
+- 执行者**不得**标记自己的 work item 为完成。独立验证者判定。
 - verifier 必须实际运行测试并报告输出片段，不得只凭 diff 判断。
 - verifier 无法运行测试（环境问题）→ `ESCALATE_HUMAN`，不要放行。
 - **回退测试（Red check）**：新增的测试必须能在修复前的代码上真的挂掉，且失败信息要指出
@@ -67,14 +67,15 @@ billing/**
   且其行为被测试断言。测试**不得**只断言配置文件里写着某个值——必须断言**改动该值会改变行为**。
   判别方法：把配置改掉，如果测试还是绿的，这个配置就是装饰品。
   一个永远生效不了的闸门，和一个不存在的闸门，在退出码上不可区分。
-  正面例子见 `test.mjs` 第 17 节：改 `registry.yaml` 的 `stagnation` 为 1 →
-  `ledger-check` 必须在 1 次重复失败后熔断；改 `max_attempts` 为 1 → `gate-check` 必须 escalate。
+  正面例子见 `test.mjs`：把 `gate-check.mjs` 的 `maxAttempts` 改为 1 →
+  测试必须变红；把 `ledger-check.mjs` 的 `stagnationThreshold` 改为 1 →
+  `stagnation` 判定必须提前触发。
 
 ## Lessons
 
-- 夜审循环（`lesson-harvest`）每天扫当天 commit，把教训写进 `LESSONS.md`。
+- 本轮发生**返工**（修了又改、验证被拒）→ 在 `LESSONS.md` 追加一行。
 - 同一条教训在 **3 个不同日期**出现 → 转正进本文件，从经验变成硬规则。
-- 转正后，`loop-verifier` 的检查项必须包含它。规则进了约束文件但 verifier 没读，等于没转正。
+- 转正后，验证者的检查项必须包含它。规则进了约束文件但验证者没读，等于没转正。
 
 ## Communication
 
@@ -82,16 +83,16 @@ billing/**
 - 未经批准不关闭 issue 或 PR。
 - 只在需要人工决策时通知，不做状态播报。
 
-## Budget
+## Kill Switch
 
-- token 花费达到日上限 **80%** → 切换到 report-only 模式（不派发执行子智能体）。
-- token 花费达到 **100%**，或 `loop-pause-all` 生效 → **立即退出**，在 `STATE.md` 写一行说明。
-- 不超过 `loop-budget.md` 中每个循环的 `max sub-agent spawns/run`。
+- `loop-pause-all` **独占一行**写在 `STATE.md` 或本文件里 → 立即退出，在 `STATE.md` 写一行说明。
+- 散文里提到不算；清除标记后人工重启。
+- `gate-check.mjs --state <dir>` 会真的读它并返回退出码 3。
 
 ## Worktrees
 
 - 无人值守的代码改动必须在独立 git worktree 中进行。
-- 一个修复一个 worktree；verifier REJECT 或升级后丢弃，不留残留分支。
+- 一个修复一个 worktree；验证者 REJECT 或升级后丢弃，不留残留分支。
 
 ## Data
 

@@ -8,8 +8,8 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  事件脊（Event Spine）                                       │
-│  issue / PR / CI / merge / release 事件 → work item          │
+│  输入（Input）                                                │
+│  GitHub issue / PR / CI 事件，或人写进 STATE.md 的待办         │
 │  职责：决定"什么时候有什么工作"                                │
 ├─────────────────────────────────────────────────────────────┤
 │  循环层（Loop Layer）— 六原语                                 │
@@ -41,7 +41,7 @@
 | **Tools** | 它能做什么、不能做什么 | 权限配置 + 拒绝列表 | 要么什么都干不了，要么能改生产配置 |
 | **Environment** | 环境如何复现 | `init.sh`、锁文件、版本固定 | "在我机器上能跑" |
 | **State** | 现在做到哪了、下一步是什么 | `feature_list.json`、`STATE.md` | 每轮重新发现项目结构 |
-| **Feedback** | 怎么知道做对了 | 验证命令、`loop-verifier` | 宣称完成但测试红着 |
+| **Feedback** | 怎么知道做对了 | 验证命令、独立验证者（`/harness-loop` 第 4 步） | 宣称完成但测试红着 |
 
 **投入产出比最高的通常是 Feedback。** 验证命令写得准，其他四个子系统的缺陷会自己暴露出来。
 
@@ -102,7 +102,7 @@
 
 ---
 
-## 事件脊：把 loop 接到真实工作上
+## 事件或待办：把 loop 接到真实工作上
 
 循环需要一个"什么时候做什么"的来源。有三种触发方式：
 
@@ -118,7 +118,7 @@
 
 反模式是每个循环各自轮询自己的信号——CI Sweeper 轮询 CI，PR Babysitter 轮询 PR，Daily Triage 又轮询一遍全部。结果是重复劳动、状态不一致、互相冲突。
 
-正确做法是**一条事件脊**：
+正确做法是**一个唯一的输入**（GitHub 事件，或人写进 `STATE.md` 的待办）：
 
 ```
 issue.opened ──▶ intake ──▶ triaged ──┐
@@ -155,9 +155,9 @@ PR.merged ──▶ post-merge ──▶ cleanup/debt ──▶ release draft �
 | 循环每轮从零开始，不记得上次 | **Loop** — 没有 external state |
 | 循环自我验证后放了坏代码进 main | **Loop** — 没有 maker/checker 分离 |
 | 循环空转烧钱 | **Loop** — 没有提前退出条件 |
-| 循环不知道该响应什么 | **事件脊** — 事件没有路由到阶段 |
-| 同一件事被多个循环重复处理 | **事件脊** — 没有 `acting_on` 冲突检测 |
-| 事件发生了但没人处理 | **事件脊** — 没有接线（workflow / webhook） |
+| 循环不知道该响应什么 | **输入不明确** — 没有唯一的待办来源 |
+| 同一件事被重复处理 | **输入不明确** — `STATE.md` 没有单一活动项 |
+| 事件发生了但没人处理 | **输入不明确** — 没有 `/harness-loop-issue` 或人工待办 |
 
 ---
 
@@ -188,6 +188,6 @@ PR.merged ──▶ post-merge ──▶ cleanup/debt ──▶ release draft �
 
 ## 下一步
 
-- 事件如何路由 → [01-event-spine.md](01-event-spine.md)
+- 四个命令各自做什么 → [../README.md](../README.md)
 - work item 的状态与字段 → [02-state-model.md](02-state-model.md)
 - 闸门规则与等级 → [03-gates-and-levels.md](03-gates-and-levels.md)

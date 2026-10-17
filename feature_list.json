@@ -1,6 +1,6 @@
 {
   "project": "harness_loop",
-  "last_updated": "2026-10-15",
+  "last_updated": "2026-10-17",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -12,371 +12,73 @@
     "blocked": "有记录的阻塞未解决",
     "passing": "要求的验证已通过且证据已记录"
   },
-  "note": "本仓库的「功能」是框架能力项。验证方式为脚本断言，不是用户可见行为。真实使用验证（阶段 2 判据 10、阶段 3 完整周期）必须在接入本框架的软件项目上做。",
+  "note": "本仓库的「功能」是框架能力项。验证方式为脚本断言，不是用户可见行为。真实使用验证必须在接入本框架的软件项目上做。",
   "features": [
     {
-      "id": "setup-001",
+      "id": "init-001",
       "priority": 1,
-      "area": "setup",
-      "title": "标准启动与验证路径可用",
-      "user_visible_behavior": "开发者克隆仓库后运行 ./init.sh，看到测试套件、自审计、CLI 入口检查全部通过",
+      "area": "stage1",
+      "title": "harness-init 产出 6 个地基文件",
+      "user_visible_behavior": "在一个空项目里运行 /harness-init，得到 AGENTS.md、feature_list.json、STATE.md、init.sh、loop-constraints.md、LESSONS.md",
       "status": "passing",
       "verification": [
-        "克隆仓库到干净目录",
-        "运行 bash init.sh",
-        "确认测试套件输出 Passed 且 Failed: 0",
-        "确认自审计输出分数与等级",
-        "确认五个 CLI 入口都报告 OK"
+        "node scripts/harness-stage.mjs <tmp> --upgrade --stage 1",
+        "确认 6 个文件存在，且不产出 loop-ledger.json / loop-run-log.md",
+        "确认 .claude/skills 与 .agents/skills 下各有 4 个技能"
       ],
       "evidence": [
-        "bash init.sh → Test suite: Passed 454 / Failed: 0；Self audit: 94/100 L2；CLI entry points: 5 个全 OK"
+        "test.mjs 第 14 节：阶段 1 产出 6 文件、不产出 loop 文档、双路径技能、消费者内脚本可运行；Passed 327 / Failed 0"
       ],
-      "notes": "init.sh 是真实命令，非占位符——这是阶段 1 判据 8 的要求"
+      "notes": ""
     },
     {
-      "id": "stage-001",
+      "id": "loopinit-001",
       "priority": 2,
-      "area": "stage",
-      "title": "三阶段检测与升级可用",
-      "user_visible_behavior": "对一个目标仓库运行 harness-stage.mjs，能看到当前阶段、每个阶段的判据通过情况、以及缺失项的具体补齐动作",
+      "area": "stage2",
+      "title": "harness-loop-init 装账本与运行日志，并校验拒绝列表已本地化",
+      "user_visible_behavior": "运行 /harness-loop-init 后得到 loop-ledger.json 与 loop-run-log.md；占位账本或照抄模板的拒绝列表会让 --require 退出 2",
       "status": "passing",
       "verification": [
-        "对空目录运行 node scripts/harness-stage.mjs <dir>，确认报告阶段 0",
-        "运行 --upgrade --stage 1，确认生成 10 个必需文件",
-        "再运行检测，确认阶段 1 达成 10/10",
-        "运行 --stage 1 --require，确认退出码 0",
-        "对阶段 2 运行 --require，确认退出码 2",
-        "verifier/breaker 技能写成 lorem ipsum + 账本 attempts 为空 → --stage 2 --require 必须非 0",
-        "对只有 pyproject.toml 的仓库 --upgrade --stage 1，生成的启动脚本不得含 npm 命令"
+        "node scripts/harness-stage.mjs <tmp> --upgrade --stage 2",
+        "确认占位账本时 --stage 2 --require 退出 2",
+        "替换 goal 并本地化拒绝列表后退出 0"
       ],
       "evidence": [
-        "node scripts/test.mjs 第 20 节：空目录阶段 0、装配后阶段 1、--require 退出码 0/2 全部通过",
-        "占位符 init.sh 使阶段 1 不达成的假阳性防护已测试",
-        "2026-10-14：判据从「文件存在」升级为「读内容」——曾有 verifier 全文 lorem ipsum 仍 6/6 PASS exit 0",
-        "2026-10-14：--upgrade 改用 verificationCommands()，曾硬编码 npm 给 Python 仓库且判据仍给 PASS"
+        "test.mjs 第 14 节：占位账本 → 退出 2；替换 goal + 本地化后 → 退出 0"
       ],
-      "notes": "阶段 2 = 6 机械 + 3 人工，阶段 3 = 7 机械 + 1 人工（以代码为准）。无法机械判定的项传 ok=null，不参与阶段达成计算。本仓库是技能源仓库，阶段判据对它天然不适用——自报阶段 1 是正确结果。"
+      "notes": ""
     },
     {
       "id": "loop-001",
       "priority": 3,
-      "area": "loop",
-      "title": "事件脊路由与闸门判定可用",
-      "user_visible_behavior": "给定一个仓库事件名，路由输出阶段、技能、闸门与下一步；给定一组改动文件与验证结论，闸门输出 proceed / escalate / exit",
+      "area": "runtime",
+      "title": "harness-loop 的闸门与熔断有真实代码入口",
+      "user_visible_behavior": "拒绝列表命中、尝试超限、范围超限、sha 不一致、回退测试未跑、证据自相矛盾都会让 gate-check 退出 2；同一错误 3 次让 ledger-check 退出 2",
       "status": "passing",
       "verification": [
-        "运行 event-router.mjs --list，确认 16 个事件已注册",
-        "对 pull_request_review.changes_requested 路由，确认阶段为 fix 且含 loop-verifier",
-        "对未注册事件路由，确认 registered=false 且不自创流程",
-        "运行 gate-check.mjs 传入拒绝列表路径，确认 decision=escalate",
-        "传入 reviewed-sha 与 head-sha 不一致，确认命中 head-commit 闸门",
-        "传入 red-check fail，确认命中 red-check 闸门",
-        "省略 --red-check 且 --phase gate，必须 exit 2（忘传参数不得放行）",
-        "--verdict aprove / --phase gtae 等未识别值，必须 exit 1",
-        "--attempts abc / --budget-pct abc 必须 exit 1（NaN 会关闭所有熔断器）",
-        "gate 阶段缺任一 sha 必须 exit 2（TOCTOU 不可绕过）",
-        "在 loop-constraints.md 的 Paths 块加 infra/prod/** 后，gate-check 必须 escalate",
-        "无参调用 gate-check 必须 exit 1"
+        "node scripts/gate-check.mjs --item p --phase fix --diff-files auth/x.ts（退出 2）",
+        "node scripts/ledger-check.mjs --ledger <3 次同错账本>（退出 2）",
+        "node scripts/test.mjs 第 4、5 节"
       ],
       "evidence": [
-        "node scripts/test.mjs 第 5、6 节：路由与闸门共 40+ 断言全部通过",
-        "2026-10-14：断言 498 → 590，全部通过；上述六项均做过变异回退（改回旧行为必挂）",
-        "2026-10-14：三份独立审查复现的 fail-open 全部关闭"
+        "test.mjs 第 4 节熔断 30+ 条、第 5 节闸门 60+ 条；变异回退确认（删 red-check 分支 → 3 条红）"
       ],
-      "notes": "闸门优先级：pause > budget100 > denylist > attempts > budget80 > scope > head-commit > red-check > verification。阈值来自 patterns/registry.yaml 的 defaults（readRegistryDefaults），CLI 可覆盖。拒绝列表真相源是 loop-constraints.md 的 ## Paths，不是脚本常量。"
+      "notes": ""
     },
     {
-      "id": "learn-001",
+      "id": "issue-001",
       "priority": 4,
-      "area": "learn",
-      "title": "经验→规则棘轮机制就位",
-      "user_visible_behavior": "LESSONS.md 有固定的记录格式与 Seen N× 计数；同一条教训出现 3 次后转正进硬约束，并在 Promoted 表留出处",
-      "status": "passing",
-      "verification": [
-        "确认 templates/LESSONS.md 含 Seen N× 格式说明与 3 次转正规则",
-        "确认 loop-constraints.md 有 Lessons 章节",
-        "确认 registry.yaml 声明 lesson_promotion_threshold: 3",
-        "确认 lesson-harvest 技能含三个扫描目标与 Done right 区"
-      ],
-      "evidence": [
-        "node scripts/test.mjs 第 11、12、17 节相关断言通过",
-        "harness-stage.mjs 的转正判据对空 Promoted 表返回 false（假阳性防护已测试）"
-      ],
-      "notes": "机制就位 ≠ 跑过。真实转正需要至少 3 天的夜审运行，见 learn-002"
-    },
-    {
-      "id": "learn-002",
-      "priority": 5,
-      "area": "learn",
-      "title": "夜审跑过并产生真实转正记录",
-      "user_visible_behavior": "LESSONS.md 有带日期的真实教训条目；Promoted 表有至少一条来自 3 次出现的转正记录",
+      "area": "runtime",
+      "title": "harness-loop-issue 只读发现并写入带完成标准的待办",
+      "user_visible_behavior": "运行 /harness-loop-issue 后，STATE.md 的 High Priority 出现带完成标准的条目；不应用标签、不评论、不关闭、不修复",
       "status": "not_started",
       "verification": [
-        "在接入本框架的真实项目上运行 lesson-harvest（至少连续 3 天）",
-        "确认 LESSONS.md 出现 Seen N× (日期) 形式的条目",
-        "确认有教训达到 Seen 3× 并转正进 loop-constraints.md",
-        "确认 loop-verifier 的检查项包含转正后的规则"
+        "在一个测试 GitHub 仓库上运行 /harness-loop-issue",
+        "确认 STATE.md 新增条目每条都有完成标准",
+        "确认没有任何写操作（gh api 调用记录里只有 GET）"
       ],
       "evidence": [],
-      "notes": "阻塞：本仓库不是真实软件项目，缺少真实 commit 流与 issue/PR 事件源。需在真实项目上验证。"
-    },
-    {
-      "id": "loop-002",
-      "priority": 6,
-      "area": "loop",
-      "title": "跑过一个完整循环周期",
-      "user_visible_behavior": "运行日志有完整周期的真实记录：事件触发 → 路由 → 派发 → 验证 → 闸门 → 状态写入",
-      "status": "not_started",
-      "verification": [
-        "在接入本框架的真实项目上接线事件（.github/workflows/ 或平台调度）",
-        "触发一个真实事件并完成全链路",
-        "确认 loop-run-log.md 的 ## Log 章节出现含 run_id 的 JSON",
-        "确认 STATE.md 的 Active 表有 acting_on 记录"
-      ],
-      "evidence": [],
-      "notes": "阻塞：本仓库无真实事件源。这是阶段 3 的判据 8（人工确认）。"
-    },
-    {
-      "id": "setup-002",
-      "priority": 7,
-      "area": "setup",
-      "title": "技能可装到跨 agent 的共享路径",
-      "user_visible_behavior": "运行 install-skills.mjs --layout agents，技能装到 .agents/skills/，非 ZCode 的 agent 也能读到；--layout both 两边都装；非法 layout 报错而非静默回落",
-      "status": "passing",
-      "verification": [
-        "运行 install-skills.mjs --target <tmp> --layout agents，确认写入 <tmp>/.agents/skills/ 且不写 .zcode",
-        "确认 manifest 记录 layout 与 dotDir 字段",
-        "运行 --layout both，确认两边都有技能",
-        "运行 --layout nonsense，确认退出码 1 且不写任何目录",
-        "运行 --layout agents --list 与 --uninstall，确认可用",
-        "对目标仓库运行 loop-audit.mjs，确认技能被计入（不再报 0 found）",
-        "预置同名不同内容的技能后 --uninstall，该用户技能必须仍在（清单只记本次实写）",
-        "清单写入 ../../../victim 路径后 --uninstall 必须拒绝退出 1，目标树外目录不得被删",
-        "--target 指向一个已存在的文件，必须给出可读错误而非裸 ENOTDIR 堆栈"
-      ],
-      "evidence": [
-        "node scripts/test.mjs 第 19 节：477 断言全通过（新增 16 项布局断言）",
-        "回退测试：把 --layout 改回硬编码 .zcode 后，10 项断言失败（含「非法 --layout 退出码 1」与「manifest 记录 layout」），确认测试真的在测行为",
-        "对 personal-agent 运行 loop-audit.mjs：7/100 → 43/100，Loop skills present (13 found) PASS，Independent verifier PASS",
-        "18 个技能文件与 skills/ 源逐字节一致（cmp 比对）",
-        "2026-10-14：修前 --uninstall 会删除安装器明确拒绝覆盖的用户技能（静默数据销毁）",
-        "2026-10-14：修前清单里的路径穿越可递归删除目标目录之外的任意目录"
-      ],
-      "notes": "修前 SKILL_DIRS 不含 .zcode/.agents，导致安装成功也报 0 found，且 L2 永远不可达（level=L2 要求 verifierPresent）"
-    },
-    {
-      "id": "stage-001",
-      "priority": 8,
-      "area": "stage",
-      "title": "阶段 1 只产出 harness 地基，不产出 loop 机制文档",
-      "user_visible_behavior": "新项目跑 /harness-init 后只有 7 个文件；LOOP.md / loop-budget.md / loop-run-log.md / session-handoff.md / loop-ledger.json 要到阶段 2 才出现。阶段 1 的 8 项判据拦得住占位 feature 和跑不通的启动脚本。",
-      "status": "passing",
-      "verification": [
-        "空目录跑 --upgrade --stage 1，确认只有 7 个文件且 5 个 loop 机制文件都不存在",
-        "确认模板出厂的占位 feature 判据 2 FAIL、换成真实 feature 后 PASS",
-        "把启动脚本换成格式合法但命令跑不通的版本，确认判据 5 FAIL 且证据含退出码",
-        "确认阶段 1 项目五个子系统都成立，且 lifecycle 入口不是阶段 2 才建的 loop 文档",
-        "跑 --upgrade --stage 2，确认 5 个 loop 机制文件此时才被补上",
-        "bash init.sh 与 node scripts/test.mjs 全绿"
-      ],
-      "evidence": [
-        "node scripts/test.mjs：624 断言全通过（修前 603，新增 21 条）",
-        "变异回退 4 轮：把 5 个 loop 文件塞回阶段 1 → 2 条断言红；判据 2 的 if(loose.length) 改 if(false) → 3 条红；判据 5 退回只读文本 → 1 条红；lifecycle 映射改回阶段 2 入口 → 2 条红",
-        "实测空目录跑 --upgrade --stage 1：就绪度 56/100，阶段 1 报告 7/8（唯一 FAIL 是模板占位 feature）",
-        "实测 --upgrade --stage 2 后目录新增 LOOP.md / loop-budget.md / loop-run-log.md / session-handoff.md / loop-ledger.json",
-        "2026-10-14 修前：阶段 1 产出 12 个文件（含 5 个 loop 机制文档），子系统映射依赖阶段 2 文件导致判据「五子系统都有最小工件」永远 FAIL",
-        "2026-10-14 修前：init.sh 判据只读文本，格式对但命令跑不通照样 PASS；且把脚本内 command not found 误报成 bash 不可用"
-      ],
-      "notes": "21 条新断言里有 4 条第一版是无牙齿的（变异后测试仍全绿），经双向断言补强。这个比例说明「加判据」不等于「加了闸门」"
-    },
-    {
-      "id": "stage-002",
-      "priority": 9,
-      "area": "stage",
-      "title": "三个建设阶段的技能归属唯一且可机械验证",
-      "user_visible_behavior": "装技能后菜单里是三个 / 入口（/harness-init、/harness-loop-init、/harness-consolidate），其余技能由 agent 按上下文自动调用。每个技能的 frontmatter 声明自己属于哪个阶段，且声明与升级列表一致。",
-      "status": "passing",
-      "verification": [
-        "跑 node scripts/test.mjs，确认 686 断言全通过",
-        "确认 17 个技能全部有 stage: 字段（1/2/3/runtime）",
-        "确认 harness-loop 标 runtime 且不在任何 STAGE*_SKILLS 里",
-        "把 harness-loop 塞回 STAGE1_SKILLS，确认测试变红",
-        "把 init-loop-harness 的 L1 门改成 if(true)，确认 4 条断言变红",
-        "把 --commands 覆盖逻辑删掉，确认 2 条断言变红",
-        "确认 REVIEW-*.md 里的旧名引用不被改名波及（审查记录不改）",
-        "空目录跑 --upgrade --stage 1 → 7 个文件；再跑 --stage 2 → 新增 5 个 loop 文件"
-      ],
-      "evidence": [
-        "node scripts/test.mjs：686 断言全通过（第一批结束时 624，新增 62）",
-        "变异回退 4 轮：STAGE1_SKILLS 加 harness-loop → 2 条红；init-loop-harness L1 门改 if(true) → 4 条红；--commands 覆盖删除 → 2 条红；frontmatter stage 改成 1 → 当场红",
-        "实测：新断言当场抓到我引入的矛盾——harness-loop 标 runtime 却被列在 STAGE1_SKILLS",
-        "2026-10-14 修前：init-loop-harness --level L1 写 12 个文件（含 5 个 loop 机制文档），技能分级另有一套（L1 装 loop-guard/signal-gatekeeper/lesson-harvest 却不装 harness-init）",
-        "2026-10-14 修前：loop-audit.mjs 的 Scaffold 建议、README、docs/07 都推荐无闸门的 init-loop-harness 路径",
-        "2026-10-14 修前：阶段 2 技能名与其「装配 loop 机制」的职责不符；README 同一个技能在两张表里分别标为「阶段」和「初始化」"
-      ],
-      "notes": "本轮 2 条新断言第一版无牙齿，经变异发现后补强。过程中我自己犯两个错：批量改 frontmatter 造出 11 个重复围栏；用 git checkout 撤销变异时抹掉了本轮已有改动——恢复变异应用改动前的副本，不是 git checkout"
-    },
-    {
-      "id": "stage-003",
-      "priority": 10,
-      "area": "stage",
-      "title": "熔断器读不到账本时停下，而不是默认放行",
-      "user_visible_behavior": "跑 ledger-check 时，账本文件缺失、attempts 字段缺失或类型不对，退出码是 2 且 verdict 是 no-ledger；attempts 为空数组仍是 0。harness-loop 第 0 步会检查事件接线，没接线记 no-wiring 而不是走完 8 步对着空队列空转。",
-      "status": "passing",
-      "verification": [
-        "node scripts/test.mjs，确认 721 断言全通过",
-        "对 7 种畸形账本输入调用 checkLedger，全部返回 no-ledger / 退出码 2",
-        "对 {attempts: []} 调用 checkLedger，仍返回 ok / 退出码 0",
-        "把 no-ledger 的 exit_code 改成 0，确认 7 条断言变红",
-        "把 LOOP.md 声明式接线的条件改成永假，确认 2 条断言变红",
-        "把 workflow 匹配放宽成「目录里有文件就算接线」，确认 2 条断言变红",
-        "空目录调用 hasEventWiring，确认返回 wired:false 并给出具体原因",
-        "在临时仓库只放一个 ci.yml（不含 loop 字样），确认仍判未接线"
-      ],
-      "evidence": [
-        "node scripts/test.mjs：721 断言全通过（第二批结束时 686，新增 35）",
-        "变异回退 4 轮：exit_code 改 0 → 7 条红；删 ledger 本体检查 → 崩溃；声明式接线条件改永假 → 2 条红；workflow 匹配放宽 → 2 条红",
-        "实测修前行为：{} / {attempts:nope} / {attempts:null} / null / undefined / [] 六种输入全部返回 verdict=ok exit=0",
-        "实测 hasEventWiring：本仓库返回 wired:true via:declared（LOOP.md 声明了调度）；不存在的目录返回 wired:false 并说明「没有 .github/workflows/，LOOP.md 也未声明调度」",
-        "2026-10-14 修前：ledger-check.mjs:72 的 Array.isArray(...)?...:[] 让 6 种畸形输入静默放行——熔断器在最需要说话的时候说「一切正常」（硬约束 11：永远生效不了的闸门和不存在的闸门在退出码上不可区分）",
-        "2026-10-14 修前：事件接线逻辑只存在于 harness-stage.mjs，harness-loop 只能靠技能文档让 agent「自己判断」，两份判断会漂移"
-      ],
-      "notes": "变异回退里出现过一次「变异没落地就宣布通过」的假绿灯：我以为写进去了，其实同一条命令末尾的 cp 已经还原了文件。确认变异落地要眼看那行代码，不能只读测试结果"
-    },
-    {
-      "id": "doc-001",
-      "priority": 11,
-      "area": "docs",
-      "title": "对外文档里的阶段判据数与技能总数与代码一致",
-      "user_visible_behavior": "README 与 docs/ 里关于「阶段 1 有几项判据」「一共有几个技能」的说法由测试守着，改代码不改正文档时测试会变红。",
-      "status": "passing",
-      "verification": [
-        "把 README 的「17 个技能」改成 19，确认漂移检测变红",
-        "把 README 阶段 1 的「8 项（全机械）」改回「10 项（全机械）」，确认漂移检测变红",
-        "确认 docs/12 里「补上 4 个技能」这种增量说法不会被误判成总数",
-        "node scripts/test.mjs 确认 724 断言全通过"
-      ],
-      "evidence": [
-        "node scripts/test.mjs：724 断言全通过（第三批结束时 721，新增 3）",
-        "变异回退 2 轮：技能数写错 → 当场红；判据数写回旧值 → 第一次没红（正则要求「10 项判据」紧邻，表格里写的是「10 项（全机械）」），修正后当场红",
-        "2026-10-14 修前：README 三阶段表、README 目录树注释、docs/10 的阶段表与技能表都还写着 10 项判据与 18 个技能，而代码已经是 8 项与 17 个——没有任何东西在校验它们",
-        "漂移检测第一次写成「禁掉 16/17/18 这几个数字」，结果把正确的 17 也判成漂移；改为「抽取总数并与磁盘实测比对」"
-      ],
-      "notes": "这条测试的价值不在新功能，在于它把「文档与代码脱节」这类一直靠人眼发现的漂移变成可执行检查。它自己写的时候也犯了两版无牙齿/过宽的错，都靠变异回退发现"
-    },
-    {
-      "id": "loop-003",
-      "priority": 1,
-      "area": "loop",
-      "title": "闸门要求证据，命令与接口一致，活动检测不虚高",
-      "user_visible_behavior": "按文档里的命令执行时闸门真的生效：approve 必须带 verifier 报告、拼错的标志被拒绝、close 阶段可路由、预算按该循环自己的上限算、审计只把事件驱动运行算作循环活动",
-      "status": "passing",
-      "verification": [
-        "node scripts/test.mjs —— 923 项断言全通过",
-        "对每个工作包做变异回退：改回错误写法，确认测试变红",
-        "node scripts/loop-audit.mjs . —— 活动检测不再把 manual 记录算作循环活动"
-      ],
-      "evidence": [
-        "node scripts/test.mjs → Passed: 923 / Failed: 0（本轮从 724 增至 923）",
-        "变异回退 13 次，捕获 2 条无牙齿断言 + 1 次变异未落地 + 3 处活动检测假阳性",
-        "bash init.sh → 退出码 0，全部 CLI 入口 OK（含 gate-check 证据路径、占位账本拒绝、未知标志拒绝）",
-        "node scripts/loop-audit.mjs . → 94/100 L2（原 98/L3 为虚高：把 manual 开发记录当成了循环活动）"
-      ],
-      "notes": "按 REVIEW-2026-10-14-remediation-spec.md 的 28 个工作包落地，修掉审查报告的 31 项缺陷（HL-01…HL-31）。新增三个脚本：budget-check（per-loop 上限真正生效）、queue-read（第 0 步的队列读取契约）、worktree（隔离要求首次有代码入口）。审计分数从 98/L3 降到 94/L2 是唯一正确的退步——它把虚高的就绪度还原成真实状态。"
-    },
-    {
-      "id": "loop-004",
-      "priority": 1,
-      "area": "loop",
-      "title": "每个注册循环都有自己的预算上限，且这条规则被断言守住",
-      "user_visible_behavior": "在 loop-budget.md 里删掉任一循环的预算行，测试立刻变红并指出是哪个循环；budget-check --pattern <任意注册循环> 都解析到该循环自己的上限，而不是全表最大值或别人的上限",
-      "status": "passing",
-      "verification": [
-        "node scripts/test.mjs → 931 项断言全通过",
-        "逐条变异回退：删预算行 / 去掉 slug 索引 / 让未知循环 fail-open，三次都必须变红",
-        "bash init.sh → 退出码 0",
-        "node -e 逐循环打印 resolveCap，确认 9 个注册循环全部 source=exact"
-      ],
-      "evidence": [
-        "node scripts/test.mjs → Passed: 931 / Failed: 0（本轮新增 8 条断言）",
-        "变异 1 删 signal-gatekeeper 行 → FAIL '每个注册循环都有预算上限' 并指名该循环",
-        "变异 2 去掉 parseBudgetCaps 的 slug 索引 → FAIL '注册循环报 exact'，得到 alias:ci sweeper",
-        "变异 3 让 resolveCap 对未知循环返回 500000 → 3 条 FAIL（含既有的'没有 per-loop 上限时退出'）",
-        "bash init.sh → INIT_EXIT=0",
-        "resolveCap 逐循环：issue-intake/pr-review-triage/ci-sweeper/merge-gate/post-merge-cleanup/release-drafter/daily-triage/lesson-harvest/signal-gatekeeper 全部 source=exact"
-      ],
-      "notes": "WP-09 的 A 类缺口第一半。原先断言写在单个文件上（/budget-check\\.mjs/.test(merge-gate.yml)），于是'另外 7 个 workflow 没接线'测不出来。本轮把断言改成规则：遍历 LOOP.md 注册的每个循环，逐一核对它在 loop-budget.md 里有自己的行。发现 signal-gatekeeper 同样注册为循环却没有预算行（registry.yaml 写着 suggested_daily_cap: 30000，但无消费者），一并补上。同时修 parseBudgetCaps 的静默回退：新增 slug 索引让表里的自然写法与循环 id 直接对上，capForPattern 的别名表退回真正的兜底，并新增 resolveCap 暴露解析路径（exact / alias:<表名> / null），使'借来的上限'与'自己的上限'在输出里可区分。另发现 loop-budget.md 与 LOOP.md 是两份各说各话的上限真相源，已记入 STATE.md Watch List。workflow 侧的接线（8 个 yml）仍未做——见 STATE.md High Priority。"
-    },
-    {
-      "id": "loop-005",
-      "priority": 1,
-      "area": "loop",
-      "title": "多循环协调的锁键在生产路径上真正生效",
-      "user_visible_behavior": "同一目标（分支/PR/issue）已被另一循环持有时，新的 workflow 运行产出 conflict=lock-held 并跳过落盘 work item；删掉任一 workflow 的 --target、或删掉写队列那一步的 if: 守卫，测试立刻变红",
-      "status": "passing",
-      "verification": [
-        "node scripts/test.mjs → 945 项断言全通过",
-        "逐条变异回退：删 --target / 删 conflict 消费 / 删 if: 守卫 / 给 release-draft 加 --target，四次都必须变红",
-        "bash init.sh → 退出码 0",
-        "行为断言：真跑 event-router CLI，有锁 → lock-held + held_by；目标不同 → 无冲突"
-      ],
-      "evidence": [
-        "node scripts/test.mjs → Passed: 945 / Failed: 0（本轮新增 14 条断言）",
-        "变异 1 删 pr-review 的 --target → FAIL 并指名 pr-review.yml",
-        "变异 2 把 jq -r '.conflict' 换成常量 → 第一版断言漏过，补强后 FAIL",
-        "变异 3 删写队列步骤的 if: 守卫 → 前两版断言漏过，改为按步骤定位后 FAIL",
-        "变异 4 给 release-draft 加 --target → FAIL（反向规则生效）",
-        "bash init.sh → INIT_EXIT=0",
-        "实测：传 --target main → conflict=lock-held；不传 → conflict 字段不存在"
-      ],
-      "notes": "WP-11 只改了技能文档，而 spec 状态表声称『断言已加并通过变异回退』——实际 test.mjs 里不存在针对 harness-loop/SKILL.md 的 --target 断言（grep '第 2 步' 命中 0 次）。本轮把断言补在规则层：落盘 work item 的 workflow 必须传 --target、必须真的读 conflict、写队列那一步必须有 if: 守卫；不落盘的不得传 --target。release-draft 有意排除（LOOP.md 列为可安全并发），并加注释说明是设计选择而非漏改。本轮工作曾被外部进程一次性还原，重做后立即提交（f36301b）。"
-    },
-    {
-      "id": "loop-006",
-      "priority": 1,
-      "area": "loop",
-      "title": "每个 workflow 都有预算与 kill switch 入口，且接线是 fail-closed",
-      "user_visible_behavior": "8 个 workflow 全部调用 budget-check.mjs 并各传自己的 pattern id；删掉任一 workflow 的调用、删掉 fail-closed 守卫、或把 LOOP_BOT_TOKEN 退回裸 GITHUB_TOKEN，测试立刻变红并指名该文件",
-      "status": "passing",
-      "verification": [
-        "node scripts/test.mjs → 954 项断言全通过",
-        "逐条变异回退：删 budget-check 调用 / 删 fail-closed 守卫 / 退回裸 GITHUB_TOKEN，三次都必须变红",
-        "bash init.sh → 退出码 0",
-        "python yaml.safe_load 解析全部 8 个 workflow，确认结构有效且都含预算步骤"
-      ],
-      "evidence": [
-        "node scripts/test.mjs → Passed: 954 / Failed: 0（本轮新增 9 条断言）",
-        "变异 1 删 release-draft 的 budget-check 调用 → 2 条 FAIL",
-        "变异 2 删 fail-closed 守卫 → FAIL 'budget-check 失败时 fail-closed'",
-        "变异 3 release-draft 退回裸 GITHUB_TOKEN → FAIL '每个调用 gh 的 workflow 都用 LOOP_BOT_TOKEN'",
-        "bash init.sh → INIT_EXIT=0",
-        "YAML 解析：8/8 结构有效，8/8 含预算步骤"
-      ],
-      "notes": "WP-09 第二半 + WP-04 第二半。修复前只有 merge-gate 有预算与 kill switch。daily-triage / lesson-harvest 的内联预算恒为 0%（正则不带 s/m 标志，匹配不上跨多行的 run-log JSON），且用 Math.max 取全表最大上限。merge-gate 的接线本身 fail-open（|| true 吞掉退出码 → jq 得到 null → 无检查继续）。LOOP_BOT_TOKEN 的真实面是 3 个调 gh 的 workflow（不是 8 个）——另 5 个不调 gh，权限只来自 permissions: 声明，断言反向守住它们不得引用该 token。限制：新接线的 5 个 workflow 不写 loop-run-log.md（budget-check 的唯一数据源），所以 used 恒为 0，预算百分比要等真实花费写进 run-log 才有意义；立即生效的是 kill switch。已写进 workflow 注释与 STATE.md。"
-    },
-    {
-      "id": "loop-007",
-      "priority": 1,
-      "area": "loop",
-      "title": "验证路径不自递归，超时杀整棵树，判据只算一次",
-      "user_visible_behavior": "在本仓库跑 bash init.sh 45 秒内完成（修复前 10 分 06 秒）且退出码 0；跑 harness-stage.mjs . 在 1 秒内返回并把判据 5 记为 NOT RUN；任何 init.sh 超时后不留孤儿进程",
-      "status": "passing",
-      "verification": [
-        "bash init.sh → 45.4s，退出码 0",
-        "node scripts/test.mjs → 979 项断言全通过",
-        "node scripts/harness-stage.mjs . --json → 0.31s，判据 5 = NOT RUN (self-reference)",
-        "变异回退 4 次：关自引用检测 / 禁用 GNU timeout / 去掉生成脚本的标记 / 去掉 memo，全部确认落地后变红",
-        "超时后检查 sleep.exe 进程数为 0（无孤儿）"
-      ],
-      "evidence": [
-        "bash init.sh → real 0m45.377s, INIT_EXIT=0（基线 10m06.026s）",
-        "node scripts/test.mjs → Passed: 979 / Failed: 0, real 0m43.694s（基线 64.7s，断言 954）",
-        "node scripts/harness-stage.mjs . --json → real 0m0.314s（基线 6m00.414s）",
-        "变异 1 关自引用检测 → 7 条 FAIL；变异 2 禁 GNU timeout → 3 条 FAIL（含孤儿断言）；变异 3 去标记 → 2 条 FAIL；变异 4 去 memo → 1 条 FAIL（expected 1, got 3）",
-        "探针实测（修复前）：69 次执行仓库自身 init.sh 全部 120s 超时、10,753 次 spawn、最深 9 层、21 棵孤儿树",
-        "对照实验：execFileSync timeout 后 3 层孙进程全 ALIVE；GNU timeout -k 后整棵树全灭"
-      ],
-      "notes": "三处修复：① 判据 5 自引用防护（两条判据各覆盖一种入口：LOOP_HARNESS_ACTIVE_INIT 标记 / root==PACK_ROOT）；② runWithTreeKill 用 GNU timeout 杀整棵树（Node 的 timeout 只杀直接子进程）；③ 判据 memoization（同一次运行判据 5 被算 3 遍 = init.sh 执行 3 次）。超时从 FAIL 改判 NOT RUN——超时是「没跑完」不是「跑不通」，原实现把它报成「bash 不可用」，证据指向错误的原因。变异 2 抓出我自己引入的 bug：降级路径 timedOut 与 spawnFailed 可同时为 true。第 4 项提议（--quick）主动跳过，理由见 STATE.md。"
+      "notes": "未在真实 GitHub 仓库上验证（硬约束 10）。"
     }
   ]
 }

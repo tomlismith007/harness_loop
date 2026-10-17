@@ -3,18 +3,16 @@
 # loop-harness 自身的标准启动与验证路径。
 #
 # 这个仓库是文档 + 零依赖 Node 脚本，没有构建步骤。
-# 验证 = 跑测试套件 + 自审计 + CLI 入口可用性。
+# 验证 = 跑测试套件 + CLI 入口可用性。
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-# 自我识别标记：harness-stage 的判据 5 会执行被审计仓库的 init.sh，而本脚本第 72 行
-# 又回头调用 harness-stage 审计本仓库——二者互为因果，会无限递归（实测套到 9 层、
-# 69 次 120s 超时、上万次 spawn，且每次超时都留孤儿进程）。harness-stage 凭这个
+# 自我识别标记：harness-stage 的判据会执行被审计仓库的 init.sh，而本脚本又回头
+# 调用 harness-stage 审计本仓库——二者互为因果，会无限递归。harness-stage 凭这个
 # 标记认出「要跑的正是正在运行的这份 init.sh」，记为 NOT RUN 而不是重入。
-# 生成的 init.sh（common.initScriptFromCommands）带同样的标记。
 ROOT_WIN="$(cd "$ROOT_DIR" && pwd -W 2>/dev/null || pwd)"
 export LOOP_HARNESS_ACTIVE_INIT="$ROOT_WIN/init.sh"
 
@@ -26,12 +24,8 @@ node --version
 echo "=== Test suite ==="
 node scripts/test.mjs
 
-echo "=== Self audit ==="
-node scripts/loop-audit.mjs .
-
 echo "=== Pre-commit hook ==="
-# 装一次就常驻。断言套件是唯一能拦住"删掉 verifier 条件"这类改动的机制，
-# 手动跑是纪律，钩子是机制。
+# 装一次就常驻。断言套件是唯一能拦住"删掉验证者条件"这类改动的机制。
 if [ "$(git config core.hooksPath || true)" = ".githooks" ]; then
   echo "  hooks path    OK (.githooks)"
 else
@@ -40,11 +34,11 @@ else
 fi
 
 echo "=== CLI entry points ==="
-node scripts/event-router.mjs --list > /dev/null && echo "  event-router  OK"
-# 账本用临时的一份：出厂的 loop-ledger.json 带占位 goal，熔断器会（正确地）判
+node scripts/harness-stage.mjs . > /dev/null && echo "  harness-stage OK"
+# 账本用临时的一份：出厂的 loop-ledger.json 带示例 goal，熔断器会（正确地）判
 # placeholder-ledger 并退出 2。用仓库里那份测会得到一个与"脚本坏了"无法区分的失败。
 LEDGER_PROBE="$(mktemp)"
-printf '{"goal":"probe","pattern":"x","level":"L1","attempts":[]}\n' > "$LEDGER_PROBE"
+printf '{"goal":"probe","attempts":[]}\n' > "$LEDGER_PROBE"
 node scripts/ledger-check.mjs --ledger "$LEDGER_PROBE" > /dev/null && echo "  ledger-check  OK"
 rm -f "$LEDGER_PROBE"
 # 占位账本必须被拦下——这是熔断器"区分示例数据与真实历史"的那条判据。
@@ -53,7 +47,7 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null 2>&1 \
   || echo "  ledger-check  OK (placeholder ledger rejected)"
 # gate 阶段的 approve 需要证据文件（verdict 是断言，不是证据）。
 EVIDENCE_PROBE="$(mktemp)"
-printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → PASS\n- Red check: PASS\n' > "$EVIDENCE_PROBE"
+printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → PASS\n\n### Checks not run\n- —\n' > "$EVIDENCE_PROBE"
 node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
   --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
   --evidence-file "$EVIDENCE_PROBE" > /dev/null \
@@ -74,10 +68,14 @@ node scripts/gate-check.mjs --item pr-1 --phase gtae --verdict approve > /dev/nu
 node scripts/gate-check.mjs --item pr-1 --phase fix --diff-filesx a.ts > /dev/null 2>&1 \
   && echo "  gate-check    BROKEN (unknown flag should be rejected)" \
   || echo "  gate-check    OK (unknown flag rejected)"
-node scripts/budget-check.mjs --pattern ci-sweeper > /dev/null && echo "  budget-check  OK"
-node scripts/queue-read.mjs > /dev/null && echo "  queue-read    OK"
-node scripts/loop-audit.mjs . > /dev/null && echo "  loop-audit    OK"
-node scripts/harness-stage.mjs . > /dev/null && echo "  harness-stage OK"
+# kill switch 必须由脚本自己读文件
+PAUSE_PROBE="$(mktemp -d)"
+printf 'loop-pause-all\n' > "$PAUSE_PROBE/STATE.md"
+node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state "$PAUSE_PROBE" > /dev/null 2>&1 \
+  && echo "  gate-check    BROKEN (loop-pause-all should exit 3)" \
+  || echo "  gate-check    OK (kill switch enforced)"
+rm -rf "$PAUSE_PROBE"
+node scripts/install-skills.mjs --target . --list > /dev/null && echo "  install-skills OK"
 
 echo "=== Verification Complete ==="
 echo
