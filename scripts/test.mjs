@@ -761,11 +761,39 @@ section('13. 技能安装（双路径）');
 
   eq('--uninstall 退出 0', run(['--uninstall']).code, 0);
   ok('卸载后 harness-loop 目录消失', !fs.existsSync(path.join(tmp, '.claude/skills/harness-loop')));
-  ok('卸载后清单消失', !fs.existsSync(path.join(tmp, '.claude/skills/.loop-harness-install.json')));
+  ok('卸载后清单消失', !fs.existsSync(path.join(tmp, '.claude/skills/.harness-loop-install.json')));
+
+  // 旧清单名（.loop-harness-install.json）必须仍能卸载，且安装时会被清掉。
+  // 已安装副本早于改名，用户不该因为改名而无法卸载。
+  {
+    const legacyTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-legacy-'));
+    const legacyRun = (args) => {
+      try {
+        execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', legacyTmp, ...args],
+          { encoding: 'utf8', cwd: legacyTmp });
+        return 0;
+      } catch (e) { return e.status; }
+    };
+    fs.mkdirSync(path.join(legacyTmp, '.claude/skills/harness-loop'), { recursive: true });
+    fs.writeFileSync(path.join(legacyTmp, '.claude/skills/harness-loop/SKILL.md'), '# old');
+    fs.writeFileSync(path.join(legacyTmp, '.claude/skills/.loop-harness-install.json'),
+      JSON.stringify({ skills: ['harness-loop'] }));
+    eq('旧清单仍可卸载', legacyRun(['--uninstall']), 0);
+    ok('旧清单卸载后目录消失', !fs.existsSync(path.join(legacyTmp, '.claude/skills/harness-loop')));
+
+    // 安装时旧清单必须被清掉，不能与新清单并存
+    fs.writeFileSync(path.join(legacyTmp, '.claude/skills/.loop-harness-install.json'),
+      JSON.stringify({ skills: [] }));
+    eq('安装成功', legacyRun([]), 0);
+    ok('安装后新清单存在', fs.existsSync(path.join(legacyTmp, '.claude/skills/.harness-loop-install.json')));
+    ok('安装后旧清单被清掉', !fs.existsSync(path.join(legacyTmp, '.claude/skills/.loop-harness-install.json')));
+    fs.rmSync(legacyTmp, { recursive: true, force: true });
+  }
 
   // 清单是用户可写文件，越界路径必须被拒绝
   fs.mkdirSync(path.join(tmp, '.claude/skills'), { recursive: true });
-  fs.writeFileSync(path.join(tmp, '.claude/skills/.loop-harness-install.json'),
+  fs.writeFileSync(path.join(tmp, '.claude/skills/.harness-loop-install.json'),
     JSON.stringify({ skills: ['../../outside'] }));
   eq('清单越界路径被拒绝', run(['--uninstall']).code, 1);
 

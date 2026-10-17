@@ -23,7 +23,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { parseArgs, exists, readText, writeText, printJson, PACK_ROOT, fail } from './lib/common.mjs';
 
-const MANIFEST_NAME = '.loop-harness-install.json';
+const MANIFEST_NAME = '.harness-loop-install.json';
+// 旧清单名：v2 早期版本用过。安装/卸载时一并清理，避免两个清单并存。
+const LEGACY_MANIFEST_NAME = '.loop-harness-install.json';
 
 /**
  * 布局 → 点目录。
@@ -125,6 +127,9 @@ function install(args) {
       dotDir: target.dot,
       skills: written,
     }, null, 2) + '\n');
+    // 旧清单名一并清掉：两个清单并存时，uninstall 会按新清单删一次、
+    // 旧清单留在原地，下一次 `--list` 又显示“已安装过”。
+    fs.rmSync(path.join(target.dir, LEGACY_MANIFEST_NAME), { force: true });
 
     const installed = results.filter((r) => r.status === 'installed').length;
     const unchanged = results.filter((r) => r.status === 'unchanged').length;
@@ -160,7 +165,10 @@ function uninstall(args) {
   const missing = [];
 
   for (const target of dest.dirs) {
-    const manifestPath = path.join(target.dir, MANIFEST_NAME);
+    // 新清单优先；只有旧清单时也能卸载（升级路径）。
+    const newPath = path.join(target.dir, MANIFEST_NAME);
+    const legacyPath = path.join(target.dir, LEGACY_MANIFEST_NAME);
+    const manifestPath = exists(newPath) ? newPath : (exists(legacyPath) ? legacyPath : newPath);
     if (!exists(manifestPath)) {
       missing.push(target.dir);
       continue;
@@ -185,7 +193,8 @@ function uninstall(args) {
         removed.push(`${target.dot}/${name}`);
       }
     }
-    fs.rmSync(manifestPath, { force: true });
+    fs.rmSync(newPath, { force: true });
+    fs.rmSync(legacyPath, { force: true });
   }
 
   if (!removed.length && missing.length === dest.dirs.length) {
@@ -220,7 +229,9 @@ function checkInstalled(args) {
       missing.push(target.dir);
       continue;
     }
-    const manifestPath = path.join(target.dir, MANIFEST_NAME);
+    const manifestPath = [MANIFEST_NAME, LEGACY_MANIFEST_NAME]
+      .map((n) => path.join(target.dir, n))
+      .find((p) => exists(p)) || path.join(target.dir, MANIFEST_NAME);
     let manifest = null;
     if (exists(manifestPath)) {
       try { manifest = JSON.parse(readText(manifestPath)); } catch { manifest = null; }
@@ -280,7 +291,9 @@ function listInstalled(args) {
   };
 
   for (const target of dest.dirs) {
-    const manifestPath = path.join(target.dir, MANIFEST_NAME);
+    const manifestPath = [MANIFEST_NAME, LEGACY_MANIFEST_NAME]
+      .map((n) => path.join(target.dir, n))
+      .find((p) => exists(p)) || path.join(target.dir, MANIFEST_NAME);
     let manifest = null;
     if (exists(manifestPath)) {
       try { manifest = JSON.parse(readText(manifestPath)); } catch { manifest = null; }
