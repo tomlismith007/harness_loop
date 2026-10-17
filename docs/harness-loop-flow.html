@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loop Harness · 真实流程图</title>
+<style>
+  :root{
+    --ink:#0c100e;
+    --panel:#131a16;
+    --panel-2:#18211c;
+    --line:#2a352e;
+    --line-soft:#202a24;
+    --text:#e8e4da;
+    --muted:#9aa79e;
+    --dim:#8b978f;
+    --amber:#e0a458;
+    --amber-soft:#3a2c1b;
+    --sage:#8fb3a3;
+    --pass:#8fbf6a;
+    --pass-soft:#1d2a19;
+    --stop:#e59073;
+    --stop-soft:#2e1d17;
+    --wait:#d8c07a;
+    --wait-soft:#2c2716;
+    --mono:"JetBrains Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:76px}
+  body{
+    margin:0;background:var(--ink);color:var(--text);font-family:var(--sans);
+    line-height:1.65;
+    background-image:
+      radial-gradient(1100px 520px at 12% -8%, rgba(224,164,88,.10), transparent 60%),
+      radial-gradient(900px 420px at 92% 4%, rgba(143,179,163,.07), transparent 55%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 64px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 64px);
+  }
+  a{color:var(--amber);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,kbd{font-family:var(--mono);font-size:.86em;color:#f0d9b5;background:rgba(224,164,88,.08);padding:.12em .38em;border-radius:4px;border:1px solid rgba(224,164,88,.16)}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+
+  header.hero{padding:72px 0 40px;border-bottom:1px solid var(--line-soft)}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--amber);margin:0 0 18px}
+  h1{font-size:clamp(2rem,4.2vw,3.4rem);line-height:1.12;margin:0 0 18px;font-weight:650;letter-spacing:-.02em}
+  h1 .thin{color:var(--muted);font-weight:350}
+  .lede{font-size:1.06rem;color:var(--muted);max-width:760px;margin:0 0 26px}
+  .stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+  .stat{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:999px}
+  .stat b{color:var(--text);font-weight:600}
+
+  nav.toc{position:sticky;top:0;z-index:20;background:rgba(12,16,14,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line-soft)}
+  nav.toc .wrap{display:flex;gap:4px;overflow-x:auto;padding-top:10px;padding-bottom:10px;scrollbar-width:none}
+  nav.toc a{flex:0 0 auto;font-size:12.5px;color:var(--muted);padding:6px 11px;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+  nav.toc a:hover{color:var(--text);background:var(--panel);text-decoration:none;border-color:var(--line)}
+
+  section{padding:64px 0 8px;border-bottom:1px solid var(--line-soft)}
+  section:last-of-type{border-bottom:0}
+  .sec-head{display:flex;align-items:baseline;gap:16px;margin-bottom:8px}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--amber);letter-spacing:.12em}
+  h2{font-size:clamp(1.5rem,2.6vw,2rem);margin:0;font-weight:600;letter-spacing:-.01em}
+  .sec-sub{color:var(--muted);max-width:820px;margin:6px 0 28px;font-size:.98rem}
+
+  .card{background:linear-gradient(180deg,var(--panel),rgba(19,26,22,.72));border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+  .card + .card{margin-top:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr}}
+
+  h3{font-size:1.02rem;margin:0 0 10px;font-weight:600}
+  h4{font-size:.9rem;margin:18px 0 8px;font-weight:600;color:var(--sage)}
+  p{margin:.5em 0}
+  ul,ol{margin:.5em 0;padding-left:1.3em}
+  li{margin:.28em 0}
+  .small{font-size:.88rem;color:var(--muted)}
+  .tiny{font-size:.82rem;color:var(--dim)}
+  .mono{font-family:var(--mono)}
+  .nowrap{white-space:nowrap}
+
+  .badge{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;letter-spacing:.04em;padding:3px 8px;border-radius:999px;border:1px solid;vertical-align:middle;white-space:nowrap}
+  .b-mech{color:var(--pass);border-color:rgba(143,191,106,.35);background:var(--pass-soft)}
+  .b-conv{color:var(--wait);border-color:rgba(216,192,122,.32);background:var(--wait-soft)}
+  .b-wire{color:var(--stop);border-color:rgba(217,119,87,.35);background:var(--stop-soft)}
+  .b-exit{color:var(--stop);border-color:rgba(217,119,87,.35);background:var(--stop-soft)}
+  .b-pass{color:var(--pass);border-color:rgba(143,191,106,.35);background:var(--pass-soft)}
+  .b-wait{color:var(--wait);border-color:rgba(216,192,122,.32);background:var(--wait-soft)}
+
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:20px;font-size:12.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+
+  /* 三层结构 */
+  .layers{display:grid;gap:10px;margin-top:8px}
+  .layer{display:grid;grid-template-columns:180px 1fr;gap:18px;align-items:start;border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--panel)}
+  .layer .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--amber);padding-top:3px}
+  .layer strong{display:block;margin-bottom:4px}
+  .layer .small{margin:0}
+  @media(max-width:720px){.layer{grid-template-columns:1fr;gap:6px}}
+
+  /* 时间线 */
+  .timeline{position:relative;margin-top:6px}
+  .step{display:grid;grid-template-columns:54px 1fr;gap:16px;position:relative;padding-bottom:22px}
+  .step:last-child{padding-bottom:0}
+  .step::before{content:"";position:absolute;left:26px;top:44px;bottom:0;width:1px;background:linear-gradient(180deg,var(--line),var(--line-soft))}
+  .step:last-child::before{display:none}
+  .step .dot{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-family:var(--mono);font-size:13px;color:var(--amber);background:var(--panel-2);border:1px solid var(--line);position:relative;z-index:1}
+  .step .body{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 18px}
+  .step .body h3{margin:0 0 6px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .step .body p:last-child{margin-bottom:0}
+  .exits{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .exit{font-size:12.5px;color:var(--muted);border:1px dashed var(--line);border-radius:8px;padding:6px 10px;background:rgba(217,119,87,.05)}
+  .exit b{color:var(--stop);font-family:var(--mono);font-weight:600;font-size:12px}
+
+  /* 闸门 */
+  .gates{counter-reset:g;display:grid;gap:9px;margin-top:6px}
+  .gate{display:grid;grid-template-columns:40px 1fr auto;gap:14px;align-items:center;border:1px solid var(--line);border-left:3px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 16px}
+  .gate .n{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .gate .what strong{display:block;font-size:.95rem}
+  .gate .what span{font-size:.83rem;color:var(--muted)}
+  .gate .res{font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .g-exit{border-left-color:var(--stop)} .g-exit .res{color:var(--stop);background:var(--stop-soft);border:1px solid rgba(217,119,87,.3)}
+  .g-esc{border-left-color:var(--amber)} .g-esc .res{color:var(--amber);background:var(--amber-soft);border:1px solid rgba(224,164,88,.3)}
+  .g-ro{border-left-color:var(--wait)} .g-ro .res{color:var(--wait);background:var(--wait-soft);border:1px solid rgba(216,192,122,.3)}
+  .g-ok{border-left-color:var(--pass)} .g-ok .res{color:var(--pass);background:var(--pass-soft);border:1px solid rgba(143,191,106,.3)}
+  @media(max-width:720px){.gate{grid-template-columns:30px 1fr}.gate .res{grid-column:2;justify-self:start}}
+
+  /* 通用流程盒 */
+  .flow{display:grid;gap:0;margin-top:6px}
+  .node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 16px;font-size:.92rem}
+  .node b{font-weight:600}
+  .node small{display:block;color:var(--muted);font-size:.8rem;margin-top:2px}
+  .arrow{height:22px;display:grid;place-items:center;color:var(--dim);font-family:var(--mono);font-size:12px}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:720px){.split{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;font-size:.87rem;margin-top:10px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+  th{color:var(--sage);font-weight:600;font-size:.82rem;letter-spacing:.06em;text-transform:uppercase}
+  tr:last-child td{border-bottom:0}
+  td code{white-space:nowrap}
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:4px 6px}
+  .tbl-wrap table{margin:0}
+
+  .callout{border:1px solid rgba(224,164,88,.28);background:linear-gradient(180deg,rgba(224,164,88,.07),rgba(224,164,88,.02));border-radius:12px;padding:16px 18px;margin-top:16px}
+  .callout.warn{border-color:rgba(217,119,87,.3);background:linear-gradient(180deg,rgba(217,119,87,.08),rgba(217,119,87,.02))}
+  .callout.ok{border-color:rgba(143,191,106,.28);background:linear-gradient(180deg,rgba(143,191,106,.07),rgba(143,191,106,.02))}
+  .callout h3{margin-top:0;font-size:.95rem}
+
+  .kbd-row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+  .kbd-row span{font-family:var(--mono);font-size:12px;border:1px solid var(--line);background:var(--panel-2);padding:5px 9px;border-radius:6px;color:var(--muted)}
+
+  footer{padding:48px 0 64px;color:var(--dim);font-size:.85rem}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between}
+
+  @media print{
+    body{background:#fff;color:#111}
+    nav.toc{display:none}
+    .card,.layer,.step .body,.gate,.node,.tbl-wrap{background:#fff;border-color:#ccc}
+    code{background:#f3f3f3;color:#111;border-color:#ddd}
+    a{color:#111}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>真实流程图<br><span class="thin">从空仓库到一次事件运行，代码实际做了什么</span></h1>
+    <p class="eyebrow">按 scripts/ 与 workflow 的实际行为绘制</p>
+    <p class="lede">
+      这份图按仓库里的<strong>可执行代码</strong>绘制，不按文档愿景绘制。每一条分支都对应
+      <code>scripts/*.mjs</code> 里真实存在的判断；没有代码入口的承诺单独标为
+      <span class="badge b-wire">未接线</span>。
+    </p>
+    <div class="stats">
+      <span class="stat"><b>16</b> 个已注册事件</span>
+      <span class="stat"><b>17</b> 个技能</span>
+      <span class="stat"><b>8</b> 个示例 workflow</span>
+      <span class="stat"><b>11</b> 个顶层脚本</span>
+      <span class="stat"><b>1067</b> 项断言 · 本机与 ubuntu 均通过</span>
+      <span class="stat">自审计 <b>94/100 · L2</b></span>
+    </div>
+    <div class="legend">
+      <span><span class="badge b-mech">机制</span> 有代码入口，测试断言改值会改行为</span>
+      <span><span class="badge b-conv">约定</span> 靠人或 agent 自觉，代码不拦</span>
+      <span><span class="badge b-wire">未接线</span> 文档提到，但没有生产消费者</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#layers">三层结构</a>
+    <a href="#assembly">装配</a>
+    <a href="#entry">事件入口</a>
+    <a href="#runtime">运行时 8 步</a>
+    <a href="#gates">闸门判定</a>
+    <a href="#budget">预算与急停</a>
+    <a href="#breaker">熔断器</a>
+    <a href="#evidence">验证契约</a>
+    <a href="#state">状态回写</a>
+    <a href="#boundary">真实边界</a>
+  </div>
+</nav>
+
+<!-- ============================================================ -->
+<section id="layers">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">00</span><h2>三层结构：谁负责什么</h2></div>
+    <p class="sec-sub">
+      这三层是理解全部流程的前提。下层不稳，上层只是把不可靠放大；上层没有运行器，
+      事件就止于“任务已交付”。
+    </p>
+
+    <div class="layers">
+      <div class="layer">
+        <div class="tag">EVENT SPINE</div>
+        <div>
+          <strong>事件脊：决定“什么时候有什么工作”</strong>
+          <p class="small">
+            GitHub 事件（issue / PR / CI / tag）进入 workflow → 被消毒 → 调
+            <code>event-router.mjs</code> 得到 phase、skills、gates → 写成
+            <code>.loop/queue/&lt;item&gt;.json</code> → 作为 artifact 交付。
+            <span class="badge b-mech">机制</span>
+          </p>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="tag">LOOP LAYER</div>
+        <div>
+          <strong>运行层：决定“工作如何连续发生”</strong>
+          <p class="small">
+            <code>harness-loop</code> 技能按 8 步跑一轮：退出检查 → 约束 → 路由 → 锁 → 预算
+            → 派发 → 闸门 → 状态。它<strong>不执行具体动作</strong>，只决定派发谁、何时停、何时交给人。
+            <span class="badge b-conv">约定</span>（技能由 agent 执行）
+          </p>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="tag">HARNESS</div>
+        <div>
+          <strong>地基：决定“单次运行是否可靠”</strong>
+          <p class="small">
+            <code>AGENTS.md</code>（指令）、<code>STATE.md</code> + <code>feature_list.json</code>（状态）、
+            <code>init.sh</code>（验证入口）、<code>loop-constraints.md</code>（范围底线）、
+            <code>loop-verifier</code>（独立检查者）。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <h3>先记住这条边界</h3>
+      <p class="small" style="margin:0">
+        本包<strong>不含 agent 运行器</strong>。workflow 只做“感知 + 判定 + 记账”，
+        真正的修改与验证需要外部平台消费队列产物。没有平台时，循环停在
+        <code>fix-proposed</code>——这是合法结局，不是“已经自动修好了”。
+        <span class="badge b-wire">未接线</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="assembly">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">01</span><h2>装配：从空仓库到可运行</h2></div>
+    <p class="sec-sub">
+      入口只有一个：<code>harness-stage.mjs</code>。它先审计目标仓库，算出当前阶段，
+      再按 <code>--upgrade --stage N</code> 补齐产物。阶段驱动技能只在包仓库运行。
+    </p>
+
+    <div class="flow">
+      <div class="node">
+        <b>① 检测</b>
+        <small><code>node scripts/harness-stage.mjs &lt;repo&gt;</code> → 跑 <code>loop-audit</code> 评分，逐条执行阶段判据，输出当前阶段与差距。只读。</small>
+      </div>
+      <div class="arrow">↓</div>
+      <div class="node">
+        <b>② 补齐</b>
+        <small><code>node scripts/harness-stage.mjs &lt;repo&gt; --upgrade --stage N</code>。跳级会被拒绝（阶段 3 要求 1、2 已完成），<code>--force</code> 是显式逃生门。</small>
+      </div>
+      <div class="arrow">↓</div>
+      <div class="node">
+        <b>③ 校验</b>
+        <small><code>--stage N --require</code>：未达成退出码 2，可直接做 CI 关卡。</small>
+      </div>
+    </div>
+
+    <h3 style="margin-top:30px">每个阶段实际写什么</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>阶段</th><th>文件</th><th>技能（装进消费者）</th><th>脚本 / workflow</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>1 初始化</b><br><span class="tiny">L1 只读</span></td>
+            <td>6 个模板 + 生成的 <code>init.sh</code>：<code>AGENTS.md</code>、<code>feature_list.json</code>、<code>progress.md</code>、<code>STATE.md</code>、<code>LESSONS.md</code>、<code>loop-constraints.md</code></td>
+            <td>6 个运行/控制技能 + <code>harness-loop</code>：<code>loop-constraints</code>、<code>loop-budget</code>、<code>event-router</code>、三个 triage</td>
+            <td>7 个运行脚本 + <code>lib/common.mjs</code></td>
+          </tr>
+          <tr>
+            <td><b>2 loop 机制</b><br><span class="tiny">L2 辅助修复</span></td>
+            <td>4 个模板 + 账本：<code>LOOP.md</code>、<code>loop-budget.md</code>、<code>loop-run-log.md</code>、<code>session-handoff.md</code>、<code>loop-ledger.json</code></td>
+            <td><code>loop-guard</code>、<code>minimal-fix</code>、<code>loop-verifier</code></td>
+            <td>无新增脚本</td>
+          </tr>
+          <tr>
+            <td><b>3 巩固</b><br><span class="tiny">L3 无人值守</span></td>
+            <td>无新增文档</td>
+            <td><code>lesson-harvest</code>、<code>signal-gatekeeper</code>、<code>post-merge-cleanup</code>、<code>release-drafter</code></td>
+            <td>复制 8 个 workflow 到 <code>.github/workflows/</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tiny" style="margin-top:8px">
+      阶段驱动技能 <code>harness-init</code> / <code>harness-loop-init</code> / <code>harness-consolidate</code>
+      不复制进消费者：它们第一步调用 <code>harness-stage.mjs</code>，而该脚本需要包内 <code>templates/</code>，不随装配复制。
+      消费者在阶段 3 共得到 <b>14</b> 个可运行技能。
+    </p>
+
+    <div class="grid2" style="margin-top:18px">
+      <div class="card">
+        <h3>技能安装（另一条路径）</h3>
+        <p class="small">
+          <code>install-skills.mjs</code> 把 <code>skills/</code> 全量复制到 agent 会扫描的目录：
+          默认 <code>~/.agents/skills/</code>（跨 agent）或 <code>&lt;repo&gt;/.agents/skills/</code>；
+          <code>--layout zcode</code> 写 <code>.zcode/</code>。
+        </p>
+        <p class="small">
+          manifest <code>.loop-harness-install.json</code> 只记录<strong>本次真正写入</strong>的技能。
+          用户自己的同名技能会被跳过，卸载时不会被删。
+        </p>
+        <p class="small"><code>--check</code> 对比已安装副本与源码；无 manifest 的目录明确报“不是本包装的”，不误报漂移。</p>
+      </div>
+      <div class="card">
+        <h3>阶段判据在检查什么</h3>
+        <ul class="small">
+          <li><b>阶段 1（8 项机械）</b>：指令/状态/进度/约束文件存在；feature 有可判定完成标准；<code>init.sh</code> <strong>真的执行</strong>并退出 0；就绪度 ≥ 40。</li>
+          <li><b>阶段 2（6 机械 + 3 人工）</b>：verifier / 约束技能在<strong>可发现路径</strong>；熔断器有非空账本；拒绝列表已本地化；回退测试、NOT RUN、triage 准确率由人确认。</li>
+          <li><b>阶段 3（7 机械 + 1 人工）</b>：事件真的接线（仓库事件 + 调 router + 消费结果）；LESSONS 有真实条目；run-log 有记录；有教训已转正；跑过一个完整周期由人确认。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="entry">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">02</span><h2>事件入口：workflow 实际做什么</h2></div>
+    <p class="sec-sub">
+      每个 workflow 结构相同：消毒输入 → 调路由 → 检查锁 → 落盘 work item → 上传 artifact。
+      它不修改代码，也不做验证。
+    </p>
+
+    <div class="flow">
+      <div class="node"><b>GitHub 事件到达</b><small>issues / pull_request / pull_request_review / check_suite / workflow_run / push:tags / schedule</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>确定事件名与 item</b><small>事件字段经 <code>env:</code> 传入，再用 <code>tr -c</code> 消毒；绝不把 <code>${{ github.event.* }}</code> 拼进 <code>run:</code> 正文（分支名可注入）。item 形如 <code>issue-1</code> / <code>pr-2</code> / <code>ci-&lt;sha&gt;-&lt;branch&gt;</code>。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>预算与 kill switch</b><small><code>budget-check.mjs --pattern &lt;id&gt; --json</code>。读不到结果就拒绝运行（fail-closed）；<code>mode=exit</code> 直接停。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>路由</b><small><code>event-router.mjs --event &lt;e&gt; --item &lt;i&gt; --target &lt;branch|pr&gt;</code> → <code>route.json</code>。输出 phase / skills / level / gates / next，可能带 <code>conflict: lock-held</code>。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>锁检查与落盘</b><small><code>jq -r '.conflict'</code>；<code>lock-held</code> 时跳过写队列。否则写 <code>.loop/queue/&lt;item&gt;.json</code>（id / event / phase / branch / sha / created_at）。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>交付</b><small><code>actions/upload-artifact@v4</code>。runner 文件系统是临时的——不上传就随 job 消失。</small></div>
+    </div>
+
+    <div class="callout">
+      <h3>workflow 的触发与缺口（真实）</h3>
+      <div class="tbl-wrap" style="margin-top:8px">
+        <table>
+          <thead><tr><th>workflow</th><th>触发</th><th>路由到</th><th>状态</th></tr></thead>
+          <tbody>
+            <tr><td><code>issue-intake</code></td><td><code>issues: opened/reopened/labeled</code></td><td>intake → <code>issue-triage</code></td><td><span class="badge b-mech">已验证</span></td></tr>
+            <tr><td><code>pr-review</code></td><td><code>pull_request</code> + <code>pull_request_review</code></td><td>review / fix / close</td><td><span class="badge b-mech">已验证</span></td></tr>
+            <tr><td><code>ci-sweeper</code></td><td><code>workflow_run</code> / <code>check_suite</code> 失败</td><td>fix → <code>ci-triage</code> → <code>minimal-fix</code></td><td><span class="badge b-mech">已验证</span></td></tr>
+            <tr><td><code>merge-gate</code></td><td><code>pull_request: ready_for_review</code></td><td>gate → <code>gate-check</code></td><td><span class="badge b-mech">已验证（拒绝路径）</span></td></tr>
+            <tr><td><code>post-merge</code></td><td><code>pull_request: closed</code></td><td>post-merge / close</td><td><span class="badge b-conv">静态验证</span></td></tr>
+            <tr><td><code>release-draft</code></td><td><code>push: tags</code></td><td>release → <code>release-drafter</code></td><td><span class="badge b-mech">已验证</span></td></tr>
+            <tr><td><code>daily-triage</code></td><td><code>schedule</code> 工作日 08:00</td><td>每日概览（不在事件脊上）</td><td><span class="badge b-mech">已验证</span></td></tr>
+            <tr><td><code>lesson-harvest</code></td><td><code>schedule</code> 每天 03:00</td><td>夜审（不在事件脊上）</td><td><span class="badge b-mech">已验证</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small" style="margin-top:10px">
+        <code>release.published</code> 与 <code>issues.closed</code> 在 <code>ROUTES</code> 里有路由，
+        但<strong>没有生产触发器</strong>。<span class="badge b-wire">未接线</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="runtime">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">03</span><h2>运行时主循环：harness-loop 的 8 步</h2></div>
+    <p class="sec-sub">
+      这是“一轮”的完整路径。第 0 步的退出检查放最前，因为它是高节奏循环唯一的经济性来源：
+      没有待办就不该启动任何子智能体。
+    </p>
+
+    <div class="timeline">
+      <div class="step">
+        <div class="dot">0</div>
+        <div class="body">
+          <h3>退出检查 <span class="badge b-mech">机制</span></h3>
+          <p class="small">按顺序检查，任一命中即退出，不继续：</p>
+          <ul class="small">
+            <li><code>budget-check --pattern &lt;id&gt;</code>：退出码 3 = 立即停（暂停或 ≥100%）；<code>report-only</code> = 不派发执行者。</li>
+            <li><code>hasEventWiring()</code>：没有“仓库事件 + 调 router + 消费结果”的 workflow → <code>no-wiring</code> 退出。</li>
+            <li><code>queue-read --json</code>：读 <code>.loop/queue/</code>，为空回落到 <code>STATE.md</code> 的 High Priority；无待办 → <code>no-op</code> 退出（&lt;5k token）。</li>
+          </ul>
+          <div class="exits">
+            <span class="exit"><b>EXIT</b> no-wiring · 项目未到阶段 3</span>
+            <span class="exit"><b>EXIT</b> no-op · 队列为空</span>
+            <span class="exit"><b>EXIT</b> exit · 暂停或超预算</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">1</div>
+        <div class="body">
+          <h3>加载约束 <span class="badge b-conv">约定</span></h3>
+          <p class="small">读 <code>loop-constraints.md</code>，输出 <code>Constraints loaded … N rules active.</code>。每条规则标了 <span class="badge b-mech">机制</span> 或 <span class="badge b-conv">约定</span>，后续动作前对照相应章节复核。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">2</div>
+        <div class="body">
+          <h3>路由事件 <span class="badge b-mech">机制</span></h3>
+          <p class="small"><code>event-router.mjs --event &lt;e&gt; --item &lt;i&gt; --target &lt;branch|pr&gt;</code>。得到 phase / skills / level / gates / next。事件不在表里 → 记 Watch List，不自创流程。</p>
+          <p class="small"><strong><code>--target</code> 不可省</strong>：它是锁键（<code>acting_on</code>），不是 work item id。省掉后不做冲突检测，锁静默失效。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">3</div>
+        <div class="body">
+          <h3>检查冲突锁 <span class="badge b-mech">机制</span></h3>
+          <p class="small">读 <code>STATE.md</code> 的 Active 表：若另一循环的 <code>acting_on</code> 等于本次目标 → 跳过，记 <code>outcome: no-op</code>（原因 <code>lock-held</code>）；否则写入本轮 <code>acting_on</code>。</p>
+          <p class="tiny">锁键统一为分支名或 PR 号。item 与 acting_on 混用会让锁永远不触发。</p>
+          <div class="exits"><span class="exit"><b>SKIP</b> lock-held · 本轮 no-op</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">4</div>
+        <div class="body">
+          <h3>预算分级 <span class="badge b-mech">机制</span></h3>
+          <p class="small">&lt;80% 正常，可派发执行者；≥80% <strong>report-only</strong>：不派发执行子智能体，只产出报告。阈值只在 <code>budget-check.mjs</code> 一处定义。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">5</div>
+        <div class="body">
+          <h3>派发技能 <span class="badge b-conv">约定</span> <span class="badge b-wire">本包无运行器</span></h3>
+          <p class="small">顺序固定：先跑感知类 triage（便宜）→ 只有产出可操作条目才派发 <code>minimal-fix</code> → 修复后必须跟<strong>独立实例</strong>的 <code>loop-verifier</code>。</p>
+          <p class="small">代码改动必须在独立 worktree：<code>worktree.mjs create --event &lt;e&gt; --item &lt;i&gt; --attempt &lt;n&gt;</code>，命名 <code>loop/&lt;event&gt;-&lt;item&gt;-attemptN</code>；REJECT 后 <code>discard</code> 连分支一起删。</p>
+          <p class="tiny">没有外部平台时，这一步不会真正发生；循环停在 fix-proposed。</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">6</div>
+        <div class="body">
+          <h3>执行闸门 <span class="badge b-mech">机制</span></h3>
+          <p class="small"><code>gate-check.mjs</code>，六个不可省参数：<code>@</code> 清单前缀、<code>--reviewed-sha</code> + <code>--head-sha</code>、<code>--red-check</code>、<code>--evidence-file</code>（approve 时）、<code>--not-run</code>、<code>--constraints-root</code>。详见下一节。</p>
+          <div class="exits">
+            <span class="exit"><b>0</b> proceed · 继续</span>
+            <span class="exit"><b>2</b> escalate · 写升级条目</span>
+            <span class="exit"><b>3</b> exit · 立即停止</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">7</div>
+        <div class="body">
+          <h3>熔断检查 <span class="badge b-mech">机制</span></h3>
+          <p class="small">每次尝试追加到 <code>loop-ledger.json</code>，重试前跑 <code>ledger-check.mjs --ledger loop-ledger.json</code>。退出码 2 → 停止，不再重试。</p>
+          <div class="exits"><span class="exit"><b>STOP</b> stagnation / no-progress / no-ledger / placeholder-ledger …</span></div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="dot">8</div>
+        <div class="body">
+          <h3>写状态 <span class="badge b-mech">机制</span></h3>
+          <p class="small">更新 <code>STATE.md</code>（Active / High Priority / Watch List / Last run）；有代码改动则更新 <code>feature_list.json</code>；追加<strong>一行</strong> JSON 到 <code>loop-run-log.md</code>；清理已关闭条目；填写 Post-Run Critique，必须产出一项具体调整。</p>
+          <p class="tiny">不写状态的运行等于没跑。</p>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:28px">一轮只允许这六种结局</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>outcome</th><th>含义</th><th>是否指向人</th></tr></thead>
+        <tbody>
+          <tr><td><code>no-wiring</code></td><td>项目还没接事件脊，第 0 步退出</td><td>是（推进阶段，不是故障）</td></tr>
+          <tr><td><code>no-op</code></td><td>无待办或锁被持有，提前退出</td><td>否</td></tr>
+          <tr><td><code>report-only</code></td><td>产出报告，未改代码</td><td>否</td></tr>
+          <tr><td><code>fix-proposed</code></td><td>提出修复，等待验证或人工</td><td>是（需要验证者/平台）</td></tr>
+          <tr><td><code>verified</code></td><td>修复通过独立验证，进入闸门</td><td>否</td></tr>
+          <tr><td><code>escalated</code></td><td>交给人类（拒绝列表、超限、需要判断）</td><td>是</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="gates">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">04</span><h2>闸门判定：gate-check 的检查顺序</h2></div>
+    <p class="sec-sub">
+      先命中者决定结果。顺序有讲究：退出类在最前（该停时不再分析），拒绝列表在尝试上限之前（安全优先于效率）。
+    </p>
+
+    <div class="gates">
+      <div class="gate g-exit">
+        <div class="n">01</div>
+        <div class="what"><strong><code>loop-pause-all</code> 生效</strong><span>只认 <code>STATE.md</code> / <code>loop-constraints.md</code> 里独占一行；散文提及不算</span></div>
+        <div class="res">exit · 3</div>
+      </div>
+      <div class="gate g-exit">
+        <div class="n">02</div>
+        <div class="what"><strong>预算 ≥ 100%</strong><span>今日花费 / 该循环自己的日上限</span></div>
+        <div class="res">exit · 3</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">03</div>
+        <div class="what"><strong>改动触及拒绝列表</strong><span>从 <code>loop-constraints.md</code> 的 <code>## Paths</code> 读取；<code>@</code> 清单必须每行一个路径</span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">04</div>
+        <div class="what"><strong>尝试次数 ≥ 3</strong><span><code>max_attempts</code>，可由 registry 覆盖</span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-ro">
+        <div class="n">05</div>
+        <div class="what"><strong>预算 ≥ 80%</strong><span>降级为 report-only，禁止派发执行者</span></div>
+        <div class="res">report-only · 0</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">06</div>
+        <div class="what"><strong>范围超限</strong><span>普通修复 &gt; 5 文件；清理类 &gt; 10 文件</span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">07</div>
+        <div class="what"><strong>gate 阶段：审查绑定</strong><span>缺任一 sha → 拦；<code>reviewed ≠ head</code> → 拦（审查后又 push）</span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">08</div>
+        <div class="what"><strong>回退测试</strong><span><code>fail</code> 一律拦；<code>not-run</code> 在 gate 阶段拦。默认值就是 <code>not-run</code>——忘传参数不得放行</span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">08b</div>
+        <div class="what"><strong>证据闸门（approve 时）</strong><span>无证据文件 / 文件不存在 / 缺 verdict 行 / 缺检查行 / 自相矛盾 FAIL / 缺 <code>### Checks not run</code> / NOT RUN 未列进该节 / 报告 commit 与 head 不符 / 全 NOT RUN / 报告自称非 APPROVE</span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">09a</div>
+        <div class="what"><strong>verdict = reject / escalate-human</strong><span>verifier 拒绝，或无法运行测试</span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-ro">
+        <div class="n">09b</div>
+        <div class="what"><strong>gate 阶段但没有 verdict</strong><span>“没验”不是“验失败”，闸门名是 <code>awaiting-verification</code></span></div>
+        <div class="res">escalate · 2</div>
+      </div>
+      <div class="gate g-ok">
+        <div class="n">✓</div>
+        <div class="what"><strong>全部通过</strong><span>输出 <code>proceed</code>，并列出 <code>checks_not_run</code>；仍禁止自动合并</span></div>
+        <div class="res">proceed · 0</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>退出码的语义</h3>
+      <div class="kbd-row">
+        <span>0 = proceed / report-only</span>
+        <span>1 = 参数错误（闸门没跑，不是通过）</span>
+        <span>2 = escalate 给人</span>
+        <span>3 = 立即停止</span>
+      </div>
+      <p class="small" style="margin:0">
+        调用方必须把 1 当成“我没问对问题”，绝不能当成“闸门通过了”。
+        <code>merge-gate.yml</code> 用 <code>set +e</code> 接住 2，让 PR 评论与失败判定仍能执行；
+        只有 1 会让 job 直接失败。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="budget">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">05</span><h2>预算与急停：budget-check 的真实算法</h2></div>
+    <p class="sec-sub">
+      预算是估算，不是精确计量。但它必须有一个真实入口——否则“80% 降级”只是文档里的一句话。
+    </p>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>输入</h3>
+        <ul class="small">
+          <li><code>loop-budget.md</code> 的 Daily Limits 表：按<strong>行名</strong>（自然写法与连字符写法都认）建索引。</li>
+          <li><code>loop-run-log.md</code>：只解析<strong>单行</strong> JSON；只算 <code>run_id</code> 是今天、且 pattern 匹配的 <code>tokens_estimate</code>。</li>
+          <li><code>STATE.md</code> / <code>loop-constraints.md</code>：独占一行的 <code>loop-pause-all</code>。</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>判定顺序</h3>
+        <ol class="small">
+          <li>暂停 → <code>exit</code></li>
+          <li><strong>查不到该循环的上限</strong> → <code>exit</code>（没有上限就没有刹车）</li>
+          <li>≥ 100% → <code>exit</code></li>
+          <li>≥ 80% → <code>report-only</code></li>
+          <li>否则 <code>normal</code></li>
+        </ol>
+        <p class="tiny">退出码：0 = normal / report-only；3 = exit。</p>
+      </div>
+    </div>
+
+    <div class="flow" style="margin-top:16px">
+      <div class="node"><b>解析上限</b><small><code>resolveCap(caps, pattern)</code> 返回 <code>cap</code> 与 <code>source</code>：<code>exact</code>（自己有行）/ <code>alias:&lt;表名&gt;</code>（借来的）/ <code>null</code>（没有）。借来的上限在输出里可见，不静默回退。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>汇总今日花费</b><small><code>sumTodaySpend()</code>。文档明确要求<strong>一条记录一行</strong>；多行 pretty JSON 会被算成 0——这一点有断言守着。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>决定模式</b><small><code>decide()</code>：暂停 → 无上限 → 100% → 80% → normal。阈值只在 <code>DEFAULT_THRESHOLDS</code> 一处。</small></div>
+    </div>
+
+    <div class="callout warn">
+      <h3>已知限制：花费数字目前是 0</h3>
+      <p class="small" style="margin:0">
+        只有 <code>daily-triage</code> / <code>lesson-harvest</code> 会写 run-log，而且写的是固定估算值；
+        其余 6 个 workflow 不写。runner 文件系统又是临时的，写入需要先决定持久化方式
+        （提交分支 / PR 评论 / 平台写）。<strong>立即生效的是 kill switch 与“无上限即退出”</strong>；
+        百分比要等持久化方式定下来才有意义。<span class="badge b-wire">未接线</span>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="breaker">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">06</span><h2>熔断器：ledger-check 的判定</h2></div>
+    <p class="sec-sub">
+      熔断器读 <code>loop-ledger.json</code>。读不到状态时必须停——“我不知道”不能被读成“一切正常”。
+    </p>
+
+    <div class="gates">
+      <div class="gate g-esc">
+        <div class="n">A</div>
+        <div class="what"><strong>账本缺失 / 坏 JSON / 字段类型错</strong><span>CLI 与库层都返回 <code>no-ledger</code>，退出码 2（不再是 1）</span></div>
+        <div class="res">no-ledger · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">B</div>
+        <div class="what"><strong>按 pattern 切片后没有记录</strong><span>账本有记录但都不属于本循环 → <code>no-pattern-records</code>，不回落到“没有记录所以正常”</span></div>
+        <div class="res">no-pattern · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">C</div>
+        <div class="what"><strong>占位账本</strong><span><code>goal</code> 仍是 “Replace with…” 且已有 attempts → 示例数据不能当真实历史</span></div>
+        <div class="res">placeholder · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">D</div>
+        <div class="what"><strong>停滞</strong><span>尾部连续失败里，归一化后的同一错误签名出现 ≥ 3 次</span></div>
+        <div class="res">stagnation · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">E</div>
+        <div class="what"><strong>无进展</strong><span>尾部非 success 段 ≥ 5 次。<strong><code>noop</code> 不再洗掉计数</strong>——被锁跳过是合法结局，但不是进展</span></div>
+        <div class="res">no-progress · 2</div>
+      </div>
+      <div class="gate g-esc">
+        <div class="n">F</div>
+        <div class="what"><strong>超预算 / 超迭代</strong><span><code>tokensUsed</code> 累计 ≥ 预算；迭代数 ≥ 10</span></div>
+        <div class="res">token-budget / max-iterations · 2</div>
+      </div>
+      <div class="gate g-ok">
+        <div class="n">✓</div>
+        <div class="what"><strong>继续</strong><span>空 <code>attempts</code> 数组也算 ok：那是“还没开始跑”，不是“读不到”</span></div>
+        <div class="res">ok · 0</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>错误签名怎么归一化</h3>
+      <p class="small" style="margin:0">
+        抹掉 ISO 时间戳、十六进制地址、路径（折叠为 basename）、行列号，以及<strong>明确是位置或时长</strong>的数字。
+        不再把退出码、HTTP 状态码、断言期望值全部抹平——否则“500 服务端错误 → 404 路由缺失 → 超时”
+        三种根因完全不同的失败会在第 3 次被误判为同一个错误。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="evidence">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">07</span><h2>验证契约：verifier 写什么，闸门读什么</h2></div>
+    <p class="sec-sub">
+      verdict 是断言，不是证据。这条链路的价值全在“生产者与消费者对同一种格式达成一致”。
+    </p>
+
+    <div class="grid2">
+      <div class="card">
+        <h3>loop-verifier 产出</h3>
+        <p class="small">以带标记的 PR 评论发布，第一行必须是：</p>
+        <pre class="mono" style="font-size:12px;overflow-x:auto;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px;color:#d9c7a8">&#x3C;!-- loop-verifier-report --&#x3E;
+## Verdict: APPROVE | REJECT | ESCALATE_HUMAN
+Commit: &#x3C;被验证的 head sha&#x3E;
+
+### Evidence
+- Tests: `npm test` → PASS
+- Red check: PASS | FAIL | NOT RUN — 说明
+- Real-use validation: PASS | FAIL | NOT RUN — 说明
+- Lint: `npm run lint` → PASS
+- Scope check: PASS | FAIL — 说明
+- Denylist check: PASS | FAIL
+- Files changed: N
+
+### Checks not run
+- &#x3C;检查项&#x3E; — 原因</pre>
+      </div>
+      <div class="card">
+        <h3>merge-gate 怎么取</h3>
+        <ol class="small">
+          <li>取 PR 的 <code>headRefOid</code> 作为 head。</li>
+          <li>取<strong>最后一条 review</strong>，要求它就是 <code>APPROVED</code>；取它绑定的 commit 作为 reviewed。<strong>没有批准时绝不回退成 head。</strong></li>
+          <li>只接受<strong>机器人账号</strong>（<code>LOOP_BOT_LOGIN</code>，默认 <code>loop-bot</code>）发的带标记评论；PR 作者伪造不了。</li>
+          <li>red-check 状态从 PR 正文的独占行 <code>red-check: pass|fail</code> 读；读不到就是 <code>not-run</code>。</li>
+          <li>把 verdict、两个 sha、red-check、证据文件一起交给 <code>gate-check</code>；<strong>调用方不改写闸门结果</strong>。</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="flow" style="margin-top:16px">
+      <div class="node"><b>证据文件进入 gate-check</b><small>解析 verdict 行与检查行；接受带命令的 <code>`cmd` → PASS</code>，也接受 verifier 模板里不带命令的 <code>Red check: FAIL</code>。箭头 <code>-&gt;</code> 与 <code>→</code> 等价。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>交叉校验</b><small>报告说 APPROVE 但有 FAIL → 拦；全 NOT RUN → 拦；<code>### Checks not run</code> 缺失 → 拦；证据里的 NOT RUN 没列进该节 → 拦；报告 <code>Commit:</code> 与 head 不符 → 拦。</small></div>
+      <div class="arrow">↓</div>
+      <div class="node"><b>输出</b><small><code>decision</code>、命中的 <code>gate</code>、可读的 <code>reason</code>、<code>checks_not_run</code>、<code>next</code>。升级与通过都带下一步动作。</small></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="state">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">08</span><h2>状态回写：下一轮凭什么能接上</h2></div>
+    <p class="sec-sub">
+      模型会忘，仓库不会。状态文件是跨会话连续性的唯一载体；写入规则本身也是机制的一部分。
+    </p>
+
+    <div class="grid3">
+      <div class="card">
+        <h3>STATE.md</h3>
+        <p class="small">活状态，每轮读写。</p>
+        <ul class="small">
+          <li><code>Last run</code>：时间戳</li>
+          <li><code>High Priority</code>：正在做 / 等人</li>
+          <li><code>Active</code>：work item + <code>acting_on</code> 锁</li>
+          <li><code>Watch List</code>：观察，不行动</li>
+          <li><code>Human Inbox</code>：模糊 / 跨循环</li>
+          <li><code>Post-Run Critique</code>：每轮必须产出一项调整</li>
+        </ul>
+        <p class="tiny">不得包含任何凭据；历史不堆回本文件。</p>
+      </div>
+      <div class="card">
+        <h3>loop-run-log.md</h3>
+        <p class="small">只追加，一条记录一行 JSON。</p>
+        <pre class="mono" style="font-size:11px;overflow-x:auto;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;color:#d9c7a8">{"run_id":"…","pattern":"ci-sweeper",
+ "event":"check_suite.completed:failure",
+ "item":"ci-a1b2-main","level":"L2",
+ "duration_s":45,"items_found":4,
+ "actions_taken":1,"escalations":0,
+ "tokens_estimate":52000,
+ "outcome":"fix-proposed"}</pre>
+        <p class="tiny">多行格式不计入预算；文档已改为单行并加断言。</p>
+      </div>
+      <div class="card">
+        <h3>feature_list.json / ledger</h3>
+        <p class="small"><code>feature_list.json</code>：功能级状态，只有验证通过且有证据才置 <code>passing</code>；id 必须唯一。</p>
+        <p class="small"><code>loop-ledger.json</code>：尝试级账本。失败时 <code>error</code> 必填，熔断器靠它检测重复失败。</p>
+        <p class="tiny">三者粒度不同，不要合并。</p>
+      </div>
+    </div>
+
+    <div class="callout ok">
+      <h3>一次真实运行的轨迹（沙箱实测）</h3>
+      <p class="small" style="margin:0">
+        issue #1 → <code>issues.opened</code> → intake → 写 <code>.loop/queue/issue-1.json</code> → artifact；
+        PR #2 转 ready → gate 阶段 → 没有 APPROVED → <code>head-commit</code> escalate →
+        PR 上出现一条可读的闸门评论，<code>Fail if escalated</code> 让 job 失败；
+        故意失败的 CI → <code>workflow_run.completed:failure</code> → fix → 熔断 <code>ok</code> → 落盘；
+        tag <code>v0.0.1-sandbox</code> → release → 草稿写入 step summary。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="boundary">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">09</span><h2>真实边界：哪些已经生效，哪些没有</h2></div>
+    <p class="sec-sub">
+      这张表比流程图更重要。它区分“代码会拦”“靠自觉”和“只是文档写了”。
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>能力</th><th>真实状态</th><th>依据</th></tr></thead>
+        <tbody>
+          <tr><td>事件路由 + work item 落盘</td><td><span class="badge b-mech">已生效</span></td><td>沙箱 issue/PR/CI/tag 四条链路实测</td></tr>
+          <tr><td>拒绝列表 / 范围 / 尝试上限闸门</td><td><span class="badge b-mech">已生效</span></td><td><code>gate-check</code> 按顺序判定，测试覆盖</td></tr>
+          <tr><td>合并绑定审过的 commit</td><td><span class="badge b-mech">已生效</span></td><td>缺 sha / sha 不一致 / 无批准均 escalate</td></tr>
+          <tr><td>回退测试与 NOT RUN 三态</td><td><span class="badge b-mech">已生效</span></td><td>gate 阶段 <code>not-run</code> 一律拦</td></tr>
+          <tr><td>证据闸门（报告内容交叉校验）</td><td><span class="badge b-mech">已生效</span></td><td>自相矛盾 / 全 NOT RUN / commit 不符均拦</td></tr>
+          <tr><td>熔断器 fail-closed</td><td><span class="badge b-mech">已生效</span></td><td>账本缺失/坏 JSON → exit 2</td></tr>
+          <tr><td>预算阈值与 kill switch</td><td><span class="badge b-mech">已生效</span></td><td>阈值单一来源；暂停只认独占行</td></tr>
+          <tr><td>独立验证者（maker/checker）</td><td><span class="badge b-conv">约定</span></td><td>技能要求新实例；调用方是否真的新开上下文，代码不校验</td></tr>
+          <tr><td>“同一分支每小时最多一个循环修改”</td><td><span class="badge b-conv">约定</span></td><td><code>acting_on</code> 锁是机制，但“每小时”没有持久时间源</td></tr>
+          <tr><td>尝试上限在合并路径</td><td><span class="badge b-wire">未接线</span></td><td><code>merge-gate</code> 不传 <code>--attempts</code>；没有运行器写账本</td></tr>
+          <tr><td>预算百分比（真实花费）</td><td><span class="badge b-wire">未接线</span></td><td>6 个 workflow 不写 run-log；持久化方式未定</td></tr>
+          <tr><td>agent 执行与验证</td><td><span class="badge b-wire">未接线</span></td><td>本包不含运行器；队列产物需外部平台消费</td></tr>
+          <tr><td><code>release.published</code> / <code>issues.closed</code></td><td><span class="badge b-wire">未接线</span></td><td>有路由，无生产触发器</td></tr>
+          <tr><td>APPROVED + commit 匹配的通过路径</td><td><span class="badge b-wire">NOT RUN</span></td><td>单账号仓库不能批准自己的 PR，需第二个账号</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn" style="margin-top:18px">
+      <h3>启用顺序（不要跳级）</h3>
+      <ol class="small" style="margin-bottom:0">
+        <li><b>L1 只读</b>：先跑一周，只报告，人工核对 triage 准确率。</li>
+        <li><b>L2 辅助</b>：有独立 verifier、拒绝列表已本地化、回退测试与 NOT RUN 真实用过；合并仍人工。</li>
+        <li><b>L3 无人值守</b>：事件接线、真实运行记录、教训已转正；并且用第二个账号补完 APPROVED 通过路径。</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Loop Harness · 按 <code>scripts/</code> 与 <code>examples/github-actions/</code> 的实际行为绘制</span>
+    <span>基线：1067 项断言 · 本机与 ubuntu-latest 均通过 · 自审计 94/100 L2</span>
+  </div>
+</footer>
+
+</body>
+</html>
