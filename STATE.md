@@ -11,6 +11,9 @@ Last run: 2026-10-18 (只读审计，产出在 audits/)
 - [x] **`/harness-loop-issue` 真机验证（两轮）**：沙箱上第一轮验 issue 发现，第二轮造了一个真实的红 PR（#4）验 CI 分类——`TypeError` 在 `src/math.mjs:2`、由该 PR 引入 → 判 regression，未误判为 env。两轮均确认只读。
 - [x] 技能已装到 `~/.claude/skills` 与 `~/.agents/skills`（各 4 个）；`~/.zcode/skills` 的 v1 陈旧副本已删除。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整。
+- [ ] **批次 0：docs 事实修正**（完成标准：4 个死链清零；`docs/03` 闸门表与代码 9 个 gate 名一致；`init.sh` 绿）
+- [ ] **批次 1：修坏掉的机制**（U-01/02/09/11 + U-07 文档；完成标准见 `audits/upgrade-plan-2026-10-18.md` §3）
+- [ ] **批次 2：收紧闸门与状态**（U-03/04/06/07检查/08/10；完成标准见同上 §3）
 
 ## Active
 
