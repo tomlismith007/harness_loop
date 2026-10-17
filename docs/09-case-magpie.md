@@ -1,7 +1,7 @@
 # 09 · 案例：magpie 的全自动 loop 设置
 
 > **来源**：一位实践者对其 magpie 项目 loop 设置的口述描述，加上三条 `/loop` 指令截图。
-> **本文件性质**：对该设置的结构化提取，用于与 loop-harness 对照。不是本框架的规范，是外部参考实现。
+> **本文件性质**：对该设置的结构化提取，用于与 harness-loop 对照。不是本框架的规范，是外部参考实现。
 > **标注约定**：**【述】** = 描述中明确给出；**【推】** = 我的推断，用于补全机制。
 > **可信度**：口述二手信息，未独立核验仓库。数字与规则文本按原样保留。
 
@@ -25,7 +25,7 @@
 | `docs/contributors.md`（案例仓库的文件） | 社区 PR 审查规范 | 审社区 PR 时 |
 | `LESSONS.md` | 错题本，agent 自己每晚写 | 夜间写入，白天读取 |
 
-> 下表中除 `AGENTS.md` 外，`docs/subsystems/`、`docs/code-standards.md`、`docs/contributors.md` 都属于**案例仓库（magpie）**——本仓库（loop-harness）没有这些文件，也不在脚手架里生成它们。
+> 下表中除 `AGENTS.md` 外，`docs/subsystems/`、`docs/code-standards.md`、`docs/contributors.md` 都属于**案例仓库（magpie）**——本仓库（harness-loop）没有这些文件，也不在脚手架里生成它们。
 
 **关键设计**：`AGENTS.md` 不承载规则，只承载「去哪找规则」。
 
@@ -312,9 +312,9 @@ CI 被取消这件事，是系统**自己发现**的（`294 tags in 51 hours lef
 
 ---
 
-## 7. 与 loop-harness 的对照
+## 7. 与 harness-loop 的对照
 
-| 机制 | magpie | loop-harness 现状 | 差距 |
+| 机制 | magpie | harness-loop 现状 | 差距 |
 |---|---|---|---|
 | **路由表 AGENTS.md** | 纯路由，规则在领域文档 | 已做（AGENTS.md 有去向索引） | ✅ 一致 |
 | **教训积累** | `LESSONS.md`，夜审自动写，479 行 | 无。只有 `loop-run-log.md`（指标）与 STATE.md 的 Post-Run Critique（当轮） | ❌ **最大缺口** |
@@ -334,7 +334,7 @@ CI 被取消这件事，是系统**自己发现**的（`294 tags in 51 hours lef
 
 **1. 教训累积与升级机制（LESSONS.md 模式）**
 
-这是 magpie 设置里最独特、也最难自己想到的一环。当前 loop-harness 的 Post-Run Critique 是**每轮覆盖**的——填完就没了，不会累积。需要新增：
+这是 magpie 设置里最独特、也最难自己想到的一环。当前 harness-loop 的 Post-Run Critique 是**每轮覆盖**的——填完就没了，不会累积。需要新增：
 
 - `LESSONS.md`：只追加的错题本，每条含 `规则 + 原因 + 证据 + Seen N×`
 - 夜审循环：定时扫当天 commit，找返工 / 不该合 / 验证太糙
@@ -363,4 +363,4 @@ CI 被取消这件事，是系统**自己发现**的（`294 tags in 51 hours lef
 | 5 | verifier 加两项：回退测试、未跑必须写明 |
 | 6 | 合并命令绑定审过的 sha |
 
-**不要一次全上。** 按 loop-harness 的采纳阶梯，先跑 L1 报告模式，确认 triage 准确后再加验证与隔离。
+**不要一次全上。** 按 harness-loop 的采纳阶梯，先跑 L1 报告模式，确认 triage 准确后再加验证与隔离。

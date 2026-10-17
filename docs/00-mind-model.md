@@ -118,7 +118,7 @@
 
 反模式是每个循环各自轮询自己的信号——CI Sweeper 轮询 CI，PR Babysitter 轮询 PR，Daily Triage 又轮询一遍全部。结果是重复劳动、状态不一致、互相冲突。
 
-正确做法是**一个唯一的输入**（GitHub 事件，或人写进 `STATE.md` 的待办）：
+正确做法是**一个唯一的输入**（人写进 `STATE.md` 的待办；GitHub 事件是可选的补充）：
 
 ```
 issue.opened ──▶ intake ──▶ triaged ──┐

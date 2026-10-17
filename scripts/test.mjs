@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * test.mjs — loop-harness 自检
+ * test.mjs — harness-loop 自检
  *
  * 零依赖测试：闸门判定、熔断逻辑、拒绝列表匹配、装配、技能与文档一致性。
  * 只测存活的脚本：gate-check / ledger-check / harness-stage / install-skills。

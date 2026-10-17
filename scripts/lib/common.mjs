@@ -304,7 +304,7 @@ export function initScriptFromCommands(commands) {
   const lines = [
     '#!/usr/bin/env bash',
     '#',
-    '# 标准启动与验证路径（由 loop-harness 生成）',
+    '# 标准启动与验证路径（由 harness-loop 生成）',
     '# 若命令不正确，直接编辑下方的命令块。',
     '',
     'set -euo pipefail',

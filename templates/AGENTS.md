@@ -1,6 +1,6 @@
 # AGENTS.md
 
-<!-- 由 loop-harness 生成。替换所有 {{...}} 占位符。 -->
+<!-- 由 harness-loop 生成。替换所有 {{...}} 占位符。 -->
 
 {{PROJECT_PURPOSE}}
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * install-skills.mjs — 把 loop-harness 技能安装到 agent 能发现的位置
+ * install-skills.mjs — 把 harness-loop 技能安装到 agent 能发现的位置
  *
  * 两个发现路径（默认都装）：
  *   .claude/skills/  Claude Code 扫描的路径
@@ -83,7 +83,7 @@ function install(args) {
   const skills = listSkillNames();
   if (!skills.length) fail('no skills found in the pack');
 
-  process.stdout.write(`Installed loop-harness skills\n`);
+  process.stdout.write(`Installed harness-loop skills\n`);
   process.stdout.write(`  scope:       ${dest.scope}\n`);
   process.stdout.write(`  layout:      ${dest.layout}\n`);
 
@@ -192,7 +192,7 @@ function uninstall(args) {
     fail(`no install manifest at ${missing.join(', ')} — nothing to uninstall from this location`);
   }
 
-  process.stdout.write(`Uninstalled ${removed.length} loop-harness skill(s)\n`);
+  process.stdout.write(`Uninstalled ${removed.length} harness-loop skill(s)\n`);
   for (const r of removed) process.stdout.write(`  removed  ${r}\n`);
   if (missing.length) {
     process.stdout.write(`\nNo manifest at: ${missing.join(', ')}\n`);
@@ -321,14 +321,14 @@ function listInstalled(args) {
       const mine = d.installed_by_this_pack && d.installed_by_this_pack.includes(p) ? '*' : ' ';
       process.stdout.write(`  ${mine} ${p}\n`);
     }
-    if (d.installed_by_this_pack) process.stdout.write(`\n(* = installed by loop-harness)\n`);
+    if (d.installed_by_this_pack) process.stdout.write(`\n(* = installed by harness-loop)\n`);
   }
 }
 
 function main() {
   const args = parseArgs();
   if (args.help) {
-    process.stdout.write(`install-skills — make loop-harness skills discoverable by agents
+    process.stdout.write(`install-skills — make harness-loop skills discoverable by agents
 
 Discovery paths (both installed by default):
   .claude/skills/  Claude Code

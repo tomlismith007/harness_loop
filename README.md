@@ -1,8 +1,11 @@
-# Loop Harness
+# harness-loop
 
-**围绕 issue/PR 或本地待办运转的编码智能体工程框架。** 把 harness engineering（让单次运行可靠）与 loop engineering（让连续运行自主）缝成一套可复制、可审计、可暂停的系统。
+**让编码智能体围绕一个明确的 work item 持续、可靠工作的工程框架。** 把 harness engineering（让单次运行可靠）与 loop engineering（让连续运行自主）缝成一套可复制、可审计、可暂停的系统。
 
 > 你不再逐步写提示词。你设计一套系统：它加载约束、选中一项工作、派发执行者、独立验证、把需要你判断的事放进收件箱。
+
+**输入是本地待办**：人写进 `STATE.md`，或直接给 `/harness-loop` 一个参数。
+GitHub issue/PR 是**可选模块**（`/harness-loop-issue`），不属于核心。
 
 ---
 
@@ -15,7 +18,7 @@
 | `/harness-loop` | 顶层编排：跑完一个 work item | 约束 → 选一项 → 执行 → 独立验证 → 闸门 → 熔断 → 写状态 |
 | `/harness-loop-issue` | GitHub 发现（只读） | 用 `gh` 读 issue/PR/CI，把 Top 5 写进 `STATE.md`，然后停 |
 
-**`/harness-loop-issue` 是可选模块**：本地仓库不需要它，直接把待办写进 `STATE.md` 即可。
+**`/harness-loop-issue` 是可选模块**：不装它，框架照样完整工作——本地仓库直接把待办写进 `STATE.md`。
 
 一次 `/harness-loop` 的流程：
 
@@ -175,6 +178,6 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 - **Harness Engineering** — [walkinglabs/learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering)（五子系统、feature list 原语、终止校验）。
 - **Loop Engineering** — [LibraScorpion/loop-engineering-cn](https://github.com/LibraScorpion/loop-engineering-cn)（六原语、模式库、熔断器、L0–L3 就绪度）。
 
-Loop Harness 的增量在于**把两者焊在同一条工作流上**：harness 提供单次运行的可靠性，loop 提供连续运行的自主性，事件（或人给的待办）保证两者作用于同一批真实工作。
+harness-loop 的增量在于**把两者焊在同一条工作流上**：harness 提供单次运行的可靠性，loop 提供连续运行的自主性，人给的待办（或可选的 GitHub 事件）保证两者作用于同一批真实工作。
 
 MIT License.

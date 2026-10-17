@@ -1,12 +1,13 @@
 # AGENTS.md
 
-Loop Harness 的入口文件。这是一个**路由器，不是手册**——这里只放启动路径、工作规则、完成定义和去向链接。
+harness-loop 的入口文件。这是一个**路由器，不是手册**——这里只放启动路径、工作规则、完成定义和去向链接。
 
 ## 项目概览
 
-Loop Harness 是一套让编码智能体围绕**一个明确的 work item** 持续、可靠工作的工程框架。
+harness-loop 是一套让编码智能体围绕**一个明确的 work item** 持续、可靠工作的工程框架。
 它由两部分组成：harness 五子系统（地基）与 loop 机制（运行层）。
-输入可以是 GitHub 事件（可选模块 `/harness-loop-issue`），也可以是人写进 `STATE.md` 的待办。
+**输入是本地待办**：人写进 `STATE.md`，或直接给 `/harness-loop` 一个参数。
+GitHub issue/PR 是可选模块（`/harness-loop-issue`），不属于核心。
 
 ## 启动工作流
 

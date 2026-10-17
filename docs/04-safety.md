@@ -87,7 +87,7 @@ billing/**
 - 使用独立机器人账号与最小权限 token。
 - **L1 只用只读连接器。** 建立信任后才扩大范围。
 - 权限扩大必须在 `STATE.md` 记录，并有至少两周可靠运行记录作为依据。
-- PR 评论中机器人身份必须明确（例如 `🤖 Loop Harness — PR Review Triage`），让人一眼看出哪些是机器写的。
+- PR 评论中机器人身份必须明确（例如 `🤖 harness-loop — PR Review Triage`），让人一眼看出哪些是机器写的。
 
 ---
 
