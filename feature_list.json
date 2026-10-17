@@ -82,9 +82,10 @@
       "evidence": [
         "在 tomlismith007/harness-loop-sandbox 上运行：gh issue list / gh pr list 只读读取",
         "STATE.md 写入 1 条带完成标准的待办（#3），loop-run-log.md 追加 outcome=report-only",
-        "验证只读：issue #3 的 state=OPEN、labels=[]、commentCount=0，无任何写操作"
+        "验证只读：issue #3 的 state=OPEN、labels=[]、commentCount=0，无任何写操作",
+        "第二轮：PR #4 CI 红（test job TypeError）→ 分类为 regression 而非 env/flake/config；两条待办均写入 STATE.md；PR #4 与 issue #3 的评论/标签/状态均未改变"
       ],
-      "notes": "真机验证于 2026-10-17；未覆盖 CI 红 PR 的分类路径（沙箱无 open PR）。"
+      "notes": "真机验证于 2026-10-17，覆盖 issue 与 CI 红 PR 两条路径。"
     }
   ]
 }
