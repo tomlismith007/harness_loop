@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # 标准启动与验证路径。
-# 由 loop-harness 的 init-loop-harness.mjs 程序化生成，或手工替换下方三个数组。
+# 由 loop-harness 的 harness-stage.mjs 程序化生成，或手工替换下方命令。
 #
 # 若无法自动生成，手工设置 INSTALL_CMD / VERIFY_CMD / START_CMD 三个数组。
 

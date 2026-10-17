@@ -6,36 +6,32 @@
 
 ```json
 {
-  "run_id": "2026-10-13T08:15:00Z",
-  "pattern": "pr-review-triage",
-  "event": "pull_request_review.changes_requested",
-  "item": "pr-123",
-  "level": "L2",
+  "run_id": "2026-10-17T08:15:00Z",
+  "item": "fix-login-test",
   "duration_s": 45,
-  "items_found": 4,
-  "actions_taken": 1,
-  "escalations": 0,
-  "tokens_estimate": 52000,
-  "worktree": "loop/pr-123-fix-1",
-  "outcome": "fix-proposed"
+  "files_changed": 2,
+  "attempts": 1,
+  "outcome": "verified"
 }
 ```
 
-**`outcome` 枚举**：`no-op` | `report-only` | `fix-proposed` | `verified` | `escalated` | `no-wiring` | `manual`
+**`outcome` 枚举**：`no-op` | `report-only` | `fix-proposed` | `verified` | `escalated`
 
-`no-wiring` = 项目未接事件脊（不是问题，是还没到阶段 3）。
-`manual` = 非事件驱动的手工运行，**不计入循环统计**。
+| 值 | 含义 |
+|---|---|
+| `no-op` | 没有可做的唯一一项，提前退出 |
+| `report-only` | 产出报告，未改代码 |
+| `fix-proposed` | 提出修复，等待验证或人工 |
+| `verified` | 修复通过独立验证 |
+| `escalated` | 交给人类（拒绝列表、尝试上限、熔断、环境问题） |
 
 ## Metrics to Watch
 
 | 指标 | 健康信号 |
 |---|---|
-| 空转率（no-op 占比） | 高节奏循环 > 70% |
-| 误报率 | < 30% |
 | 升级率 | 稳定且非 0 |
 | 平均尝试次数 | < 2 |
 | 重复失败率 | 趋近 0 |
-| token 效率 | 稳定或下降 |
 
 ## Log
 

@@ -6,3 +6,7 @@
 .env.*
 *.pem
 *.key
+
+# 已安装的技能副本（真相源是 skills/，安装产物不入库）
+.claude/skills/
+.agents/skills/

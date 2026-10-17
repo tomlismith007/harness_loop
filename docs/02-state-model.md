@@ -18,7 +18,7 @@
 
 ## Work item 模型
 
-一个 work item 是事件脊上的一个处理单元。
+一个 work item 是一次 `/harness-loop` 运行处理的单元。
 
 ### 字段
 
@@ -44,7 +44,7 @@
 
 | Work item | 阶段 | 技能 | acting_on | 尝试 | 状态 |
 |---|---|---|---|---|---|
-| pr-123 | fix | minimal-fix | loop/pr-123-fix-1 | 1/3 | 修复已提出，待验证 |
+| pr-123 | 1 | 修复已提出，待验证 |
 | ci-a1b2c3-test | fix | ci-triage | loop/ci-a1b2c3-fix-1 | 2/3 | 第 2 次尝试中 |
 ```
 
@@ -151,7 +151,7 @@
     {
       "iteration": 1,
       "item": "pr-123",
-      "action": "minimal-fix: 在 profile handler 中加 null guard",
+      "action": "在 profile handler 中加 null guard",
       "outcome": "failure",
       "error": "TypeError: Cannot read properties of undefined (reading 'email') at profile.ts:42",
       "tokensUsed": 1800,
@@ -237,7 +237,7 @@
 |---|---|
 | 状态引用不存在的 PR | 每轮清理已关闭/已合并条目 |
 | 多循环互相覆盖 | 每模式独立状态文件，或清晰分区 |
-| 时间戳不更新 | 把 `Last run` 写入列进 `loop-budget` 技能的结束流程 |
+| 时间戳不更新 | 把 `Last run` 写入列进 `/harness-loop` 第 7 步（写状态） |
 | ID 过期 | 用实时 API 验证 ID，不信任缓存 |
 
 ---

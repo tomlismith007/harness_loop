@@ -14,27 +14,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readJson, printJson, readRegistryDefaults, fail, rejectUnknownFlags } from './lib/common.mjs';
+import { parseArgs, readJson, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
 
 export const DEFAULT_BREAKER = {
   maxIterations: 10,
   stagnationThreshold: 3,
   noProgressThreshold: 5,
 };
-
-/**
- * registry.yaml 的 breaker 阈值覆盖内置默认值。
- * 配置文件写着某个值却没有任何代码读它，等于"看起来被强制、实际是装饰"。
- */
-export function breakerDefaults(registryPath) {
-  const r = readRegistryDefaults(registryPath);
-  if (!r) return {};
-  const out = {};
-  if (Number.isFinite(r.stagnation)) out.stagnationThreshold = r.stagnation;
-  if (Number.isFinite(r.noProgress)) out.noProgressThreshold = r.noProgress;
-  if (Number.isFinite(r.maxIterations)) out.maxIterations = r.maxIterations;
-  return out;
-}
 
 /**
  * 错误签名归一化：抹掉时间戳、十六进制、路径、行列号、其余数字。
@@ -127,8 +113,7 @@ export function checkLedger(ledger, opts = {}) {
   // per-pattern 切片。
   //
   // 共享账本里，A 循环的失败会把 B 循环的熔断器顶爆——一个循环还没跑，
-  // 却因为另一个循环的 5 次失败被判 no-progress。`budget-check` 早就有
-  // per-pattern 解析（resolveCap），账本这一侧没有，是不对称的。
+  // 却因为另一个循环的 5 次失败被判 no-progress。
   //
   // 切片后为空时显式报 no-pattern-records，而不是回落到"没有记录所以一切正常"：
   // "这个循环还没跑过"与"账本里根本没有它的记录"必须可区分。
@@ -322,7 +307,7 @@ function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
     'ledger', 'stagnation', 'noProgress', 'maxIterations', 'tokenBudget',
-    'pattern', 'escalation', 'json', 'registry', 'help',
+    'pattern', 'escalation', 'json', 'help',
   ], 'ledger-check');
   if (args.help) {
     process.stdout.write(`ledger-check — loop circuit breaker
@@ -364,9 +349,8 @@ Exit codes:
     return n;
   };
 
-  // registry.yaml 作为阈值来源，CLI 参数覆盖单项。
-  const fromRegistry = breakerDefaults(typeof args.registry === 'string' ? args.registry : undefined);
-  const opts = { ...fromRegistry };
+  // 阈值来自内置默认值，CLI 参数覆盖单项。
+  const opts = {};
   if (args.stagnation !== undefined) opts.stagnationThreshold = numArg(args.stagnation, '--stagnation');
   if (args.noProgress !== undefined) opts.noProgressThreshold = numArg(args.noProgress, '--no-progress');
   if (args.maxIterations !== undefined) opts.maxIterations = numArg(args.maxIterations, '--max-iterations');

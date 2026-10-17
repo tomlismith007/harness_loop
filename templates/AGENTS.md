@@ -10,8 +10,8 @@
 
 1. `pwd` 确认工作目录是仓库根。
 2. 完整读本文件。
-3. 读项目文档（README 或等价物；本脚手架**不生成** `docs/ARCHITECTURE.md`、`docs/PRODUCT.md`，若项目有就在这里补读，没有就跳过）。
-4. 读 `progress.md` 拿最新已核实状态与下一步。
+3. 读项目文档（README 或等价物）。
+4. 读 `STATE.md` 拿当前活动与人类收件箱。
 5. 读 `feature_list.json`，选**一个**最高优先级未完成 feature。
 6. 跑 `./init.sh` 验证环境健康。
 7. `git log --oneline -5` 看最近提交。
@@ -20,21 +20,22 @@
 
 ## 工作规则
 
-- **One feature at a time** — 从 `feature_list.json` 选恰好一个未完成 feature，直到它被验证或被显式标记为阻塞。
-- **Verification required** — 没跑验证命令不得宣称完成。
-- **Update artifacts** — 结束前更新 `progress.md` 与 `feature_list.json`。
-- **Stay in scope** — 不改与当前 feature 无关的文件。
-- **Leave clean state** — 下一会话必须能立刻 `./init.sh`。
+- **一次只做一个 work item** —— 选恰好一个，直到它被验证或被显式标记为阻塞。
+- **不跑验证不得宣称完成。**
+- **状态必须落盘** —— 结束前更新 `STATE.md`；有代码改动时更新 `feature_list.json`。
+- **不修改与当前 work item 无关的文件。** 一个修复一个 diff。
 - **不得在实现过程中静默修改验证规则。**
+- **执行者不得标记自己的 work item 为完成。**
 
 ## 必需工件
 
 | 文件 | 作用 |
 |---|---|
 | `feature_list.json` | feature 状态追踪，唯一真相源 |
-| `progress.md` | 会话连续性日志 |
+| `STATE.md` | 活状态：收件箱、当前活动、观察列表 |
 | `init.sh` | 标准启动与验证路径 |
-| `session-handoff.md` | 可选，大型会话的紧凑交接 |
+| `loop-constraints.md` | 拒绝列表与闸门 |
+| `LESSONS.md` | 错题本：返工记录，经验转正为规则 |
 
 ## 完成定义
 
@@ -42,12 +43,12 @@
 
 - [ ] 目标行为已实现
 - [ ] 要求的验证**确实跑过**（tests / lint / type-check）
-- [ ] 证据记录在 `feature_list.json` 或 `progress.md`
+- [ ] 证据记录在 `feature_list.json` 或 `STATE.md`
 - [ ] 仓库仍能从标准启动路径重启
 
 ## 结束会话
 
-1. 更新 `progress.md`
+1. 更新 `STATE.md`
 2. 更新 `feature_list.json`
 3. 记录未解决的风险或 blocker
 4. 工作处于安全状态后用描述性 message 提交
@@ -69,5 +70,6 @@
 |---|---|
 | 架构决策 | 查架构文档，查不到问用户 |
 | 需求不清 | 查产品/需求文档，查不到问用户 |
-| 反复测试失败 | 更新 progress，标记人工复核 |
+| 反复测试失败 | 更新 STATE.md，标记人工复核 |
 | 范围含糊 | 重读 `feature_list.json` 的完成标准 |
+| 触及拒绝列表 | 立即停止，写升级条目 |

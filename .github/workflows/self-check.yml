@@ -1,7 +1,7 @@
 name: Self-check
 
 # loop-harness 自身的验证关卡。
-# 每次 push / PR 运行测试套件与自审计。
+# 每次 push / PR 运行测试套件与 CLI 冒烟。
 
 on:
   push:
@@ -29,39 +29,27 @@ jobs:
       - name: Run test suite
         run: node scripts/test.mjs
 
-      - name: Audit the pack itself
-        run: |
-          node scripts/loop-audit.mjs . --suggest
-          # 退出码 0 = score >= 40
-        continue-on-error: false
-
       - name: Verify scripts are executable entry points
         run: |
           set -e
-          node scripts/event-router.mjs --list > /dev/null
-          # 账本用临时的一份：出厂的 loop-ledger.json 带占位 goal，熔断器会（正确地）
-          # 判 placeholder-ledger 并退出 2。用仓库里那份测会得到一个与"脚本坏了"
-          # 无法区分的失败。
-          printf '{"goal":"probe","pattern":"x","level":"L1","attempts":[]}\n' > /tmp/ledger-probe.json
+          node scripts/harness-stage.mjs . > /dev/null
+          # 账本用临时的一份：出厂的 loop-ledger.json 带示例 goal，熔断器会（正确地）
+          # 判 placeholder-ledger 并退出 2。
+          printf '{"goal":"probe","attempts":[]}\n' > /tmp/ledger-probe.json
           node scripts/ledger-check.mjs --ledger /tmp/ledger-probe.json > /dev/null
           # 占位账本必须被拦下——熔断器要能区分示例数据与真实历史
           if node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null 2>&1; then
             echo "::error::placeholder ledger must be rejected"
             exit 1
           fi
-          node scripts/budget-check.mjs --pattern ci-sweeper > /dev/null
-          node scripts/queue-read.mjs > /dev/null
-          node scripts/loop-audit.mjs . > /dev/null
-          node scripts/harness-stage.mjs . > /dev/null
-          # gate-check 的冒烟测试必须覆盖 gate 路径，且同时断言 escalate 分支——
-          # 只跑 --verdict approve 会落在"闸门全关"的路径上，等于什么都没验。
+          # gate-check 的冒烟测试必须覆盖 gate 路径，且同时断言 escalate 分支。
           # 证据必须带 `### Checks not run` 节（即使为空也写 `—`）——闸门现在真的读它。
           printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → PASS\n- Red check: `npm run red` → PASS\n\n### Checks not run\n- —\n' > /tmp/evidence-probe.md
           node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
             --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
             --evidence-file /tmp/evidence-probe.md > /dev/null
           # 自相矛盾的报告必须被拦下：一份写着 Tests → FAIL 的 APPROVE 报告
-          # 曾经拿到 proceed exit 0——比没有报告更容易过（P0-01）。
+          # 曾经拿到 proceed exit 0——比没有报告更容易过。
           printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → FAIL\n\n### Checks not run\n- —\n' > /tmp/evidence-contra.md
           if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
             --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
@@ -69,11 +57,11 @@ jobs:
             echo "::error::APPROVE with a failing check must escalate"
             exit 1
           fi
-          # 指向多行清单但忘记 @ 必须报错，不能静默塌缩成 1 个文件——
-          # 那会让拒绝列表与范围两个闸门同时失效。
-          printf 'a.ts\nauth/x.ts\n' > /tmp/multiline.txt
+          # 指向路径清单但忘记 @ 必须报错，不能静默塌缩成 1 个文件——
+          # 那会让拒绝列表与范围两个闸门同时失效。单行清单同样必须被拦。
+          printf 'auth/x.ts\n' > /tmp/multiline.txt
           if node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files /tmp/multiline.txt > /dev/null 2>&1; then
-            echo "::error::--diff-files pointing at a multi-line file must be rejected"
+            echo "::error::--diff-files pointing at a path list must be rejected"
             exit 1
           fi
           # approve 不带证据必须升级（verdict 是断言，不是证据）
@@ -95,23 +83,22 @@ jobs:
             echo "::error::unknown flag must be rejected"
             exit 1
           fi
-          echo "All CLI entry points respond."
-
-      - name: Verify no auto-merge in event wiring
-        run: |
-          # 事件接线绝不能包含自动合并
-          if grep -rn "gh pr merge\|git push origin main" examples/github-actions/; then
-            echo "::error::Event wiring must never auto-merge"
+          # kill switch 必须由脚本自己读文件
+          mkdir -p /tmp/pause-probe
+          printf 'loop-pause-all\n' > /tmp/pause-probe/STATE.md
+          if node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state /tmp/pause-probe > /dev/null 2>&1; then
+            echo "::error::loop-pause-all must exit 3"
             exit 1
           fi
-          echo "No auto-merge found in examples/github-actions/"
+          node scripts/install-skills.mjs --target . --list > /dev/null
+          echo "All CLI entry points respond."
 
       - name: Check for credential literals
         run: |
           # 源码与示例中不得出现可用的凭据字面量
           if grep -rEn "(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})" \
               --include="*.mjs" --include="*.yml" --include="*.md" --include="*.json" \
-              scripts/ examples/ templates/ skills/ docs/ 2>/dev/null; then
+              scripts/ templates/ skills/ docs/ 2>/dev/null; then
             echo "::error::Possible credential literal found"
             exit 1
           fi

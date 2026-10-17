@@ -35,7 +35,7 @@ billing/**
 
 ### 强制写入技能
 
-`minimal-fix` 与所有执行类技能必须包含这条原句：
+`/harness-loop` 的执行者段落必须包含这条原句：
 
 > Do not modify files matching the denylist. Escalate to human with context.
 

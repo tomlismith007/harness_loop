@@ -13,8 +13,6 @@ export const PACK_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
 export const TEMPLATE_DIR = path.join(PACK_ROOT, 'templates');
 export const SKILLS_DIR = path.join(PACK_ROOT, 'skills');
 
-export const SUBSYSTEMS = ['instructions', 'state', 'verification', 'scope', 'lifecycle'];
-
 /**
  * 两个路径是否指向同一个文件/目录。
  *
@@ -48,43 +46,12 @@ export const DENYLIST_PATTERNS = [
   'billing/**',
 ];
 
-/** 状态文件候选名 */
-export const STATE_FILES = [
-  'STATE.md',
-  'pr-babysitter-state.md',
-  'ci-sweeper-state.md',
-  'post-merge-state.md',
-  'dependency-sweeper-state.md',
-  'changelog-drafter-state.md',
-  'issue-triage-state.md',
-];
-
-/** 循环技能名（用于审计识别） */
-export const LOOP_SKILL_NAMES = [
-  'harness-loop',
-  'loop-constraints',
-  'loop-budget',
-  'loop-guard',
-  'loop-verifier',
-  'event-router',
-  'issue-triage',
-  'pr-review-triage',
-  'ci-triage',
-  'minimal-fix',
-  'post-merge-cleanup',
-  'release-drafter',
-  'harness-init',
-  'harness-loop-init',
-  'harness-consolidate',
-];
-
-/** 技能扫描目录
- *  .zcode/.agents 是 install-skills.mjs 实际写入的路径；
- *  其余是其他 agent 的约定与仓库内裸 skills/。 */
+/** 技能扫描目录。
+ *  `.claude/skills` 与 `.agents/skills` 是本包安装的两个位置；
+ *  其余是其他 agent 的约定。裸 `skills/` 是源目录，任何 agent 都不会扫描它。 */
 export const SKILL_DIRS = [
-  '.zcode/skills', '.agents/skills',
-  '.grok/skills', '.claude/skills', '.codex/skills',
-  'skills',
+  '.claude/skills', '.agents/skills',
+  '.zcode/skills', '.grok/skills', '.codex/skills',
 ];
 
 /** 忽略的目录 */
@@ -439,143 +406,6 @@ export function loadDenylist(root = '.') {
     if (parsed.length) return parsed;
   }
   return DENYLIST_PATTERNS;
-}
-
-/**
- * 仓库事件：能代表"有事发生"的触发类型。
- *
- * push/pull_request/workflow_dispatch 不算——任何 CI 都有它们，
- * 它们不说明这个仓库挂了事件脊（本仓库的 self-check.yml 就是这种）。
- */
-const REPO_EVENT = /^\s*(issues|issue_comment|pull_request_review|check_suite|check_run|workflow_run|release|repository_dispatch)\s*:|^\s*pull_request\s*:\s*\n\s*types\s*:/m;
-
-/**
- * 项目是否接好了事件脊。
- *
- * 阶段 3 的判据 1 与 `harness-loop` 的第 0 步退出检查共用这一份逻辑——同一件事
- * 判两遍就有两遍可能漂移。它在 common 而不是留在 harness-stage 里，正是为了让
- * 两个消费者读同一个答案。
- */
-export function hasEventWiring(root = '.') {
-  const wfDir = path.join(root, '.github', 'workflows');
-  if (exists(wfDir)) {
-    let files = [];
-    try { files = fs.readdirSync(wfDir); } catch { /* 权限或竞态 */ }
-    // 判定"接线"看的是内容，不是文件名。
-    // 曾经用 /loop|triage|.../ 匹配文件名，于是任何官方 release-drafter action、
-    // 任何叫 triage.yml 的文件都算接线——而 harness-loop 会据此认为项目已接事件脊，
-    // 对着空队列跑完 8 步，把"没做事"记成一次正常运行；阶段 3 判据也会给一个
-    // 不存在事件脊的项目发 PASS。
-    //
-    // 第二层收窄（2026-10-17）：光"调用运行层脚本"仍不够。本仓库自己的
-    // self-check.yml 就是反例——它触发于 push/pull_request，调这些脚本是为了
-    // 冒烟测试它们的 CLI，于是 hasEventWiring('.') 返回 wired:true，而
-    // STATE.md 明写着"尚未跑过任何一轮真实事件"。后果是 no-wiring 这道
-    // "该不该跑"的自检在本仓库永不触发，阶段 3 判据 1 也拿到一个假 PASS。
-    // 所以还要求：触发事件是**仓库事件**（不是纯 CI），且真的消费路由结果。
-    const wired = files.filter((f) => {
-      if (!/\.ya?ml$/.test(f)) return false;
-      const text = readText(path.join(wfDir, f));
-      if (!/^on:/m.test(text)) return false;
-      // 纯 CI 事件（push / pull_request / workflow_dispatch）不算"接上了事件脊"
-      if (!REPO_EVENT.test(text)) return false;
-      if (!/node\s+scripts\/event-router\.mjs/.test(text)) return false;
-      // 必须真的用上路由结果：读锁冲突、落盘 work item、或传锁键
-      return /\.conflict|\.loop\/queue|--target/.test(text);
-    });
-    if (wired.length) {
-      return {
-        wired: true,
-        via: 'workflow',
-        detail: `${wired.length} 个 workflow 由仓库事件驱动且消费了路由结果（${wired.slice(0, 3).join(', ')}）`,
-      };
-    }
-  }
-  // 非 GitHub 平台：LOOP.md 里声明了调度也算。
-  //
-  // 但只在**没有 .github/workflows/** 时才认这条。有 workflow 目录说明这就是
-  // 一个 GitHub 仓库，那么文件才是真相——否则"在 LOOP.md 里写一句 cron"
-  // 就能让接线判据通过，而本仓库正是这么命中过：self-check.yml 被收窄后，
-  // 判定落到这里，因为 LOOP.md 的调度段含 `cron:` 与"事件驱动"两个词。
-  // 那与 P1-06 是同一个形状的问题，只是换了一层。
-  if (!wfDir || !exists(wfDir)) {
-    const loop = readText(path.join(root, 'LOOP.md'));
-    if (loop && /schedule|cron|scheduler|automation/i.test(loop) && /on:|事件驱动/.test(loop)) {
-      return { wired: true, via: 'declared', detail: 'LOOP.md 声明了调度' };
-    }
-  }
-  return {
-    wired: false,
-    via: null,
-    detail: wfDir && exists(wfDir)
-      ? '存在 .github/workflows/，但没有由仓库事件驱动并消费路由结果的 workflow'
-      : '没有 .github/workflows/，LOOP.md 也未声明调度',
-  };
-}
-
-/**
- * 从 patterns/registry.yaml 读 `defaults` 里的标量。
- *
- * 这个文件的头写着 "Consumed by scripts/loop-audit.mjs"，但过去没有任何脚本读它的
- * 值——所有阈值都在代码里重复硬编码，改配置不改变任何行为。仓库承诺零依赖，
- * 所以不引入 YAML 依赖：这几个键都是顶层标量，正则足够。
- * 文件缺失或解析不到时返回 null，调用方回落到内置默认值。
- */
-export function readRegistryDefaults(registryPath) {
-  const p = registryPath || path.join(PACK_ROOT, 'patterns', 'registry.yaml');
-  if (!exists(p)) return null;
-  const text = readText(p);
-  const block = text.split(/^defaults:/m)[1]?.split(/^\S/m)[0] || '';
-  const num = (key) => {
-    const m = block.match(new RegExp(`^\\s*${key}:\\s*(\\d+(?:\\.\\d+)?)`, 'm'));
-    return m ? Number(m[1]) : undefined;
-  };
-  const breaker = block.split(/breaker:/)[1] || '';
-  const breakerNum = (key) => {
-    const m = breaker.match(new RegExp(`^\\s*${key}:\\s*(\\d+)`, 'm'));
-    return m ? Number(m[1]) : undefined;
-  };
-  return {
-    maxAttempts: num('max_attempts'),
-    maxFilesPerFix: num('max_files_per_fix'),
-    maxFilesPerCleanup: num('max_files_per_cleanup'),
-    budgetReportOnly: num('budget_report_only_pct'),
-    budgetExit: num('budget_exit_pct'),
-    stagnation: breakerNum('stagnation'),
-    noProgress: breakerNum('no_progress'),
-    maxIterations: breakerNum('max_iterations'),
-  };
-}
-
-/**
- * 从 patterns/registry.yaml 读 `stages:` 块里的每阶段判据数。
- *
- * 这个块此前**没有任何消费者**——文件里写着 mechanical_checks: 10，而阶段 1
- * 的判据早已改成 8 项。同一份文件里的 `defaults:` 有消费者，`stages:` 没有，
- * 于是它成了第二个真相源并静默漂移。约束 11：写着值却没人读的配置是装饰品。
- *
- * 返回 [{ id, mechanical, human }]。解析不到返回 null，调用方回落。
- */
-export function readRegistryStages(registryPath) {
-  const p = registryPath || path.join(PACK_ROOT, 'patterns', 'registry.yaml');
-  if (!exists(p)) return null;
-  const text = readText(p);
-  const block = text.split(/^stages:/m)[1];
-  if (!block) return null;
-  const out = [];
-  // 以 "- id: N" 切段，逐段取标量
-  for (const chunk of block.split(/^\s*-\s*id:/m).slice(1)) {
-    const id = Number((chunk.match(/^\s*(\d+)/) || [])[1]);
-    if (!Number.isFinite(id)) continue;
-    const mech = chunk.match(/mechanical_checks:\s*(\d+)/);
-    const human = chunk.match(/human_checks:\s*(\d+)/);
-    out.push({
-      id,
-      mechanical: mech ? Number(mech[1]) : undefined,
-      human: human ? Number(human[1]) : undefined,
-    });
-  }
-  return out.length ? out : null;
 }
 
 /** 判断路径是否命中拒绝列表 */
