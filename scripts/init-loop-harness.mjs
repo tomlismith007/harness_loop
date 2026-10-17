@@ -54,11 +54,20 @@ Options:
   --help                    Show this help
 
 What gets created:
-  L1  AGENTS.md, feature_list.json, progress.md, session-handoff.md, init.sh,
-      loop-constraints.md, loop-budget.md, loop-run-log.md, LOOP.md, STATE.md,
-      LESSONS.md, loop-ledger.json,
-      control-plane + perception + lesson-harvest + gatekeeper skills
-  L2  adds minimal-fix, loop-verifier, post-merge-cleanup, release-drafter
+  L1  AGENTS.md, feature_list.json, progress.md, init.sh, loop-constraints.md,
+      STATE.md, LESSONS.md, plus runtime/control skills (harness-loop,
+      loop-constraints, loop-budget, event-router, the three triage skills)
+  L2  adds the 5 loop documents (LOOP.md, loop-budget.md, loop-run-log.md,
+      session-handoff.md, loop-ledger.json) and loop-guard / minimal-fix /
+      loop-verifier
+  L3  adds lesson-harvest, signal-gatekeeper, post-merge-cleanup, release-drafter
+
+Not the same as 'harness-stage --upgrade':
+  - it does NOT copy runtime scripts (scripts/*.mjs) or event workflows
+  - it does NOT install the stage-driver skills (harness-init / harness-loop-init /
+    harness-consolidate), which only run in the pack repository
+  Prefer 'node scripts/harness-stage.mjs <dir> --upgrade --stage N': that path
+  copies the runtime scripts the skills and workflows call.
 `);
     return;
   }

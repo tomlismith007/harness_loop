@@ -1733,6 +1733,20 @@ section('15. 端到端装配');
   ok('init.sh 含 npm test', initContent.includes('npm test'));
   ok('init.sh 含 set -euo pipefail', initContent.includes('set -euo pipefail'));
 
+  // ---- legacy 装配脚本的 --help 必须与实现一致 ----
+  // 它曾声称 L1 就写全部 12 个文件并装 lesson-harvest/gatekeeper，实际只在 L2/L3 写；
+  // 还漏说"不复制运行脚本与 workflow"——照它装配的消费者里每条命令都跑不起来。
+  {
+    const help = execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'init-loop-harness.mjs'), '--help'], { encoding: 'utf8' });
+    ok('init-loop-harness --help 说明 L1 不写 loop 机制文档',
+      /L1[\s\S]{0,300}loop-constraints/.test(help) && !/L1[\s\S]{0,300}loop-ledger\.json/.test(help),
+      '帮助文本把 loop 机制文档算进 L1');
+    ok('init-loop-harness --help 声明不复制运行脚本与 workflow',
+      /does NOT copy runtime scripts/i.test(help) && /workflows/i.test(help));
+    ok('init-loop-harness --help 不再推荐为等价入口', /not the same as/i.test(help));
+  }
+
   // 幂等：再跑一次不应覆盖
   const out2 = execFileSync(process.execPath, [
     path.join(PACK_ROOT, 'scripts', 'init-loop-harness.mjs'),

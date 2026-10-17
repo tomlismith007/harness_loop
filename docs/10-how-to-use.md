@@ -13,7 +13,7 @@
 | 文档 | 13 篇 |
 | 模板 | 13 个 |
 | 事件接线 | 8 个 GitHub Actions workflow |
-| 测试 | 1064 项断言全通过 |
+| 测试 | 1067 项断言全通过 |
 | 自审计 | 94/100，L2 |
 | 技能已安装 | 以 `node scripts/install-skills.mjs --scope user --check` 的实际输出为准 |
 
@@ -111,9 +111,14 @@ node scripts/loop-audit.mjs /path/to/repo --suggest
 node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
 node scripts/harness-stage.mjs /path/to/repo --stage 1 --require   # 退出码 0 = 达成
 
-# 一次装配到 L2/L3（无闸门，只报告写了什么）
+# 旧装配脚本（legacy）：只写文件与技能，不复制运行脚本/workflow，不推荐
 node scripts/init-loop-harness.mjs --target /path/to/repo --level L2
 ```
+
+> `init-loop-harness.mjs` **不等价于** `harness-stage --upgrade`：它不复制
+> `scripts/*.mjs` 运行层脚本，也不装阶段驱动技能。消费者里照它装配出的项目，
+> 技能与 workflow 调用的 `node scripts/xxx.mjs` 会 `ERR_MODULE_NOT_FOUND`。
+> 只用 `harness-stage.mjs --upgrade --stage N`。
 
 **阶段 1 生成**：`AGENTS.md`、`feature_list.json`、`progress.md`、`init.sh`、`STATE.md`、`LESSONS.md`、`loop-constraints.md`。
 
@@ -124,7 +129,7 @@ node scripts/init-loop-harness.mjs --target /path/to/repo --level L2
 | 等级 | 生成什么 | 允许做什么 |
 |---|---|---|
 | L1 | 阶段 1 的 7 个文件 + `harness-loop`、`loop-constraints`、`loop-budget`、`event-router`、三个 triage | 只报告，不改代码 |
-| L2 | 追加 5 个 loop 机制文档 + `harness-loop-init`、`loop-guard`、`minimal-fix`、`loop-verifier` | 在 worktree 中提出修复，独立验证；合并仍需人工 |
+| L2 | 追加 5 个 loop 机制文档 + `loop-guard`、`minimal-fix`、`loop-verifier` | 在 worktree 中提出修复，独立验证；合并仍需人工 |
 | L3 | 追加 `signal-gatekeeper`、`lesson-harvest`、`post-merge-cleanup`、`release-drafter` | 明确边界内无人值守 |
 
 **默认从 L1 开始。** 第一周只看报告，确认 triage 准确后再升级。
@@ -224,7 +229,7 @@ verifier 报告只接受该账号发的评论；账号名用仓库变量 `LOOP_B
 | `gate-check.mjs` | 闸门判定 | 0 = 通过；2 = 升级；3 = 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 = 继续；2 = 停止并升级（**含账本缺失或畸形**） |
 | `install-skills.mjs` | 安装技能到 ZCode 发现路径 | 0 = 成功；1 = 错误 |
-| `test.mjs` | 自检（1064 断言） | 0 = 全通过 |
+| `test.mjs` | 自检（1067 断言） | 0 = 全通过 |
 
 **退出码是给自动化用的。** 在 CI 里可以直接 `node scripts/gate-check.mjs ... || exit 1`。
 
