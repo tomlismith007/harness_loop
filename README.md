@@ -139,7 +139,8 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ├── docs/                      # 方法论（7 篇）+ archive/（v1 结构，仅参考）
 ├── skills/                    # 4 个技能：两个建设阶段 + 顶层编排 + GitHub 发现
 ├── templates/                 # 可直接复制进项目的 7 个模板
-└── scripts/                   # 5 个零依赖 Node 脚本
+├── scripts/                   # 5 个零依赖 Node 脚本
+└── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```
 
 ---
@@ -149,10 +150,23 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ```bash
 node scripts/test.mjs           # 330 项断言
 node scripts/test.mjs --verbose # 显示每一项
-bash init.sh                    # 测试 + 自审计 + CLI 冒烟
+bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
 
-CI 在每次 push 时运行测试套件与两条安全断言（不得出现凭据字面量）。见 `.github/workflows/self-check.yml`。
+CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检查。见 `.github/workflows/self-check.yml`。
+
+---
+
+## 已验证到什么程度
+
+| 验证 | 方式 | 结果 |
+|---|---|---|
+| 两阶段装配 | 临时项目端到端 | 阶段 1 出 6 文件、阶段 2 出 2 文件，`--require` 退出 0 |
+| 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 |
+| `/harness-loop-issue` 发现 | 沙箱仓库 `harness-loop-sandbox` | 写入带完成标准的待办；确认只读 |
+| `/harness-loop-issue` CI 分类 | 沙箱里造的真实红 PR | `TypeError` 由该 PR 引入 → 判 **regression**，未误判为 env/flake |
+
+真机验证抓出并修掉了两个框架 bug：闸门证据正则不接受技能文档里的报告格式；`install-skills --check` 把别家技能误报成清单残留。
 
 ---
 
