@@ -76,7 +76,7 @@ GitHub issue/PR 是可选模块（`/harness-loop-issue`），不属于核心。
 | 真实生产案例（全自动 loop） | `docs/09-case-magpie.md` |
 | v1 结构（已归档，仅参考） | `docs/archive/` |
 | 具体动作怎么做 | `skills/<技能名>/SKILL.md` |
-| 装配新项目 | `templates/` + `node scripts/harness-stage.mjs <repo> --upgrade --stage 1` |
+| 装配新项目 | `templates/` + `node scripts/harness-stage.mjs <repo> --upgrade --stage 1`（`harness-stage` 是 pack 级工具，消费方靠安装清单的 `packRoot` 定位） |
 
 ## 两个建设阶段
 

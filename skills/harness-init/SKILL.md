@@ -20,9 +20,17 @@ stage: 1
 
 ## 前置检查
 
+`harness-stage.mjs` 是 **pack 级工具**，不在消费方仓库的 `scripts/` 里（消费方只有
+`gate-check.mjs`、`ledger-check.mjs`、`lib/common.mjs`）。先定位 pack：
+
 ```bash
-node scripts/harness-stage.mjs <target>
+# 读项目内安装清单里的 packRoot
+node -e "console.log(require('./.claude/skills/.harness-loop-install.json').packRoot)"
+node <packRoot>/scripts/harness-stage.mjs <target>
 ```
+
+清单也可能在 `.agents/skills/` 或用户级 `~/.claude/skills/`。都找不到 → 问用户 pack 在哪，
+不要猜路径。
 
 看报告里阶段 1 的判据，确认缺什么。**不要凭印象判断缺什么。**
 
@@ -41,7 +49,7 @@ node scripts/harness-stage.mjs <target>
 ## 执行
 
 ```bash
-node scripts/harness-stage.mjs <target> --upgrade --stage 1
+node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 1
 ```
 
 生成 **6 个文件**：
@@ -67,8 +75,11 @@ node scripts/harness-stage.mjs <target> --upgrade --stage 1
 
 ```bash
 bash init.sh
-node scripts/harness-stage.mjs <target> --stage 1 --require   # 退出码 0 = 达成
+node <packRoot>/scripts/harness-stage.mjs <target> --stage 1 --require   # 退出码 0 = 达成
 ```
+
+注意：出厂模板的 3 条 feature 带 `占位：` 标记，替换前 `--require` 必须退出 2。
+若退出 0，说明判据被削弱了，不要继续。
 
 ## 常见错误
 
@@ -82,7 +93,7 @@ node scripts/harness-stage.mjs <target> --stage 1 --require   # 退出码 0 = �
 ## 下一步
 
 ```bash
-node scripts/harness-stage.mjs <target> --upgrade --stage 2
+node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
 或直接对话：`/harness-loop-init`。

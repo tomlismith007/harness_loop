@@ -20,9 +20,15 @@ requires_stage: 1
 
 ## 前置检查
 
+`harness-stage.mjs` 是 **pack 级工具**，不在消费方仓库的 `scripts/` 里。从项目内
+`.claude/skills/.harness-loop-install.json`（或 `.agents/skills/`、用户级清单）读 `packRoot`：
+
 ```bash
-node scripts/harness-stage.mjs <target>
+node -e "console.log(require('./.claude/skills/.harness-loop-install.json').packRoot)"
+node <packRoot>/scripts/harness-stage.mjs <target>
 ```
+
+清单不存在 → 问用户 pack 在哪，不要猜。
 
 阶段 1 必须 COMPLETE。没到就别进阶段 2——没有状态文件，验证者无法判断改动范围。
 
@@ -32,7 +38,7 @@ node scripts/harness-stage.mjs <target>
 |---|---|---|---|
 | 1 | `loop-ledger.json` 存在且不是占位账本 | 机械 | `ledger-check.mjs` 返回非 `placeholder-ledger` |
 | 2 | `loop-run-log.md` 存在 | 机械 | 文件存在且有 `## Log` 章节 |
-| 3 | `harness-loop` 已装到可发现路径 | 机械 | `.claude/skills/` 或 `.agents/skills/` |
+| 3 | `harness-loop` 已装到可发现路径 | 机械 | 只查**项目内** `.claude/skills/` 或 `.agents/skills/`；user-scope 安装不计入 |
 | 4 | `init.sh` 无占位符 | 机械 | 不含 `replace this line` / `No test script` |
 | 5 | **拒绝列表已本地化** | 机械 | 含 `loop-constraints.md` 自身，且至少 2 条模板外路径 |
 | 6 | **两份拒绝列表一致** | 机械 | `loop-constraints.md` ↔ `docs/04-safety.md` 逐条比对 |
@@ -45,7 +51,7 @@ node scripts/harness-stage.mjs <target>
 ## 执行
 
 ```bash
-node scripts/harness-stage.mjs <target> --upgrade --stage 2
+node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
 产出 **2 个文件**：
@@ -113,7 +119,7 @@ node scripts/harness-stage.mjs <target> --upgrade --stage 2
 ## 退出条件
 
 ```bash
-node scripts/harness-stage.mjs <target> --stage 2 --require
+node <packRoot>/scripts/harness-stage.mjs <target> --stage 2 --require
 # 退出码 0 = 7 项机械判据全过
 ```
 

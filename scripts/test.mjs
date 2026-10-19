@@ -610,8 +610,10 @@ section('8. init.sh 生成');
 
 section('9. 模板完整性');
 {
+  // init.sh 不在模板里：装配器用 initScriptFromCommands 生成它。
+  // 保留一份手写模板只会与生成器分叉（旧模板缺 LOOP_HARNESS_ACTIVE_INIT 标记）。
   const requiredTemplates = [
-    'AGENTS.md', 'feature_list.json', 'init.sh',
+    'AGENTS.md', 'feature_list.json',
     'loop-constraints.md', 'loop-run-log.md', 'STATE.md', 'LESSONS.md',
   ];
   for (const t of requiredTemplates) {
@@ -632,6 +634,14 @@ section('9. 模板完整性');
   ok('LESSONS 模板含 Seen N× 格式说明', /Seen N×/.test(lessons));
   ok('LESSONS 模板含转正规则', /3 个不同日期/.test(lessons));
   ok('LESSONS 模板有 Promoted 表', /## Promoted to hard rules/.test(lessons));
+
+  // 消费方拿到的约束集不能比 pack 自己少。
+  const constraintsTpl = readText(path.join(TEMPLATE_DIR, 'loop-constraints.md'));
+  ok('约束模板含可执行入口规则', /可执行入口规则/.test(constraintsTpl));
+  ok('约束模板含 Worktrees 章节', /## Worktrees/.test(constraintsTpl));
+
+  // 出厂 feature 必须自带占位标记，否则会绕过阶段 1 判据。
+  ok('feature 模板每条都带占位标记', fl.features.every((f) => /^\s*占位/.test(f.notes || '')));
 
   const log = fs.readFileSync(path.join(TEMPLATE_DIR, 'loop-run-log.md'), 'utf8');
   ok('run-log 模板声明 outcome 枚举', /`outcome` 枚举/.test(log));
@@ -677,6 +687,17 @@ section('10. 技能完整性');
   ok('harness-loop 声明合并始终人工', /合并永远由人工|合并.*人工/.test(loop));
   ok('harness-loop 含证据输出格式', /## Verdict: APPROVE/.test(loop));
   ok('harness-loop 一次只做一个 item', /一个.*work item|一个 item/.test(loop));
+  // --state 接受目录，不是文件路径。写 STATE.md 会让 kill switch 静默失效。
+  ok('harness-loop 不使用错误的 --state 文件路径', !/--state\s+STATE\.md/.test(loop));
+  // 证据 / head-commit / red-check not-run 三道闸只在 gate 阶段生效。
+  ok('harness-loop 第 5 步使用 gate 阶段', /--phase gate/.test(loop));
+  ok('harness-loop gate 命令带证据文件', /--evidence-file/.test(loop));
+  ok('harness-loop gate 命令绑定 sha', /--reviewed-sha/.test(loop) && /--head-sha/.test(loop));
+  ok('harness-loop 不承诺不存在的 --verify 模式', !/--verify/.test(loop));
+
+  // harness-stage 是 pack 级工具：消费方没有它，技能必须从安装清单定位 pack。
+  ok('harness-init 从安装清单定位 pack', /harness-loop-install\.json/.test(init));
+  ok('harness-loop-init 从安装清单定位 pack', /harness-loop-install\.json/.test(loopInit));
 
   const issue = readText(path.join(SKILLS_DIR, 'harness-loop-issue', 'SKILL.md'));
   ok('harness-loop-issue 标明仅 GitHub', /仅支持 GitHub/.test(issue));
@@ -731,6 +752,15 @@ section('12. 文档完整性');
   const readme = readText(path.join(PACK_ROOT, 'README.md'));
   ok('README 提到四个命令', ['/harness-init', '/harness-loop-init', '/harness-loop', '/harness-loop-issue']
     .every((c) => readme.includes(c)));
+
+  // 悬空引用：文档指向不存在的文件，读者按它找会落空。
+  const docsText = docs.map((d) => readText(path.join(PACK_ROOT, 'docs', d))).join('\n')
+    + readme + readText(path.join(PACK_ROOT, 'AGENTS.md'))
+    + readText(path.join(PACK_ROOT, 'LESSONS.md'));
+  for (const p of ['docs/06-cost-and-observability.md', 'docs/11-three-stages.md',
+    'templates/progress.md', 'templates/session-handoff.md', 'skills/lesson-harvest']) {
+    ok(`文档不引用悬空路径 ${p}`, !docsText.includes(p));
+  }
 }
 
 // ---------------------------------------------------------------- 13. 技能安装
@@ -833,7 +863,17 @@ section('14. 两阶段驱动器');
 
   fs.writeFileSync(path.join(empty, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
   runStage(empty, ['--upgrade', '--stage', '1']);
+
+  // 出厂模板的占位 feature 必须被阶段 1 判据拦住。此前测试先替换再断言，
+  // 正好掩盖了模板 notes 不以「占位」开头、从而自动通过判据的缺陷。
+  eq('模板占位 feature → 阶段 1 未达成',
+    runStage(empty, ['--stage', '1', '--require']).code, 2);
+  eq('占位 feature 未替换时不得跳级到阶段 2',
+    runStage(empty, ['--upgrade', '--stage', '2']).code, 2);
+
   writeRealFeatures(path.join(empty, 'feature_list.json'));
+  eq('替换占位 feature 后阶段 1 达成',
+    runStage(empty, ['--stage', '1', '--require']).code, 0);
 
   // 阶段 1 产出 6 个文件
   for (const f of ['AGENTS.md', 'feature_list.json', 'STATE.md', 'LESSONS.md', 'loop-constraints.md', 'init.sh']) {
@@ -853,6 +893,14 @@ section('14. 两阶段驱动器');
   for (const d of ['.claude/skills', '.agents/skills']) {
     ok(`消费者有 ${d}/harness-loop`, fs.existsSync(path.join(empty, d, 'harness-loop', 'SKILL.md')));
   }
+  // 安装清单记录 packRoot：消费方没有 harness-stage.mjs，技能靠它定位 pack。
+  for (const d of ['.claude/skills', '.agents/skills']) {
+    const mf = path.join(empty, d, '.harness-loop-install.json');
+    ok(`消费者有 ${d}/安装清单`, fs.existsSync(mf));
+    if (fs.existsSync(mf)) {
+      eq(`${d} 清单 packRoot 指向本包`, JSON.parse(fs.readFileSync(mf, 'utf8')).packRoot, PACK_ROOT);
+    }
+  }
 
   // 行为断言：消费者目录内真的能跑
   const runInConsumer = (rel, args) => {
@@ -865,8 +913,8 @@ section('14. 两阶段驱动器');
   fs.writeFileSync(probeLedger, JSON.stringify({ goal: 'probe', attempts: [] }));
   eq('消费者内 ledger-check 可运行',
     runInConsumer('ledger-check.mjs', ['--ledger', probeLedger]).code, 0);
-  eq('消费者内缺账本时 ledger-check 报错',
-    runInConsumer('ledger-check.mjs', ['--ledger', path.join(empty, 'nope.json')]).code, 1);
+  eq('消费者内缺账本时 ledger-check 停止并升级',
+    runInConsumer('ledger-check.mjs', ['--ledger', path.join(empty, 'nope.json')]).code, 2);
   eq('消费者内 gate-check 可运行',
     runInConsumer('gate-check.mjs', ['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts']).code, 0);
   // 装配后的仓库必须能自己演练护栏——drill-check 随装配进入消费者项目。

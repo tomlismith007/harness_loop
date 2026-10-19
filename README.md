@@ -27,7 +27,7 @@ kill switch → 加载约束 → 选定唯一一项 → 执行者（独立 workt
 → 验证者（新实例，只拿 diff 与验证命令）→ gate-check → ledger-check → 写状态
 ```
 
-验证者的独立性：有子智能体就派新实例；没有就要求人另开会话跑 `/harness-loop --verify <item>`，未经验证不得标记完成。
+验证者的独立性：有子智能体就派新实例；没有就要求人另开会话跑 `/harness-loop <item>`，并在指令中写明"只执行独立验证，不得修改代码"，未经验证不得标记完成。
 
 ---
 
@@ -53,13 +53,17 @@ node scripts/install-skills.mjs --scope user
 
 **装完重启会话**，否则 `/harness-init` 不会出现。
 
-也可以直接用脚本：
+也可以直接用脚本（`harness-stage.mjs` 是 pack 级工具，从本仓库运行，不复制进消费方）：
 
 ```bash
 node scripts/harness-stage.mjs /path/to/repo            # 看当前阶段与差距
 node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
 node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门，未达成退出 2
 ```
+
+技能在消费方仓库里靠 `.claude/skills/.harness-loop-install.json` 的 `packRoot` 定位 pack。
+阶段 2 的“技能已装到可发现路径”判据只查项目内的 `.claude/skills` / `.agents/skills`；
+user-scope 安装（`~/.claude/skills`）不计入。
 
 ---
 
@@ -85,7 +89,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 | `drill-check.mjs` | 护栏演练：拒绝列表逐条命中 + 熔断器具体触发（`--record` 写 `loop-drill.json`） | 0 全过；2 护栏没响 |
 | `clean-state.mjs` | 结束前检查：init.sh 无占位、无调试残留、Last run 是今天 | 0 干净；2 有未清理项 |
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`，manifest 记状态 | 0 成功；2 有未提交改动未清理 |
-| `test.mjs` | 自检（463 项断言） | 0 全通过 |
+| `test.mjs` | 自检（484 项断言） | 0 全通过 |
 
 装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs`、`worktree.mjs` 与 `lib/common.mjs`。
 
@@ -146,7 +150,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ├── loop-run-log.md            # 只追加运行日志
 ├── docs/                      # 方法论（7 篇）+ archive/（v1 结构，仅参考）
 ├── skills/                    # 4 个技能：两个建设阶段 + 顶层编排 + GitHub 发现
-├── templates/                 # 可直接复制进项目的 7 个模板
+├── templates/                 # 可直接复制进项目的 6 个模板（init.sh 由装配器生成）
 ├── scripts/                   # 5 个零依赖 Node 脚本
 └── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```
@@ -156,7 +160,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 463 项断言
+node scripts/test.mjs           # 484 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
