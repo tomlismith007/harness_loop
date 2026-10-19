@@ -24,6 +24,7 @@ import {
   verificationCommands, initScriptFromCommands, textHas, structuredText, fail,
   samePath, runWithTreeKill,
 } from './lib/common.mjs';
+import { recordStatus } from './drill-check.mjs';
 
 // ---------------------------------------------------------------- 阶段定义
 
@@ -419,6 +420,16 @@ function checkStage2(root) {
   add('两份拒绝列表一致（loop-constraints.md ↔ docs/04-safety.md）', drift.ok, drift.reason,
     '两边逐条对齐：文档说禁止的路径，机器必须也禁止');
 
+  // 护栏必须被证明会响，而不只是存在。记录绑定约束文件的 sha256：
+  // 改了策略而没重跑 drill，旧记录不再证明任何东西。
+  const drill = recordStatus(root);
+  const drillOk = drill.present && !drill.stale && drill.failed.length === 0;
+  add('护栏演练通过（loop-drill.json 与当前约束一致、无失败项）', drillOk,
+    drillOk ? null
+      : drill.reason
+        || `演练有 ${drill.failed.length} 项失败：${drill.failed.join(', ')}`,
+    '运行 node scripts/drill-check.mjs --record，然后提交 loop-drill.json');
+
   add('回退测试被实际执行过（需人工确认）', null,
     '至少有一次：新测试在修复前的代码上真的挂掉，且失败信息指出了错误的行为。'
     + '把那次运行的命令与输出记进 STATE.md，作为证据',
@@ -515,7 +526,7 @@ function copySkillDir(name, target, results) {
  * 不复制：`test.mjs`（源仓库自检套件）、`install-skills.mjs` 与
  * `harness-stage.mjs`（装配工具，依赖 pack 内的 templates/ 与 skills/）。
  */
-const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs'];
+const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs'];
 
 function copyRuntimeScripts(root, force, results) {
   const packScripts = path.join(PACK_ROOT, 'scripts');

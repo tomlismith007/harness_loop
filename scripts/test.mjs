@@ -842,7 +842,7 @@ section('14. 两阶段驱动器');
     && !fs.existsSync(path.join(empty, 'loop-run-log.md')));
 
   // 运行层脚本随装配进入目标仓库
-  for (const f of ['gate-check.mjs', 'ledger-check.mjs', 'lib/common.mjs']) {
+  for (const f of ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'lib/common.mjs']) {
     ok(`消费者项目有 scripts/${f}`, fs.existsSync(path.join(empty, 'scripts', f)));
   }
   for (const f of ['test.mjs', 'harness-stage.mjs', 'install-skills.mjs']) {
@@ -868,6 +868,9 @@ section('14. 两阶段驱动器');
     runInConsumer('ledger-check.mjs', ['--ledger', path.join(empty, 'nope.json')]).code, 1);
   eq('消费者内 gate-check 可运行',
     runInConsumer('gate-check.mjs', ['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts']).code, 0);
+  // 装配后的仓库必须能自己演练护栏——drill-check 随装配进入消费者项目。
+  eq('消费者内 drill-check 可运行',
+    runInConsumer('drill-check.mjs', ['--state', '.', '--only', 'breaker']).code, 0);
 
   // 跳级保护：阶段 1 未达成时不得直接装阶段 2
   {
@@ -891,6 +894,11 @@ section('14. 两阶段驱动器');
   fs.writeFileSync(path.join(empty, 'loop-constraints.md'),
     fs.readFileSync(path.join(empty, 'loop-constraints.md'), 'utf8')
       .replace('auth/**', 'auth/**\ninfra/prod/**\nops/runbooks/**'));
+  // 阶段 2 现在要求护栏演练记录；记录绑定约束文件的 sha256，所以必须在
+  // 本地化之后生成，否则一生成就是过期的。
+  execFileSync(process.execPath,
+    [path.join(PACK_ROOT, 'scripts', 'drill-check.mjs'), '--record', '--state', empty],
+    { encoding: 'utf8' });
   eq('替换 goal + 本地化拒绝列表后阶段 2 机械判据全过', runStage(empty, ['--stage', '2', '--require']).code, 0);
 
   // 自引用防护：目标就是 pack 自己时，判据记为 NOT RUN 而不是递归
@@ -1373,6 +1381,176 @@ section('17. 升级回归（批次 2）');
     const readme = readText(path.join(PACK_ROOT, 'README.md'));
     const docGates = [...readme.matchAll(/^\| \d+ \| `([a-z-]+)` \|/gm)].map((m) => m[1]).sort();
     eq('README 闸门表与代码 gate 名一致', docGates.join(','), codeGates.join(','));
+  }
+}
+
+// ---------------------------------------------------------------- 18. 护栏演练（U-05）
+
+section('18. 护栏演练（U-05）');
+{
+  const runDrill = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'drill-check.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+
+  // 拒绝列表逐条命中（敏感性）+ 良性路径不命中（特异性）
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-'));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\nauth/**\n**/secrets/**\n```\n');
+    const r = runDrill(['--record', '--state', t], t);
+    eq('U-05 全命中 → exit 0', r.code, 0);
+    ok('U-05 记录文件生成', fs.existsSync(path.join(t, 'loop-drill.json')));
+    const rec = JSON.parse(readText(path.join(t, 'loop-drill.json')));
+    ok('U-05 记录含 gate 组', Boolean(rec.guardrails && rec.guardrails.gate), JSON.stringify(Object.keys(rec.guardrails || {})));
+    ok('U-05 记录含 constraints 指纹', /"sha256":\s*"[0-9a-f]{64}"/.test(readText(path.join(t, 'loop-drill.json'))));
+
+    // 篡改约束文件 → 记录失效
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\nauth/**\n**/secrets/**\npayments/**\n```\n');
+    const stale = runDrill(['--state', t], t);
+    eq('U-05 约束文件变了 → 记录失效 exit 1', stale.code, 1);
+    ok('U-05 失效原因可见', /STALE|过期|已改动/.test(stale.out), stale.out.slice(0, 300));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 熔断器演练：三个具体触发 + 健康账本不触发
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-b-'));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    const r = runDrill(['--record', '--only', 'breaker', '--state', t], t);
+    eq('U-05 breaker 演练全过 → 0', r.code, 0);
+    const rec = JSON.parse(readText(path.join(t, 'loop-drill.json')));
+    const ids = (rec.guardrails.breaker.results || []).map((x) => x.id).sort();
+    ok('U-05 breaker 含 stagnation', ids.includes('breaker.stagnation'), ids.join(','));
+    ok('U-05 breaker 含 no-progress', ids.includes('breaker.no-progress'), ids.join(','));
+    ok('U-05 breaker 含 healthy（特异性）', ids.includes('breaker.healthy'), ids.join(','));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 拒绝列表有一条匹配不上 → 演练失败，exit 2
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-f-'));
+    // `**` 之外的畸形模式：合成路径无法命中它
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\n[unclosed\n```\n');
+    const r = runDrill(['--record', '--only', 'gate', '--state', t], t);
+    eq('U-05 某条拒绝列表不命中 → 2', r.code, 2);
+    ok('U-05 失败项被点名', /\[unclosed\]/.test(r.out), r.out.slice(0, 400));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 记录必须真的能证明东西：空记录、缺组、缺指纹、少条目都不算。
+  {
+    const stage = (dir) => {
+      let out = '';
+      try {
+        out = execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), dir, '--json'], { encoding: 'utf8' });
+      } catch (e) { out = e.stdout || ''; }
+      const j = JSON.parse(out);
+      return j.stages[1].checks.find((x) => /护栏|drill/.test(x.label));
+    };
+    const mk = () => {
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-r-'));
+      fs.writeFileSync(path.join(d, 'loop-constraints.md'), '## Paths\n\n```\n.env\nauth/**\n```\n');
+      return d;
+    };
+
+    const empty = mk();
+    fs.writeFileSync(path.join(empty, 'loop-drill.json'), JSON.stringify({ schema: 1, guardrails: {} }));
+    ok('U-05 空记录 → 判据失败', stage(empty).ok === false, JSON.stringify(stage(empty)));
+    fs.rmSync(empty, { recursive: true, force: true });
+
+    const noSha = mk();
+    fs.writeFileSync(path.join(noSha, 'loop-drill.json'), JSON.stringify({
+      schema: 1,
+      guardrails: {
+        gate: { results: [{ id: 'gate.benign', outcome: 'passed' }] },
+        breaker: { results: [{ id: 'breaker.healthy', outcome: 'passed' }] },
+      },
+    }));
+    ok('U-05 缺 sha256 的记录 → 判据失败', stage(noSha).ok === false, JSON.stringify(stage(noSha)));
+    fs.rmSync(noSha, { recursive: true, force: true });
+
+    // breaker-only 记录：拒绝列表是否命中没有证据
+    const onlyBreaker = mk();
+    runDrill(['--record', '--only', 'breaker', '--state', onlyBreaker], onlyBreaker);
+    ok('U-05 只有 breaker 的记录 → 判据失败', stage(onlyBreaker).ok === false, JSON.stringify(stage(onlyBreaker)));
+    fs.rmSync(onlyBreaker, { recursive: true, force: true });
+
+    // 正常记录通过
+    const good = mk();
+    runDrill(['--record', '--state', good], good);
+    ok('U-05 完整记录 → 判据通过', stage(good).ok === true, JSON.stringify(stage(good)));
+
+    // gate 结果全 skipped：拒绝列表在那里，没有"跳过"这种合法结局。
+    const rec = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec.guardrails.gate.results = rec.guardrails.gate.results.map((r) => ({ ...r, outcome: 'skipped' }));
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec));
+    ok('U-05 gate 结果全 skipped → 判据失败', stage(good).ok === false, JSON.stringify(stage(good)));
+
+    // breaker 只留 healthy：证明不了它会停。
+    const rec2 = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec2.guardrails.gate.results = rec2.guardrails.gate.results.map((r) => ({ ...r, outcome: 'passed' }));
+    rec2.guardrails.breaker.results = [{ id: 'breaker.healthy', outcome: 'passed' }];
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec2));
+    ok('U-05 breaker 只留 healthy → 判据失败', stage(good).ok === false, JSON.stringify(stage(good)));
+
+    // 未知 outcome 不得被当成通过。
+    const rec4 = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec4.guardrails.gate.results = rec4.guardrails.gate.results.map((r) => ({ ...r, outcome: 'PASSED' }));
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec4));
+    ok('U-05 非规范 outcome → 判据失败', stage(good).ok === false, JSON.stringify(stage(good)));
+
+    // 非对象元素不得让 stage driver 崩掉。
+    const rec3 = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec3.guardrails.gate.results = [null];
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec3));
+    ok('U-05 记录含 null 元素 → 判据失败而不崩溃', stage(good).ok === false, JSON.stringify(stage(good)));
+    fs.rmSync(good, { recursive: true, force: true });
+  }
+
+  // 被别的模式遮住的死条目必须被点名，而不是算通过。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-m-'));
+    // 每条结果必须由**它自己的**模式拦下。曾经拿整表匹配，
+    // 于是一条更宽的模式会把另一条的样本也拦掉，结果里写着别人的名字，
+    // 死条目因此永远看不出来。
+    // 顺序有讲究：宽模式在前，整表匹配时它会把窄模式的样本也拦下，
+    // 于是旧代码给窄模式记的"命中"其实是宽模式干的。新代码只拿 [glob]
+    // 匹配，两条都归因到自己。这个 fixture 在旧代码上会红。
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n**/src/**\n**/secret/**\n```\n');
+    const r = runDrill(['--only', 'gate', '--state', t, '--json'], t);
+    const j = JSON.parse(r.out);
+    const secret = j.results.find((x) => x.id === 'gate.denylist[**/secret/**]');
+    ok('U-05 命中归因到自己的模式',
+      secret && /blocked by \*\*\/secret\/\*\*/.test(secret.actual), JSON.stringify(secret));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 阶段 2 新增判据：没有 drill 记录 → 未达成
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-s-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), t, '--upgrade', '--stage', '1'],
+      { encoding: 'utf8' });
+    writeRealFeatures(path.join(t, 'feature_list.json'));
+    let out = '';
+    try {
+      out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), t, '--json'], { encoding: 'utf8' });
+    } catch (e) { out = e.stdout || ''; }
+    const j = JSON.parse(out);
+    const c = j.stages[1].checks.find((x) => /护栏|drill/.test(x.label));
+    ok('U-05 阶段 2 有 drill 判据', Boolean(c), JSON.stringify(j.stages[1].checks.map((x) => x.label)));
+    ok('U-05 无记录时判据失败', c && c.ok === false, JSON.stringify(c));
+    fs.rmSync(t, { recursive: true, force: true });
   }
 }
 
