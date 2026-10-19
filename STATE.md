@@ -16,7 +16,8 @@ Last run: 2026-10-19 (U-05 护栏演练 + U-12 清洁交接)
 - [x] **批次 2：收紧闸门与状态**（U-03/04/06/07检查/08/10；完成标准见同上 §3）— commit `9232620`，独立验证 4 轮后 APPROVE
 - [x] **U-05 护栏演练**（drill-check + 阶段 2 判据；完成标准见 `audits/upgrade-plan-2026-10-18.md` §2 U-05）— commit `9b0b4aa`，独立验证 3 轮后 APPROVE
 - [ ] **已知未达成**：本仓库 `harness-stage . --stage 2 --require` 仍退出 2（占位账本按设计保留；技能在 `<repo>/skills/`，worktree 未安装）。CI 不跑 `--require`，故不阻断。
-- [ ] **剩余推迟项**：U-12（clean-state）、U-13（worktree manifest）尚未开始。
+- [x] **U-12 清洁交接**（clean-state；完成标准见 `audits/upgrade-spec-2026-10-18.md` U-12）— commit `fb1ff93`，独立验证 3 轮后 APPROVE
+- [ ] **剩余推迟项**：U-13（worktree manifest）尚未开始。
 
 ## Active
 
