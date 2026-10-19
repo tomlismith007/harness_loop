@@ -526,7 +526,7 @@ function copySkillDir(name, target, results) {
  * 不复制：`test.mjs`（源仓库自检套件）、`install-skills.mjs` 与
  * `harness-stage.mjs`（装配工具，依赖 pack 内的 templates/ 与 skills/）。
  */
-const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'clean-state.mjs'];
+const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'clean-state.mjs', 'worktree.mjs'];
 
 function copyRuntimeScripts(root, force, results) {
   const packScripts = path.join(PACK_ROOT, 'scripts');

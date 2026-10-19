@@ -64,7 +64,8 @@ Constraints loaded from loop-constraints.md: N rules active.
 在**独立 worktree** 里做最小改动：
 
 ```bash
-git worktree add loop/<event>-<item>-attempt<N> -b loop/<event>-<item>-attempt<N>
+node scripts/worktree.mjs create --run-id <item>-attempt<N>
+# 等价于 git worktree add -b loop/<id> .loop-worktrees/<id> <base>，但记进 manifest
 ```
 
 硬要求：
@@ -159,7 +160,9 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 2. 有代码改动时更新 `feature_list.json`（状态 + 证据）
 3. 追加一条 JSON 到 `loop-run-log.md`
 4. 本轮若发生**返工**（修了又改、验证被拒），在 `LESSONS.md` 追加一行
-5. 丢弃 worktree：`git worktree remove --force <dir>` + `git branch -D <name>`
+5. 处置 worktree：验证通过 → `node scripts/worktree.mjs mark --run-id <id> --status merged`；
+   被拒或升级 → `--status rejected|escalated`，然后 `node scripts/worktree.mjs cleanup`。
+   cleanup 不带 `--force`：有未提交改动时它会报告而不是销毁（exit 2）。
 6. 跑清洁交接检查：
 
    ```bash

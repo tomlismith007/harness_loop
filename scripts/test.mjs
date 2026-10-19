@@ -1705,6 +1705,153 @@ section('19. 清洁交接（U-12）');
   }
 }
 
+// ---------------------------------------------------------------- 20. worktree manifest（U-13）
+
+section('20. worktree manifest（U-13）');
+{
+  const runWt = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'worktree.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  const mkRepo = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wt-'));
+    const env = { ...process.env };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: d, env });
+    fs.writeFileSync(path.join(d, 'a.txt'), 'x\n');
+    execFileSync('git', ['add', '-A'], { cwd: d, env });
+    execFileSync('git', ['commit', '-qm', 'init'], { cwd: d, env });
+    return { dir: d, env };
+  };
+  const gitOut = (args, cwd, env) => execFileSync('git', args, { cwd, encoding: 'utf8', env }).trim();
+  // 记录不存在时返回 null，让断言红而不是让整个套件抛异常——
+  // 一个崩掉的测试不会告诉人"哪个行为错了"。
+  const readManifestSafe = (dir) => {
+    try { return JSON.parse(readText(path.join(dir, '.loop-worktrees', 'manifest.json'))); }
+    catch { return null; }
+  };
+
+  {
+    const { dir, env } = mkRepo();
+    const r = runWt(['create', '--run-id', 't1', '--state', dir], dir);
+    eq('U-13 create → 0', r.code, 0);
+    ok('U-13 manifest 生成', fs.existsSync(path.join(dir, '.loop-worktrees', 'manifest.json')));
+    const manifest = readManifestSafe(dir) || { worktrees: [] };
+    const entry = manifest.worktrees.find((w) => w.id === 't1');
+    ok('U-13 manifest 记录 active', entry && entry.status === 'active', JSON.stringify(entry));
+    ok('U-13 worktree 目录存在', entry ? fs.existsSync(path.join(dir, entry.path)) : false);
+    ok('U-13 分支创建', gitOut(['branch', '--list', 'loop/t1'], dir, env).includes('loop/t1'));
+
+    // 同一 run-id 重复 create 必须拒绝
+    eq('U-13 重复 run-id → 非零', runWt(['create', '--run-id', 't1', '--state', dir], dir).code !== 0 ? 1 : 0, 1);
+
+    // 未提交改动时 cleanup 不得删除
+    if (!entry) {
+      ok('U-13 后续断言需要 manifest 条目', false, 'create 没有写入条目');
+    } else {
+    fs.writeFileSync(path.join(dir, entry.path, 'dirty.txt'), 'x\n');
+    runWt(['mark', '--run-id', 't1', '--status', 'rejected', '--state', dir], dir);
+    const clean = runWt(['cleanup', '--state', dir], dir);
+    eq('U-13 有未提交改动 → cleanup 报告而不删除', clean.code, 2);
+    ok('U-13 未提交改动被点名',
+      /modified or untracked|uncommitted|未提交|dirty/.test(clean.out), clean.out.slice(0, 300));
+    ok('U-13 worktree 仍在', fs.existsSync(path.join(dir, entry.path)));
+
+    // 清掉改动后可以删除
+    fs.rmSync(path.join(dir, entry.path, 'dirty.txt'));
+    eq('U-13 干净后 cleanup → 0', runWt(['cleanup', '--state', dir], dir).code, 0);
+    ok('U-13 worktree 目录已删', !fs.existsSync(path.join(dir, entry.path)));
+    ok('U-13 分支已删', !gitOut(['branch', '--list', 'loop/t1'], dir, env).includes('loop/t1'));
+    const after = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 manifest 移除条目', !after.worktrees.some((w) => w.id === 't1'));
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // active 状态的 worktree 永远不被 cleanup 扫到
+    const { dir, env } = mkRepo();
+    runWt(['create', '--run-id', 'live', '--state', dir], dir);
+    eq('U-13 active 不被 cleanup 删除', runWt(['cleanup', '--state', dir], dir).code, 0);
+    const m = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 active 条目仍在', m.worktrees.some((w) => w.id === 'live' && w.status === 'active'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // merged 也不自动删：合并后的分支可能还要人看
+    const { dir } = mkRepo();
+    runWt(['create', '--run-id', 'm1', '--state', dir], dir);
+    runWt(['mark', '--run-id', 'm1', '--status', 'merged', '--state', dir], dir);
+    eq('U-13 merged 不被 cleanup 自动删除', runWt(['cleanup', '--state', dir], dir).code, 0);
+    const m = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 merged 条目仍在', m.worktrees.some((w) => w.id === 'm1'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // 分支删不掉（被锁）时，条目不能从 manifest 里消失——否则分支永远残留，
+    // 而 manifest 说"已清理"。用 ref lock 强制这个失败。
+    const { dir, env } = mkRepo();
+    runWt(['create', '--run-id', 'locked', '--state', dir], dir);
+    runWt(['mark', '--run-id', 'locked', '--status', 'rejected', '--state', dir], dir);
+    const lockFile = path.join(dir, '.git', 'refs', 'heads', 'loop', 'locked.lock');
+    fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+    fs.writeFileSync(lockFile, '');
+    const r = runWt(['cleanup', '--state', dir], dir);
+    eq('U-13 分支删不掉 → cleanup exit 2', r.code, 2);
+    ok('U-13 分支残留被点名', /branch/.test(r.out), r.out.slice(0, 400));
+    const m = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 分支残留的条目仍在 manifest', m.worktrees.some((w) => w.id === 'locked'), JSON.stringify(m));
+    ok('U-13 分支仍存在', gitOut(['branch', '--list', 'loop/locked'], dir, env).includes('loop/locked'));
+
+    // 恢复路径必须存在：解锁后再 cleanup，条目与分支都要清掉。
+    // 否则条目永远卡在 manifest 里，没有任何出路。
+    fs.rmSync(lockFile, { force: true });
+    const again = runWt(['cleanup', '--state', dir], dir);
+    eq('U-13 解锁后 cleanup → 0', again.code, 0);
+    const m2 = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 解锁后条目已移除', !m2.worktrees.some((w) => w.id === 'locked'), JSON.stringify(m2));
+    ok('U-13 解锁后分支已删', !gitOut(['branch', '--list', 'loop/locked'], dir, env).includes('loop/locked'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    const { dir } = mkRepo();
+    eq('U-13 未知 status → 参数错误', runWt(['mark', '--run-id', 'x', '--status', 'nope', '--state', dir], dir).code, 1);
+    eq('U-13 不存在的 run-id → 非零', runWt(['mark', '--run-id', 'nope', '--status', 'rejected', '--state', dir], dir).code !== 0 ? 1 : 0, 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // 非 git 目录 → 参数错误
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wt-ng-'));
+    eq('U-13 非 git 目录 → 1', runWt(['create', '--run-id', 'x', '--state', d], d).code, 1);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // run-id 不能逃出 .loop-worktrees/
+    const { dir } = mkRepo();
+    eq('U-13 run-id 含路径分隔符 → 1', runWt(['create', '--run-id', '../evil', '--state', dir], dir).code, 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    const { dir } = mkRepo();
+    const j = runWt(['list', '--state', dir, '--json'], dir);
+    eq('U-13 list 空 manifest → 0', j.code, 0);
+    ok('U-13 list --json 是数组', Array.isArray(JSON.parse(j.out).worktrees), j.out.slice(0, 200));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- 汇总
 
 // 文档里声称的断言数必须与实测一致，否则"验证已完成"这句话本身就是不可信的。
