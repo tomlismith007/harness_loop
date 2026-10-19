@@ -26,7 +26,7 @@
         "确认安装、类型检查、测试、构建全部通过"
       ],
       "evidence": [],
-      "notes": "替换为你的真实 feature。此条目是占位符。"
+      "notes": "占位：替换为你的真实 feature。此条目是占位符。"
     },
     {
       "id": "core-001",
@@ -41,7 +41,7 @@
         "确认结果 Y 出现"
       ],
       "evidence": [],
-      "notes": "dependencies: setup-001"
+      "notes": "占位：dependencies: setup-001"
     },
     {
       "id": "verify-001",
@@ -56,7 +56,7 @@
         "故意引入一个回归，确认测试失败"
       ],
       "evidence": [],
-      "notes": "dependencies: core-001"
+      "notes": "占位：dependencies: core-001"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # 03 · 闸门与等级：什么条件下允许做什么
 
-本文档定义 L0–L3 就绪度等级、五类闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
+本文档定义 L0–L3 就绪度等级、闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
 
 ---
 
@@ -60,7 +60,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 **为什么**：三次尝试不成功说明问题不在实现细节，而在理解层面——可能是根因判断错了、需求不清楚、或者是环境问题。继续重试只会烧 token 并污染状态。
 
-熔断器的三个阈值（见 `docs/06-cost-and-observability.md`）：
+熔断器的三个阈值（见 `docs/archive/06-cost-and-observability.md`）：
 
 | 类型 | 默认阈值 |
 |---|---|
@@ -81,18 +81,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 **为什么**：写代码的模型给自己打分系统性偏高。这不是诚实问题，是生成模型的性质——它在生成过程中说服了自己。
 
-### 5. 预算闸门（Budget Gate）
-
-**判定**：今日 token 花费占日上限的比例。
-
-| 花费 | 动作 |
-|---|---|
-| < 80% | 正常运行 |
-| ≥ 80% | `report-only`：不派发执行子智能体 |
-| ≥ 100% | 立即退出 |
-| `loop-pause-all` | 立即退出 |
-
-### 6. 合并闸门（Merge Gate）—— 默认关闭
+### 5. 合并闸门（Merge Gate）—— 默认关闭
 
 **默认：不自动合并。** 只有以下情况例外：
 
@@ -105,7 +94,8 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 允许列表必须写入 `loop-auto-merge-allowlist.md`，且**必须逐条列出路径**，不接受模式化的宽松规则。
 
-> **该文件目前不存在，也不在脚手架里生成。** 它只在真的要开启自动合并时才需要创建，而 `patterns/registry.yaml` 的 `defaults.auto_merge` 是全局 `false`——所以当前缺失是安全的：没有任何路径能自动合并，L3 清单里的"自动合并已关闭"已经成立，"允许列表"那一项因此不适用。
+> **该文件目前不存在，也不在脚手架里生成。** 本框架默认不自动合并，且不生成允许列表；
+> 它只在真的要开启自动合并时才需要手工创建。当前缺失是安全的：没有任何路径能自动合并。
 
 ---
 
@@ -115,15 +105,13 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ```
 1.  loop-pause-all 生效？          → exit（不检查其他）
-2.  预算 >= 100%？                 → exit
-3.  触及拒绝列表？                  → escalated（不执行编辑）
-4.  attempts >= 3？                → escalated
-5.  预算 >= 80%？                  → report-only
-6.  改动 > 5 文件（清理类 > 10）？   → escalated
-7.  head-commit 不一致？            → escalated（约束 7：合并绑定审过的 commit）
-8.  回退测试未通过 / 未跑？          → escalated（约束 8）
-9.  verifier 未 APPROVE？          → 回 fix 或 escalated
-10. 合并闸门（默认关闭）            → 人工
+2.  触及拒绝列表？                  → escalated（不执行编辑）
+3.  attempts >= 3？                → escalated
+4.  改动 > 5 文件（清理类 > 10）？   → escalated
+5.  head-commit 不一致？            → escalated（约束 7：合并绑定审过的 commit）
+6.  回退测试未通过 / 未跑？          → escalated（约束 8）
+7.  verifier 未 APPROVE？          → 回 fix 或 escalated
+8.  合并闸门（默认关闭）            → 人工
 ```
 
 顺序有讲究：**退出类判定在最前**（避免在应该停的时候还在分析），**拒绝列表在尝试上限之前**（安全优先于效率）。
@@ -136,7 +124,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 ### 机械判定 vs 人工判定
 
 本文档描述的部分判定**无法机械执行**，应当标为人工项而不是假装能自动检查——
-这与 `docs/11-three-stages.md` 处理阶段 2 判据的原则一致（"判断力无法被 grep 替代，
+这与 `docs/archive/11-three-stages.md` 处理阶段 2 判据的原则一致（"判断力无法被 grep 替代，
 把它标成人工项比让它假绿诚实"）。
 
 | 判定 | 类型 | 说明 |
@@ -207,9 +195,9 @@ node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state .
 此前文档里的示例输出不可能由文档里的命令产生——说明那个示例从未被执行过，
 而这正是"文档说 A、代码做 B"这类漂移最容易藏身的地方。
 
-`decision` 枚举：`proceed` | `report-only` | `escalate` | `exit`
+`decision` 枚举：`proceed` | `escalate` | `exit`
 
-**退出码**：`0` = `proceed` 或 `report-only`；`2` = `escalate`；`3` = `exit`。
+**退出码**：`0` = `proceed`；`2` = `escalate`；`3` = `exit`。
 **参数错误（未知标志、非法枚举值、非数字阈值）退出 `1`**——它不属于上面四态，
 所以调用方必须把它当"我没问对问题"处理，而不是当"闸门通过了"。
 

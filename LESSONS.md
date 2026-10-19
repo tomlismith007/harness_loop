@@ -6,7 +6,7 @@
 > 升级规则：同一条教训在 **3 个不同日期**的复盘里出现 → 转正进 `loop-constraints.md`
 > 或 `AGENTS.md` 的硬约束区，从「经验」变成「硬规则」，之后每个 PR 审查逐条对。
 >
-> 机制说明见 `docs/09-case-magpie.md` 与 `skills/lesson-harvest/SKILL.md`。
+> 机制说明见 `docs/09-case-magpie.md`。
 
 ---
 
@@ -60,6 +60,11 @@ Evidence: 实测 `Last run: never` → 日期即触发；仅加一条 `run_id` �
 这与已记录的 D3（两个对照结果相同、实为 fixture 缺失造成的噪声）是同一个病的两种形态。
 Seen 1× (2026-10-16)
 Evidence: `gate-check` 四种参数排列实跑（2026-10-16；原始审查报告已删除）
+
+**文档里的示例命令必须被至少一条断言覆盖，否则它和代码的漂移没有任何东西能发现。**
+原因：`/harness-loop` 第 0 步写着 `--state STATE.md`，而脚本把该参数当目录——kill switch 在文档命令里静默失效；第 5 步只跑 `--phase fix`，证据/sha/回退测试三道闸永不触发。两处都不是实现错，是文档与代码各按自己的理解写，335 条断言没有一条读它们。
+Seen 1× (2026-10-19)
+Evidence: REPAIR-SPEC.md P1-1、P1-2；test.mjs 新增 `--state STATE.md` 与 `--phase gate` 断言
 
 **断言的分叉判据要绑能力，不要绑平台名。**
 原因：`test.mjs` 的孙进程断言依赖 GNU `timeout`，报告写「原生 Windows → 978/1」。

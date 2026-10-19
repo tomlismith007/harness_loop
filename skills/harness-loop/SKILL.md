@@ -25,8 +25,12 @@ stage: runtime
 kill switch：`STATE.md` 或 `loop-constraints.md` 里**独占一行**的 `loop-pause-all`。
 
 ```bash
-node scripts/gate-check.mjs --item probe --phase fix --diff-files "" --state STATE.md --json
+node scripts/gate-check.mjs --item probe --phase fix --diff-files "" --state . --json
 ```
+
+`--state` 接受**目录**，不是文件路径：脚本会在该目录下找 `STATE.md` 与 `loop-constraints.md`。
+把状态文件名传给 `--state` 会去找 `STATE.md/STATE.md`，kill switch 静默失效。
+第 0 步从主检出目录运行；若在 worktree 内运行，传主检出的绝对路径。
 
 退出码 `3` = 暂停生效，**立即退出**，在 `STATE.md` 写一行说明。
 kill switch 只认独占一行——散文里提到不算，否则一次说明性文字就把循环永久停死。
@@ -79,7 +83,7 @@ git worktree add loop/<event>-<item>-attempt<N> -b loop/<event>-<item>-attempt<N
 **结构性要求**：执行者与验证者必须是不同实例、不同指令。
 
 - **有子智能体**：派一个新实例。提示词只含 diff、验证命令、报告格式，**不含执行者的推理过程**。
-- **没有子智能体**：要求人另开会话运行 `/harness-loop --verify <item>`。未经验证的改动不得标记完成。
+- **没有子智能体**：要求人另开会话运行 `/harness-loop <item>`，并在指令中写明"只执行第 4 步独立验证，不得修改代码"。未经验证的改动不得标记完成。
 
 验证者的立场是**找出拒绝的理由**，不是确认它是对的。检查项：
 
@@ -111,20 +115,37 @@ git worktree add loop/<event>-<item>-attempt<N> -b loop/<event>-<item>-attempt<N
 
 ### 第 5 步：闸门
 
+先写出改动清单（`@` 前缀要求文件存在）：
+
+```bash
+git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实际替换
+```
+
+再跑 gate 阶段。**必须用 `--phase gate`**：证据、head-commit、回退测试"未跑"三道闸
+只在 gate 阶段生效；`--phase fix` 只做派发前的预检。
+
 ```bash
 node scripts/gate-check.mjs \
   --item <item-id> \
-  --phase fix \
+  --phase gate \
   --attempts <n> \
   --diff-files @changed-files.txt \
   --verdict <approve|reject|escalate-human|none> \
   --red-check <pass|fail|not-run> \
-  --state STATE.md
+  --reviewed-sha <验证者审过的 sha> \
+  --head-sha "$(git rev-parse HEAD)" \
+  --evidence-file <verifier-report.md> \
+  --state .
 ```
 
 `--diff-files` 的 `@` 前缀**不可省**：裸路径会被当成"单个改动文件"，拒绝列表与范围两个闸门同时失效。
 
+`--verdict approve` 必须带 `--evidence-file`，报告须含 `## Verdict:` 行、至少一条
+`- <check>: <cmd> → PASS|FAIL|NOT RUN` 证据行、以及 `### Checks not run` 节。
+`--reviewed-sha` 与 `--head-sha` 不一致 → 审查后 head 动过，必须重新验证。
+
 `decision` 为 `proceed` 才继续；`escalate` → 写升级条目；`exit` → 立即停止。
+提交前删除 `changed-files.txt`（它是本轮临时产物，不入库）。
 
 ### 第 6 步：熔断（有代码改动时）
 
@@ -134,7 +155,8 @@ node scripts/gate-check.mjs \
 node scripts/ledger-check.mjs --ledger loop-ledger.json
 ```
 
-退出码 `2` → **停止，不再重试**，写升级条目。
+退出码 `2` → **停止，不再重试**，写升级条目（账本缺失或非法 JSON 也返回 2，不是"未知"）。
+退出码 `1` → 命令写错了（非法参数），不是通过。
 
 ### 第 7 步：写状态
 

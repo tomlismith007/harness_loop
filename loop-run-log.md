@@ -38,3 +38,4 @@
 <!-- 每轮追加。最新在下方。 -->
 
 {"run_id": "2026-10-17T12:00:00Z", "item": "sandbox-verification", "duration_s": 0, "files_changed": 0, "attempts": 1, "outcome": "verified", "notes": "在 /d/loop-harness-test 跑完一轮：装配、回退测试、独立子智能体验证、闸门、熔断、状态写入。抓出 gate-check 证据正则的行尾锚定 bug。"}
+{"run_id": "2026-10-19T09:30:00Z", "item": "repair-spec", "duration_s": 0, "files_changed": 17, "attempts": 1, "outcome": "verified", "notes": "按 REPAIR-SPEC 修复 9 项。证据：test.mjs 357/0、init.sh 0、gate 阶段五条路径（proceed/evidence/red-check/head-commit/awaiting-verification）实跑、占位 feature 替换前 exit 2 替换后 0、安装清单 packRoot 可用、账本缺失/坏 JSON exit 2、run-log 空文件 FAIL。"}

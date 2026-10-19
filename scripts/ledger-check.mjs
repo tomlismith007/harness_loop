@@ -335,11 +335,22 @@ Exit codes:
   }
 
   const ledgerPath = typeof args.ledger === 'string' ? args.ledger : 'loop-ledger.json';
+  // 账本不可读统一走 no-ledger / exit 2。此前走 fail() 退出 1，而文档与
+  // /harness-loop 只定义 0（继续）/ 2（停止）两态——路径写错会被读成"未知"继续跑。
+  let ledger = null;
+  let unreadable = null;
   if (!fs.existsSync(ledgerPath)) {
-    fail(`ledger not found: ${ledgerPath}`);
+    unreadable = `ledger not found: ${ledgerPath}`;
+  } else {
+    ledger = readJson(ledgerPath);
+    if (!ledger) unreadable = `ledger is not valid JSON: ${ledgerPath}`;
   }
-  const ledger = readJson(ledgerPath);
-  if (!ledger) fail(`ledger is not valid JSON: ${ledgerPath}`);
+  if (unreadable) {
+    const result = unreadableLedger(unreadable, DEFAULT_BREAKER);
+    if (args.escalation) process.stdout.write(renderEscalation(null, result));
+    else printJson(result);
+    process.exit(2);
+  }
 
   // Number('abc') 是 NaN，而 checkLedger 里的 ?? 只接 null/undefined——NaN 会原样
   // 穿过去，让所有阈值比较恒为 false，等于把所有熔断器关掉。必须 fail-closed。

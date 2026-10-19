@@ -21,9 +21,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseArgs, exists, readText, writeText, printJson, PACK_ROOT, fail } from './lib/common.mjs';
+import { parseArgs, exists, readText, writeText, printJson, PACK_ROOT, INSTALL_MANIFEST, fail } from './lib/common.mjs';
 
-const MANIFEST_NAME = '.harness-loop-install.json';
+const MANIFEST_NAME = INSTALL_MANIFEST;
 // 旧清单名：v2 早期版本用过。安装/卸载时一并清理，避免两个清单并存。
 const LEGACY_MANIFEST_NAME = '.loop-harness-install.json';
 

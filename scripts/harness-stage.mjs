@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
-  PACK_ROOT, SKILLS_DIR, SKILL_DIRS, parseDenylistFrom, detectProject,
+  PACK_ROOT, SKILLS_DIR, SKILL_DIRS, INSTALL_MANIFEST, parseDenylistFrom, detectProject,
   verificationCommands, initScriptFromCommands, textHas, structuredText, fail,
   samePath, runWithTreeKill,
 } from './lib/common.mjs';
@@ -253,6 +253,15 @@ function ledgerIsReal(root) {
   return { ok: true, reason: null };
 }
 
+/** 运行日志是否存在且带 `## Log` 章节（技能文档的判据是章节，不是文件存在） */
+function runLogHasSection(root) {
+  const p = path.join(root, 'loop-run-log.md');
+  if (!exists(p)) return { ok: false, reason: 'loop-run-log.md 不存在' };
+  return /^##\s+Log\s*$/m.test(readText(p))
+    ? { ok: true, reason: null }
+    : { ok: false, reason: 'loop-run-log.md 缺少 ## Log 章节' };
+}
+
 /** 阶段 1 判据 */
 function checkStage1(root) {
   const c = [];
@@ -328,7 +337,8 @@ function checkStage2(root) {
   add('熔断账本就位（loop-ledger.json，goal 已替换）', ledger.ok, ledger.reason,
     '编辑 loop-ledger.json：把 goal 换成当前循环的真实目标');
 
-  add('运行日志存在（loop-run-log.md）', hasFile(root, 'loop-run-log.md'), null,
+  const runLog = runLogHasSection(root);
+  add('运行日志存在且含 ## Log 章节（loop-run-log.md）', runLog.ok, runLog.reason,
     '复制 templates/loop-run-log.md');
 
   const loopSkill = skillInDiscoverablePath(root, 'harness-loop', ['kill switch', '验证']);
@@ -435,6 +445,28 @@ function copySkillDir(name, target, results) {
 }
 
 /**
+ * 写安装清单。
+ *
+ * 消费方仓库不复制 harness-stage.mjs（它是 pack 级工具），而技能要用它做
+ * 前置检查与验证。技能从这份清单读 packRoot。清单是定位信息，不是技能副本，
+ * 所以即使技能已存在（skipped）也要写。
+ */
+function writeInstallManifest(target, results) {
+  for (const destDir of SKILL_DEST_DIRS) {
+    const dest = path.join(target, destDir, INSTALL_MANIFEST);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, JSON.stringify({
+      installedAt: new Date().toISOString(),
+      packRoot: PACK_ROOT,
+      scope: 'workspace',
+      layout: 'both',
+      skills: ['harness-init', 'harness-loop-init', 'harness-loop', 'harness-loop-issue'],
+    }, null, 2) + '\n', 'utf8');
+    results.push({ status: 'written', path: dest });
+  }
+}
+
+/**
  * 把运行层脚本复制进目标仓库。
  *
  * 技能命令都写 `node scripts/xxx.mjs` 并隐含 cwd = 项目根，少了这一步，
@@ -505,6 +537,7 @@ function upgrade(root, targetStage, force, results, opts = {}) {
     for (const s of ['harness-init', 'harness-loop-init', 'harness-loop', 'harness-loop-issue']) {
       copySkillDir(s, root, results);
     }
+    writeInstallManifest(root, results);
     copyRuntimeScripts(root, force, results);
   }
 

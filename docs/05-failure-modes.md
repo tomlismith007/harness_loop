@@ -208,7 +208,8 @@
 | 码 | 含义 | 动作 |
 |---|---|---|
 | `0` | 继续 | 可以重试 |
-| `2` | 停止 | 不再重试，写升级条目，退出循环 |
+| `1` | 参数错误 | 命令写错了，不是通过 |
+| `2` | 停止 | 不再重试，写升级条目，退出循环。账本缺失或非法 JSON 也返回 2 |
 
 ### 规则
 
@@ -229,13 +230,13 @@
 | 6 | MCP 拥有无限制写入权限 | L1 只用只读连接器 |
 | 7 | 没有紧急停止开关 | 在 `STATE.md` 或 `loop-constraints.md` 写独占一行的 `loop-pause-all` |
 | 8 | 用代码修复间歇性故障 | 分类 → 隔离或重试策略 → 升级环境故障 |
-| 9 | 没有路径许可清单却自动合并 | 明确允许列表（`loop-auto-merge-allowlist.md`，尚未创建——只在真要开启自动合并时才需要；默认 `auto_merge: false` 所以当前安全）；拒绝列表路径人工合并 |
+| 9 | 没有路径许可清单却自动合并 | 明确允许列表（`loop-auto-merge-allowlist.md`，尚未创建——只在真要开启自动合并时才需要；框架默认不自动合并，所以当前安全）；拒绝列表路径人工合并 |
 | 10 | 没有运行日志（只有 STATE.md） | 追加到 `loop-run-log.md` |
 
 ---
 
 ## 下一步
 
-- 成本与可观测性 → [06-cost-and-observability.md](06-cost-and-observability.md)
-- 采纳阶梯 → [07-adoption-ladder.md](07-adoption-ladder.md)
+- 成本与可观测性 → [archive/06-cost-and-observability.md](archive/06-cost-and-observability.md)
+- 采纳阶梯 → [archive/07-adoption-ladder.md](archive/07-adoption-ladder.md)
 - 术语 → [08-glossary.md](08-glossary.md)

@@ -252,7 +252,7 @@
 - 什么没完成？
 - 下一步最好做什么？
 
-具体模板见 `templates/session-handoff.md` 与 `templates/progress.md`。
+具体字段见本文件的 `STATE.md` 规格与 `feature_list.json` 规格。
 
 ---
 

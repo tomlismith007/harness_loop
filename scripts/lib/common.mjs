@@ -14,6 +14,12 @@ export const TEMPLATE_DIR = path.join(PACK_ROOT, 'templates');
 export const SKILLS_DIR = path.join(PACK_ROOT, 'skills');
 
 /**
+ * 安装清单文件名。技能靠它记录 packRoot：消费方仓库不含 harness-stage.mjs，
+ * 装配工具是 pack 级工具，技能必须能从清单找到 pack 再调用。
+ */
+export const INSTALL_MANIFEST = '.harness-loop-install.json';
+
+/**
  * 两个路径是否指向同一个文件/目录。
  *
  * 用于"自引用"判定：init.sh 里 `pwd -W` 给出 `D:/repo/init.sh`（正斜杠），
