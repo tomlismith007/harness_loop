@@ -217,16 +217,57 @@ function uninstall(args) {
  * 于是"文档/测试描述的能力"与"agent 实际行为"静默不一致。
  * docs/10 自己写着"改完技能要重跑安装脚本推送更新"——但那是纪律，不是机制。
  */
+/** 读清单里声明的布局（`both` / `claude` / `agents`），读不到返回 null。 */
+function readManifestLayout(dir) {
+  for (const n of [MANIFEST_NAME, LEGACY_MANIFEST_NAME]) {
+    const p = path.join(dir, n);
+    if (!exists(p)) continue;
+    try {
+      const v = JSON.parse(readText(p)).layout;
+      // 清单是用户可写文件。未知布局不能让期望集合变空——那等于把检查关掉。
+      return Object.hasOwn(LAYOUTS, v) ? v : null;
+    } catch { return null; }
+  }
+  return null;
+}
+
+/**
+ * --check 的期望宿主集合。
+ *
+ * 以**清单里声明的布局**为准，--layout 只在没有任何清单时兜底。
+ * 反过来做（以 --layout 为准）会留下一个绕过：装过两个宿主之后，
+ * 用 `--check --layout claude` 就能让被删掉的 .agents 从结果里消失。
+ * 检查范围不能由调用方临时收窄。
+ */
+function expectedDotsForCheck(dest, args) {
+  const declared = new Set();
+  let anyManifest = false;
+  for (const dot of Object.values(LAYOUTS).flat()) {
+    const dir = path.join(dest.root, dot, 'skills');
+    const layout = readManifestLayout(dir);
+    if (!layout) continue;
+    anyManifest = true;
+    for (const d of LAYOUTS[layout] || []) declared.add(d);
+  }
+  if (anyManifest) return [...declared];
+  const layout = typeof args.layout === 'string' ? args.layout : DEFAULT_LAYOUT;
+  return LAYOUTS[layout] || [];
+}
+
 function checkInstalled(args) {
   const dest = resolveDestinations(args);
   const srcDir = path.join(PACK_ROOT, 'skills');
   const drifted = [];
-  const missing = [];
   let checked = 0;
 
-  for (const target of dest.dirs) {
+  const expectedDots = expectedDotsForCheck(dest, args);
+  const targets = expectedDots.map((dot) => ({ dot, dir: path.join(dest.root, dot, 'skills') }));
+  // 期望之外的宿主目录存在也不算错（可能是别的方式装的），只是不在检查范围。
+
+  for (const target of targets) {
     if (!exists(target.dir)) {
-      missing.push(target.dir);
+      // 期望的宿主目录整个不见了。有清单说它装过 → 漂移，不是"用户本来就没装"。
+      drifted.push(`${target.dot}/skills — 宿主目录不存在（清单声明过该布局）`);
       continue;
     }
     const manifestPath = [MANIFEST_NAME, LEGACY_MANIFEST_NAME]
@@ -244,6 +285,14 @@ function checkInstalled(args) {
       .map((e) => e.name)
       .filter((n) => exists(path.join(srcDir, n, 'SKILL.md')));
     const installed = [...new Set([...(manifest?.skills || []), ...present])];
+
+    // 清单说这个技能装过，目录里却没有 → 整个副本缺失。
+    // 只比内容发现不了它：内容比较的对象已经不存在了，循环直接跳过。
+    for (const name of manifest?.skills || []) {
+      if (!present.includes(name)) {
+        drifted.push(`${target.dot}/skills/${name} — 清单记着已安装，但副本缺失`);
+      }
+    }
 
     for (const name of installed) {
       const src = path.join(srcDir, name, 'SKILL.md');
@@ -263,12 +312,9 @@ function checkInstalled(args) {
   }
 
   if (args.json) {
-    printJson({ checked, drifted, missing, in_sync: drifted.length === 0 });
+    printJson({ checked, drifted, in_sync: drifted.length === 0 });
   } else {
     process.stdout.write(`Checked ${checked} installed skill(s)\n`);
-    if (missing.length) {
-      process.stdout.write(`\nNo install directory at: ${missing.join(', ')}\n`);
-    }
     if (drifted.length) {
       process.stdout.write(`\nDRIFT — the host runs the installed copy, not the source:\n`);
       for (const d of drifted) process.stdout.write(`  ${d}\n`);
@@ -278,6 +324,10 @@ function checkInstalled(args) {
     }
   }
 
+  // 单宿主安装（--layout claude）不该因为另一个宿主没装而失败；只有
+  // "清单声明过、副本却不在"才算漂移。missing 只在没有任何清单时才出现。
+  // 期望的宿主都查过了：drifted 非空就是漂移。missing 现在只在
+  // "没有任何清单、也没指定布局"时才会出现，此时不判失败。
   process.exit(drifted.length ? 1 : 0);
 }
 

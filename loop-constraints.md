@@ -38,6 +38,17 @@ k8s/production/**
 auth/**
 payments/**
 billing/**
+loop-constraints.md
+scripts/gate-check.mjs
+scripts/ledger-check.mjs
+scripts/lib/common.mjs
+.github/workflows/**
+package.json
+package-lock.json
+templates/**
+.githooks/**
+scripts/test.mjs
+audits/**
 ```
 
 - 命中任一模式的路径：**停止编辑，写升级条目，交给人**。不做"顺便的小改动"。
@@ -70,6 +81,10 @@ billing/**
   正面例子见 `test.mjs`：把 `gate-check.mjs` 的 `maxAttempts` 改为 1 →
   测试必须变红；把 `ledger-check.mjs` 的 `stagnationThreshold` 改为 1 →
   `stagnation` 判定必须提前触发。
+
+## Budget
+
+- 日 token 上限：0        # 0 = 不启用；>0 时 ledger-check 读取
 
 ## Lessons
 

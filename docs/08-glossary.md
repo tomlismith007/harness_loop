@@ -19,7 +19,7 @@
 一个能自我触发的系统：发现任务、派发任务、验证结果、持久化状态。最小形式是「目标 + 验证方法 + 停止条件」。
 
 **harness-loop**
-本框架。harness 五子系统提供单次运行的可靠性，loop 六原语提供连续运行的自主性，人给的待办（或可选的 GitHub 事件）保证两者作用于同一批真实工作。
+本框架。harness 五子系统提供单次运行的可靠性，loop 的五构件 + 记忆层提供连续运行的自主性，人给的待办（或可选的 GitHub 事件）保证两者作用于同一批真实工作。
 
 ---
 
@@ -53,7 +53,10 @@
 
 ---
 
-## 六原语（Loop 层）
+## 五构件 + 记忆层（Loop 层）
+
+> 参考仓库自身有两种数法：`docs/concepts.md` 写"六原语（+ 记忆）"，`docs/primitives.md`
+> 写"Five Primitives + Memory"。本框架采用后者的结构：记忆是贯穿层，不与其余五个并列。
 
 **Automation（自动化/调度）**
 循环的心跳。没有调度，循环只是你手动跑的一次性运行。形式：`/loop`、cron、GitHub Actions、事件触发器。
@@ -106,7 +109,9 @@ work item 的处理步骤：`intake` / `review` / `fix` / `verify` / `gate` / `p
 ## 闸门与等级
 
 **Gate（闸门）**
-"允许继续"的条件。六类：拒绝列表、范围、尝试上限、验证、预算、合并。
+"允许继续"的条件。代码里有 9 个 gate 名：pause、denylist、max-attempts、scope、
+head-commit、red-check、verification-evidence、verification、awaiting-verification。
+文档按章节叙述（拒绝列表、范围、尝试上限、验证、预算、合并），与代码 gate 名的对应关系见 `docs/03-gates-and-levels.md`。
 
 **Denylist（拒绝列表）**
 未经人工批准绝不自动编辑的路径：`.env*`、`secrets/`、`credentials/`、`auth/`、`payments/`、`billing/`、`.terraform/`、`k8s/production/`、`migrations/`。
@@ -121,7 +126,7 @@ work item 的处理步骤：`intake` / `review` / `fix` / `verify` / `gate` / `p
 把决策交给人类。**升级是功能，不是失败。** 触发条件：触及拒绝列表、尝试超上限、需要判断。
 
 **Readiness Level（就绪度等级）**
-L0 草案 / L1 报告 / L2 辅助 / L3 无人值守。决定循环被允许做什么。
+L1 报告 / L2 辅助。由 `harness-stage` 的阶段判据给出；本框架不授予 L3。
 
 **Kill Switch（紧急停止）**
 `loop-pause-all` 标志或标签。每轮开始必须检查。恢复需要人工清除。
@@ -137,7 +142,7 @@ L0 草案 / L1 报告 / L2 辅助 / L3 无人值守。决定循环被允许做�
 `loop-ledger.json`。每次尝试追加一条，失败时必须含 `error`。熔断器靠它检测重复失败。
 
 **Error Signature（错误签名）**
-归一化后的错误文本：抹掉时间戳、十六进制地址、路径（折叠为 basename）、行列号、其余数字。使"同一个错误"能被识别。
+归一化后的错误文本：抹掉时间戳、十六进制地址、路径（折叠为 basename）、行列号、位置/时长类数字；退出码、HTTP 状态码、断言期望值保留。使"同一个错误"能被识别，又不把不同根因合并。
 
 **Early Exit（提前退出）**
 无待办时在 <5k token 内退出。高节奏循环的经济性完全依赖它。
@@ -204,7 +209,7 @@ Prompt Engineering（指令）→ Context Engineering（信息）→ Loop Engine
 | 100 | `AGENTS.md` 建议行数 |
 | 50–150 | 主题文档建议行数 |
 | 15 | 全局硬约束上限条数 |
-| 38 / 58 / 78 | 就绪度评分阈值：L1 / L2 / L3 |
+| — | 就绪度评分已移除（v2）；等级由 `harness-stage` 阶段判据给出 |
 | 5k | 空转退出的 token 上限 |
 
 ---

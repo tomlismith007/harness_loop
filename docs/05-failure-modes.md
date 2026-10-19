@@ -201,7 +201,10 @@
 - 十六进制地址
 - 路径（折叠为 basename）
 - 行列号
-- 其余数字
+- 位置/时长类数字（`line 42`、`500ms`）
+
+**不抹掉**退出码、HTTP 状态码、断言期望值等裸数字：把 `exit code 1` 与 `exit code 2`
+归一成同一个签名，会让根因不同的失败在第 3 次被误判为停滞。
 
 ### 退出码
 
@@ -225,7 +228,7 @@
 | 1 | 由同一智能体实现并验证 | 独立 verifier，默认立场 REJECT |
 | 2 | 没有尝试次数上限（"Keep trying until CI is green"） | 硬性上限 3 次 → 完整上下文写入状态并升级 |
 | 3 | triage 输出含糊（大段叙述） | 结构化章节、每条目单行、明确 `Suggested loop action` |
-| 4 | 在 L1 质量达标前启用 L3 | 第一周 L1 仅报告，先衡量 triage 准确性 |
+| 4 | 在 L1 质量达标前启用 L2 自动修复 | 第一周 L1 仅报告，先衡量 triage 准确性 |
 | 5 | 共享状态却没有结构规范 | 每模式一个状态文件，或清晰分区 + 清理规则 |
 | 6 | MCP 拥有无限制写入权限 | L1 只用只读连接器 |
 | 7 | 没有紧急停止开关 | 在 `STATE.md` 或 `loop-constraints.md` 写独占一行的 `loop-pause-all` |
@@ -237,6 +240,6 @@
 
 ## 下一步
 
-- 成本与可观测性 → [archive/06-cost-and-observability.md](archive/06-cost-and-observability.md)
-- 采纳阶梯 → [archive/07-adoption-ladder.md](archive/07-adoption-ladder.md)
+- 成本与可观测性（v1 归档）→ [archive/06-cost-and-observability.md](archive/06-cost-and-observability.md)
+- 采纳阶梯（v1 归档）→ [archive/07-adoption-ladder.md](archive/07-adoption-ladder.md)
 - 术语 → [08-glossary.md](08-glossary.md)
