@@ -160,6 +160,15 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json
 3. 追加一条 JSON 到 `loop-run-log.md`
 4. 本轮若发生**返工**（修了又改、验证被拒），在 `LESSONS.md` 追加一行
 5. 丢弃 worktree：`git worktree remove --force <dir>` + `git branch -D <name>`
+6. 跑清洁交接检查：
+
+   ```bash
+   node scripts/clean-state.mjs --state .
+   ```
+
+   exit 2 → 本轮不得宣称完成。它查三件事：`init.sh` 无占位符、
+   没有未跟踪的调试残留（`*.log` / `debug-*` / `tmp-*`）、`STATE.md` 的
+   `Last run` 是今天。
 
 ## 停止条件（机器可判定）
 

@@ -74,7 +74,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 
 ---
 
-## 脚本（6 个）
+## 脚本（7 个）
 
 | 脚本 | 用途 | 退出码 |
 |---|---|---|
@@ -83,9 +83,10 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 | `ledger-check.mjs` | 熔断检查 | 0 继续；2 停止并升级 |
 | `install-skills.mjs` | 安装 / `--list` / `--check` / `--uninstall` | 0 成功；1 错误或漂移 |
 | `drill-check.mjs` | 护栏演练：拒绝列表逐条命中 + 熔断器具体触发（`--record` 写 `loop-drill.json`） | 0 全过；2 护栏没响 |
-| `test.mjs` | 自检（416 项断言） | 0 全通过 |
+| `clean-state.mjs` | 结束前检查：init.sh 无占位、无调试残留、Last run 是今天 | 0 干净；2 有未清理项 |
+| `test.mjs` | 自检（433 项断言） | 0 全通过 |
 
-装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs` 与 `lib/common.mjs`。
+装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs` 与 `lib/common.mjs`。
 
 ---
 
@@ -154,7 +155,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 416 项断言
+node scripts/test.mjs           # 433 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```

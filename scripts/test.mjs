@@ -23,6 +23,7 @@ import {
 } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { checkGates, isPaused } from './gate-check.mjs';
+import { localToday } from './clean-state.mjs';
 
 const VERBOSE = process.argv.includes('--verbose');
 let passed = 0;
@@ -1554,22 +1555,176 @@ section('18. 护栏演练（U-05）');
   }
 }
 
+// ---------------------------------------------------------------- 19. 清洁交接（U-12）
+
+section('19. 清洁交接（U-12）');
+{
+  const runClean = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'clean-state.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  // 必须与 clean-state.mjs 的判据同源：本地日期，不是 UTC。
+  // 用 toISOString 会让套件在 UTC+8 的 00:00–07:59 每天红 4 条。
+  const today = localToday();
+  const mkRepo = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-clean-'));
+    const env = { ...process.env };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+    execFileSync('git', ['init', '-q'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: d, env });
+    fs.writeFileSync(path.join(d, 'STATE.md'), `# Loop State\n\nLast run: ${today}\n`);
+    fs.writeFileSync(path.join(d, 'init.sh'), '#!/usr/bin/env bash\nset -e\nnpm test\n');
+    fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules/\n');
+    execFileSync('git', ['add', '-A'], { cwd: d, env });
+    execFileSync('git', ['commit', '-qm', 'init'], { cwd: d, env });
+    return d;
+  };
+
+  {
+    const d = mkRepo();
+    const r = runClean(['--state', d], d);
+    eq('U-12 干净仓库 → 0', r.code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'debug-login.log'), 'x\n');
+    const r = runClean(['--state', d], d);
+    eq('U-12 未跟踪的 *.log → 2', r.code, 2);
+    ok('U-12 调试文件被点名', /debug-login\.log/.test(r.out), r.out.slice(0, 300));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'debug-repro.ts'), 'x\n');
+    eq('U-12 未跟踪的 debug-* → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'tmp-scratch.txt'), 'x\n');
+    eq('U-12 未跟踪的 tmp-* → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // 已跟踪的 .log 是仓库资产，不是残留——只查未跟踪。
+    const d = mkRepo();
+    const env = { ...process.env };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+    fs.writeFileSync(path.join(d, 'audit.log'), 'x\n');
+    execFileSync('git', ['add', 'audit.log'], { cwd: d, env });
+    execFileSync('git', ['commit', '-qm', 'log'], { cwd: d, env });
+    eq('U-12 已跟踪的 .log 不算残留 → 0', runClean(['--state', d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // 普通未跟踪文件（源码、配置）不算调试残留。
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'new-feature.ts'), 'x\n');
+    eq('U-12 普通未跟踪文件不误报 → 0', runClean(['--state', d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'STATE.md'), '# Loop State\n\nLast run: 2020-01-01\n');
+    const r = runClean(['--state', d], d);
+    eq('U-12 Last run 不是今天 → 2', r.code, 2);
+    ok('U-12 旧时间戳被点名', /Last run/.test(r.out), r.out.slice(0, 300));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'init.sh'),
+      '#!/usr/bin/env bash\nset -e\necho "No package manifest detected."\n');
+    eq('U-12 init.sh 仍是占位 → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // 不在 git 仓库里：无法判断哪些是未跟踪文件 → 参数错误，不静默放行。
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-clean-ng-'));
+    fs.writeFileSync(path.join(d, 'STATE.md'), `Last run: ${today}\n`);
+    fs.writeFileSync(path.join(d, 'init.sh'), '#!/usr/bin/env bash\nset -e\nnpm test\n');
+    eq('U-12 非 git 目录 → 参数错误 1', runClean(['--state', d], d).code, 1);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // git 默认会把含空格/非 ASCII 的路径 C-quote 成 `"my folder/x.log"`。
+    // 用非 `-z` 输出时 basename 带引号，`.log` 匹配不上——静默放行。
+    const d = mkRepo();
+    fs.mkdirSync(path.join(d, 'my folder'));
+    fs.writeFileSync(path.join(d, 'my folder', 'x.log'), 'x\n');
+    eq('U-12 带空格的路径里的 .log → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+
+    const d2 = mkRepo();
+    fs.mkdirSync(path.join(d2, '我的目录'));
+    fs.writeFileSync(path.join(d2, '我的目录', 'x.log'), 'x\n');
+    eq('U-12 非 ASCII 路径里的 .log → 2', runClean(['--state', d2], d2).code, 2);
+    fs.rmSync(d2, { recursive: true, force: true });
+  }
+
+  {
+    // "今天"必须是本地日期。UTC+8 的凌晨，toISOString 会把它算成昨天。
+    const d = mkRepo();
+    const local = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const todayLocal = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`;
+    fs.writeFileSync(path.join(d, 'STATE.md'), `Last run: ${todayLocal}\n`);
+    eq('U-12 Last run 用本地日期 → 0', runClean(['--state', d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    eq('U-12 --state 缺值 → 参数错误 1', runClean(['--state', '--json'], d).code, 1);
+    eq('U-12 位置参数可用', runClean([d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    const j = runClean(['--state', d, '--json'], d);
+    const parsed = JSON.parse(j.out);
+    ok('U-12 --json 输出每项检查', Array.isArray(parsed.checks) && parsed.checks.length >= 3,
+      j.out.slice(0, 300));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- 汇总
 
 // 文档里声称的断言数必须与实测一致，否则"验证已完成"这句话本身就是不可信的。
 const docChecks = [
-  ['README.md', /\b(\d{3,4})\s*项断言/],
+  // 全局匹配：README 里有多处断言数声明，只读第一处会让第二处静默过期。
+  ['README.md', /\b(\d{3,4})\s*项断言/g],
 ];
 // 本节自身的断言尚未计入 passed，偏移量等于待检查的文档数。
 const DOC_OFFSET = docChecks.length;
 const expectedTotal = passed + failed + DOC_OFFSET;
 for (const [file, re] of docChecks) {
-  const m = fs.readFileSync(path.join(PACK_ROOT, file), 'utf8').match(re);
-  if (!m) {
+  const text = fs.readFileSync(path.join(PACK_ROOT, file), 'utf8');
+  const claimed = [...text.matchAll(re)].map((m) => Number(m[1]));
+  if (!claimed.length) {
     ok(`${file} 声称了断言数`, false, '未找到断言数声明');
     continue;
   }
-  ok(`${file} 声称的断言数与实测一致`, Number(m[1]) === expectedTotal, `文档写 ${m[1]}，实测 ${expectedTotal}`);
+  const stale = claimed.filter((n) => n !== expectedTotal);
+  ok(`${file} 声称的断言数与实测一致（全部 ${claimed.length} 处）`, stale.length === 0,
+    `文档写 ${stale.join('/')}，实测 ${expectedTotal}`);
 }
 
 process.stdout.write(`\n${'='.repeat(60)}\n`);
