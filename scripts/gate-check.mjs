@@ -17,6 +17,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg } from './lib/common.mjs';
 
@@ -38,6 +39,26 @@ const RED_CHECKS = ['pass', 'fail', 'not-run'];
  * STATE.md 或 loop-constraints.md 里任何对 loop-pause-all 的散文提及都不算生效——
  * 否则一次说明性文字就把循环永久停死。`--state` 指向的目录下读这两个文件。
  */
+/**
+ * 执行证据里声明的一条命令，返回真实退出码。
+ *
+ * 含 shell 元字符的命令走 shell（调用方写的就是 shell 语法），否则用 execFile
+ * 避免多一层解析。超时按失败处理——挂住的验证和没跑过的验证一样不可信。
+ */
+export function runEvidenceCommand(command, cwd, timeoutMs = 120000) {
+  // 一律走 shell，且把命令原样交给它。曾经按元字符分叉、无元字符时自己 split：
+  // 带引号的参数会被拆掉引号（`node --eval "process.exitCode=1"` 变成两个参数，
+  // node 把它当无效的 --eval 值，退出 0），于是一条必失败的命令被读成 PASS。
+  // 重放的语义是"报告里写的命令，在 shell 里跑一遍"，不能由我们重新解释引号。
+  try {
+    execFileSync(command, [], { cwd, timeout: timeoutMs, stdio: 'ignore', shell: true });
+    return { exitCode: 0, timedOut: false };
+  } catch (e) {
+    if (e.killed === true || e.code === 'ETIMEDOUT') return { exitCode: null, timedOut: true };
+    return { exitCode: typeof e.status === 'number' ? e.status : 1, timedOut: false };
+  }
+}
+
 export function isPaused(statePath) {
   const { files, readable } = stateFiles(statePath);
   for (const { name, text } of files) {
@@ -115,6 +136,8 @@ export function checkGates(input, opts = {}) {
     headSha = null,
     redCheck = 'not-run',
     evidenceFile = null,
+    evidenceCwd = null,
+    noReplay = false,
     notRun = [],
     // 拒绝列表由调用方从 loop-constraints.md 读入；不给则用 JS 常量兜底。
     denylist = DENYLIST_PATTERNS,
@@ -262,6 +285,7 @@ export function checkGates(input, opts = {}) {
   //     "审查过的 commit"两条硬约束都由调用方自证——一个接受自证的闸门，
   //     和一个不存在的闸门，在退出码上不可区分。
   let evidenceNotRun = [];
+  let replaySkipped = false;
   if (phase === 'gate' && verdict === 'approve') {
     if (!evidenceFile) {
       return {
@@ -377,6 +401,57 @@ export function checkGates(input, opts = {}) {
     }
     // 证据里声明的 NOT RUN 必须进入输出，而不是只回显 --not-run 入参。
     evidenceNotRun = checks.filter((c) => c.status === 'NOT RUN').map((c) => c.name);
+
+    // 8c. 重放证据里的命令。
+    //
+    // 只校验格式时，一份写得漂亮的报告和一次真的验证在闸门眼里没有区别——
+    // 而"独立验证"是整套框架唯一无法自证的承诺。重放是让它可自证的最小手段：
+    // 报告说 `cmd → PASS`，闸门就真的跑一遍，退出码与 PASS/FAIL 对不上就拒绝。
+    //
+    // 命令直接从已有的证据行取（`- Tests: `<cmd>` → PASS`），不再要求第二个格式：
+    // 一个概念一个定义。没有命令的检查行（`Red check: PASS — …`）无法重放，
+    // 只能算作未重放。
+    const replayable = [...report.matchAll(EVIDENCE_LINE)]
+      .map((m) => ({ name: m[1], command: (m[0].match(/`([^`]+)`/) || [])[1], status: m[2] }))
+      .filter((c) => c.command);
+    if (replayable.length === 0) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: 'evidence carries no replayable command (every check line lacks a `<command>`)',
+        allowed_actions: ['write the command next to each check so it can be re-run'],
+        exit_code: 2,
+        next: 'a check without its command cannot be verified. Use `- Tests: `<cmd>` → PASS`.',
+      };
+    }
+    if (noReplay) {
+      evidenceNotRun = [...evidenceNotRun, 'Evidence replay'];
+      replaySkipped = true;
+    } else {
+      const cwd = evidenceCwd || process.cwd();
+      const mismatched = [];
+      for (const { command, status, name } of replayable) {
+        const r = runEvidenceCommand(command, cwd, 120000);
+        const wantPass = status === 'PASS';
+        const gotPass = r.exitCode === 0;
+        if (r.timedOut) mismatched.push(`${name}: ${command} (timed out)`);
+        else if (gotPass !== wantPass) {
+          mismatched.push(`${name}: ${command} (claimed ${status}, command exited ${r.exitCode})`);
+        }
+      }
+      if (mismatched.length) {
+        return {
+          ...base,
+          decision: 'escalate',
+          gate: 'verification-evidence',
+          reason: `evidence replay failed: ${mismatched.join('; ')}`,
+          allowed_actions: ['re-run the verification and record the real result'],
+          exit_code: 2,
+          next: 'the report claims results the commands do not reproduce. Re-run them and fix the report.',
+        };
+      }
+    }
   }
 
   // 9. 验证
@@ -436,6 +511,7 @@ export function checkGates(input, opts = {}) {
     ...(phase === 'fix' && verdict === 'approve'
       ? { warning: 'approve at fix phase is not a gate; merge requires --phase gate' }
       : {}),
+    ...(replaySkipped ? { warning: 'evidence commands were not replayed (--no-replay); recorded as NOT RUN' } : {}),
     checks_not_run: allNotRun,
     allowed_actions: ['propose PR', 'update state', 'request human merge'],
     forbidden_actions: ['auto-merge to main'],
@@ -446,12 +522,33 @@ export function checkGates(input, opts = {}) {
   };
 }
 
+/**
+ * --head-sha 缺省时自己取。调用方填的 head 只是自证；
+ * 让脚本读 git，至少把"当前 HEAD 是什么"从断言变成事实。
+ * 不在 git 仓库里就返回 null，由 head-commit 闸门升级（要求显式传参）。
+ */
+function resolveHeadSha(args) {
+  if (typeof args.headSha === 'string') return args.headSha;
+  // 必须清掉继承来的 GIT_DIR / GIT_WORK_TREE。pre-commit hook 里跑时它们指向
+  // 外层仓库，于是临时目录里的 `git rev-parse HEAD` 会解析到外层 HEAD，
+  // "不在 git 仓库里"这一分支永远走不到。
+  const env = { ...process.env };
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env,
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
 function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
     'item', 'phase', 'attempts', 'diffFiles', 'verdict', 'pause', 'cleanup',
     'reviewedSha', 'headSha', 'redCheck', 'constraintsRoot', 'notRun',
-    'evidenceFile', 'state', 'json', 'help',
+    'evidenceFile', 'evidenceCwd', 'noReplay', 'state', 'json', 'help',
   ], 'gate-check');
   if (args.help) {
     process.stdout.write(`gate-check — enforce loop gates before acting
@@ -469,12 +566,15 @@ Options:
                          (default: cwd). The kill switch is a real gate, not a doc.
   --pause                Set if loop-pause-all is active
   --cleanup              Treat as a cleanup change (higher file limit)
-  --reviewed-sha <sha>   Commit SHA that was reviewed (required at --phase gate)
-  --head-sha <sha>       Current head SHA of the branch (required at --phase gate)
+  --reviewed-sha <sha>   Commit SHA that was reviewed (40/64 hex; required at --phase gate)
+  --head-sha <sha>       Current head SHA. Omitted -> read from git rev-parse HEAD
+                         (required at --phase gate; fails if neither is available)
   --red-check <state>    pass | fail | not-run — does the new test fail on pre-fix code? (default: not-run)
   --evidence-file <p>    Verifier report. Required with --verdict approve at --phase gate:
-                         the gate reads it and checks it carries a verdict line and at
-                         least one command-output line. A verdict without evidence is a claim.
+                         the gate reads it, checks the verdict/evidence lines, and
+                         re-runs the command in each evidence line (the `<cmd>` after the check name).
+  --evidence-cwd <dir>   Directory the evidence commands run in (default: cwd)
+  --no-replay            Skip re-running evidence commands; the result is listed as NOT RUN
   --constraints-root <d> Directory holding loop-constraints.md (default: cwd). The denylist is
                          read from it so repo-specific paths are actually enforced.
   --not-run <list>       Comma-separated checks that were NOT run (listed, never omitted)
@@ -554,6 +654,16 @@ Exit codes:
   // proceed/escalate/exit 三态——最重要的人工升级信号会在传递途中消失。
   const normalizeVerdict = (v) => String(v).trim().toLowerCase().replace(/_/g, '-');
 
+  // sha 必须是真实的 commit id。假 sha 对假 sha 曾经也能过闸——
+  // 调用方自己填两个字符串，闸门只比较它们是否相等。
+  const SHA_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/i;
+  const checkSha = (v, flag) => {
+    if (v === undefined) return;
+    if (!SHA_RE.test(String(v))) fail(`${flag} must be a 40- or 64-char hex commit id (got: ${v})`, 1);
+  };
+  checkSha(args.reviewedSha, '--reviewed-sha');
+  checkSha(args.headSha, '--head-sha');
+
   const statePath = typeof args.state === 'string' ? args.state : process.cwd();
   const state = stateFiles(statePath);
   // 读不到状态文件 ≠ 没有暂停。fail-closed：让调用方修正参数，而不是让闸门放行。
@@ -561,6 +671,13 @@ Exit codes:
     fail(`--state ${statePath}: no STATE.md or loop-constraints.md found `
       + `(pass a directory that contains them, or the file itself)`, 1);
   }
+  // gate 阶段拿不到 head 是调用环境的问题，不是"验证失败"：报参数错误，
+  // 别让它伪装成一次正常升级。checkGates 自身仍把缺 sha 当 escalate。
+  const resolvedHead = resolveHeadSha(args);
+  if (args.phase === 'gate' && !resolvedHead) {
+    fail('--phase gate needs --head-sha, or a git repository to read HEAD from', 1);
+  }
+
   const activeFile = state.files.find((f) => f.name === 'STATE.md');
   const activeCount = activeFile ? activeItems(activeFile.text) : null;
 
@@ -581,9 +698,11 @@ Exit codes:
     // 维护者按文档在 ## Repo-Specific 加的路径必须真的被强制执行。
     denylist: loadDenylist(typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd()),
     reviewedSha: typeof args.reviewedSha === 'string' ? args.reviewedSha : null,
-    headSha: typeof args.headSha === 'string' ? args.headSha : null,
+    headSha: resolveHeadSha(args),
     redCheck: enumArg(args.redCheck, RED_CHECKS, '--red-check') ?? 'not-run',
     evidenceFile: typeof args.evidenceFile === 'string' ? args.evidenceFile : null,
+    evidenceCwd: typeof args.evidenceCwd === 'string' ? args.evidenceCwd : null,
+    noReplay: boolArg(args.noReplay),
     notRun: typeof args.notRun === 'string'
       ? args.notRun.split(',').map((s) => s.trim()).filter(Boolean)
       : [],

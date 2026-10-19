@@ -19,7 +19,7 @@
 未经人工批准，**绝不自动编辑**以下路径：
 
 > 本代码块与 `loop-constraints.md` 的 `## Paths` 必须逐条一致。
-> 目前**没有脚本**比对两者；比对是 `audits/upgrade-plan-2026-10-18.md` U-06（批次 2）的内容。
+> `harness-stage.mjs` 在阶段 2 判据里逐条比对两者；不一致即判失败。
 
 ```
 .env
@@ -34,6 +34,17 @@ k8s/production/**
 auth/**
 payments/**
 billing/**
+loop-constraints.md
+scripts/gate-check.mjs
+scripts/ledger-check.mjs
+scripts/lib/common.mjs
+.github/workflows/**
+package.json
+package-lock.json
+templates/**
+.githooks/**
+scripts/test.mjs
+audits/**
 ```
 
 ### 强制写入技能

@@ -1,6 +1,6 @@
 # 03 · 闸门与等级：什么条件下允许做什么
 
-本文档定义 L1–L2 两个阶段等级、9 道闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
+本文档定义 L1–L2 两个阶段等级、10 道闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
 
 ---
 
@@ -23,11 +23,11 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ---
 
-## 9 道闸门
+## 10 道闸门
 
-闸门是"允许继续"的条件。任一不通过，work item 进入 `escalated`。代码里的 gate 名共 9 个：
+闸门是"允许继续"的条件。任一不通过，work item 进入 `escalated`。代码里的 gate 名共 10 个：
 `pause`、`denylist`、`max-attempts`、`scope`、`head-commit`、`red-check`、
-`verification-evidence`、`verification`、`awaiting-verification`。
+`verification-evidence`、`verification`、`awaiting-verification`、`wip-limit`。
 
 ### 1. 拒绝列表闸门（Denylist Gate）
 
@@ -85,7 +85,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ### 5. 预算闸门（Budget Gate）
 
-> **现状（2026-10-18）**：`ledger-check.mjs` 支持 `--token-budget` 且行为正确，但技能与 `init.sh` 都不传这个参数，账本的 `tokensUsed` 也没有写入方。**这道闸门目前不会触发。** 接线见 `audits/upgrade-plan-2026-10-18.md` U-08。
+预算写在 `loop-constraints.md` 的 `## Budget` 段，由 `ledger-check.mjs` 读取；`0` 表示不启用。
 
 **判定**：今日 token 花费占日上限的比例。
 
@@ -127,7 +127,8 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 7.  approve 但证据缺失 / 自相矛盾 / 缺 Checks not run？ → escalate
 8.  verifier reject / escalate-human？ → escalate
 9.  gate 阶段无 verdict？            → escalate（awaiting-verification）
-10. 预算（尚未接线，见上）           → report-only / exit
+10. `## Active` 多于一项？            → escalate（wip-limit）
+11. 预算 ≥80% / ≥100%？              → report-only / exit
 ```
 
 顺序有讲究：**退出类判定在最前**（避免在应该停的时候还在分析），**拒绝列表在尝试上限之前**（安全优先于效率）。
@@ -151,7 +152,8 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 | 回退测试结论 | **机械** | 读 `--red-check` 的值 |
 | kill switch | **机械** | `gate-check.mjs --state` 读 `STATE.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` |
 | **改动是否与 work item 相关** | **人工** | 脚本不知道 work item 的目标，无法判定"范围蔓延" |
-| **verdict 是否诚实** | **半机械** | 闸门能核对报告格式与自相矛盾，但无法验证测试真的跑过 |
+| **verdict 是否诚实** | **半机械** | 闸门会重放证据里的命令并比对退出码；能抓"报告说 PASS、命令实际失败"，抓不到"命令覆盖不到这次改动" |
+| 证据命令重放 | **机械** | `gate-check.mjs` 在 `--evidence-cwd` 下执行 `- Tests: `<cmd>` → PASS` 里的命令；`--no-replay` 显式跳过并记 NOT RUN |
 
 ---
 
@@ -211,7 +213,7 @@ node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state .
 此前文档里的示例输出不可能由文档里的命令产生——说明那个示例从未被执行过，
 而这正是"文档说 A、代码做 B"这类漂移最容易藏身的地方。
 
-`decision` 枚举：`proceed` | `escalate` | `exit`（`report-only` 尚未由 `gate-check.mjs` 发出——预算未接线，见第 5 节）
+`decision` 枚举：`proceed` | `escalate` | `exit`（预算降级由 `ledger-check.mjs` 以 `verdict: report-only` 表达）
 
 **退出码**：`0` = `proceed`；`2` = `escalate`；`3` = `exit`。
 **参数错误（未知标志、非法枚举值、非数字阈值）退出 `1`**——它不属于上面四态，

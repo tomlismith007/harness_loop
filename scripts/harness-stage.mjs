@@ -147,11 +147,18 @@ function skillInDiscoverablePath(root, skillName, requiredText) {
   return textHas(structuredText(text), requiredText);
 }
 
-/** 模板里预置的拒绝列表路径（用于判断用户是否本地化过） */
+/**
+ * 模板里预置的拒绝列表路径（用于判断用户是否本地化过）。
+ * 必须与 templates/loop-constraints.md 逐条一致——否则模板自己会被判成"已本地化"。
+ * 测试断言模板是仓库列表的子集，且仓库至少多 2 条。
+ */
 const TEMPLATE_DENYLIST = [
   '.env', '.env.*', '**/secrets/**', '**/credentials/**',
   '**/*_key*', '**/*_secret*', '.terraform/**', 'k8s/production/**',
   '**/migrations/**', 'auth/**', 'payments/**', 'billing/**',
+  'loop-constraints.md', 'scripts/gate-check.mjs', 'scripts/ledger-check.mjs',
+  'scripts/lib/common.mjs', '.github/workflows/**', 'package.json',
+  'package-lock.json', 'templates/**',
 ];
 
 /**
@@ -170,6 +177,14 @@ function denylistLocalized(root) {
     return { localized: false, reason: 'Paths 章节没有代码块（拒绝列表为空）' };
   }
 
+  // 策略面路径必须在列表里：拒绝列表不保护自己，就等于可以被循环改掉。
+  if (!lines.includes('loop-constraints.md')) {
+    return {
+      localized: false,
+      reason: '拒绝列表没有包含 loop-constraints.md 自身——策略文件必须自我保护',
+    };
+  }
+
   const templateSet = new Set(TEMPLATE_DENYLIST);
   const currentSet = new Set(lines);
 
@@ -180,6 +195,14 @@ function denylistLocalized(root) {
     return {
       localized: false,
       reason: `拒绝列表与模板完全一致（${lines.length} 条）——说明只复制了模板，没有按本仓库调整`,
+    };
+  }
+  // "与模板不同"太弱：只写一条 loop-constraints.md 也算不同。
+  // 判据要能回答"这个仓库真的想过自己的高危路径吗"——至少两条模板之外的路径。
+  if (added.length < 2) {
+    return {
+      localized: false,
+      reason: `拒绝列表只比模板多 ${added.length} 条——至少要有 2 条本仓库特有的高危路径`,
     };
   }
 
@@ -262,6 +285,38 @@ function ledgerIsReal(root) {
   }
   if (/^\s*(example\b|replace with)/i.test(String(ledger.goal || ''))) {
     return { ok: false, reason: 'loop-ledger.json 仍是出厂占位 goal（Replace with…）' };
+  }
+  return { ok: true, reason: null };
+}
+
+/**
+ * 拒绝列表的第二个副本：`docs/04-safety.md` 的代码块。
+ *
+ * 两份列表逐条比较。文档说禁止、机器放行是危险方向，所以它必须是判据而不是建议。
+ * 没有 docs/04 时跳过（不是所有仓库都有 docs 目录）。
+ */
+function denylistDrift(root) {
+  const docs = path.join(root, 'docs', '04-safety.md');
+  if (!exists(docs)) return { ok: true, reason: null, skipped: true };
+  const md = readText(docs);
+  const heading = md.split(/^##\s*拒绝列表/m)[1];
+  if (heading === undefined) return { ok: true, reason: null, skipped: true };
+  const block = (heading.split('```')[1] || '')
+    .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+    .map((l) => l.split(/\s+#/)[0].trim()).filter(Boolean);
+  if (!block.length) return { ok: true, reason: null, skipped: true };
+
+  const constraints = parseDenylistFrom(readText(path.join(root, 'loop-constraints.md')));
+  const a = new Set(constraints);
+  const b = new Set(block);
+  const missingInConstraints = block.filter((p) => !a.has(p));
+  const missingInDocs = constraints.filter((p) => !b.has(p));
+  if (missingInConstraints.length || missingInDocs.length) {
+    return {
+      ok: false,
+      reason: `拒绝列表漂移：docs/04 有而约束文件没有 [${missingInConstraints.join(', ')}]；`
+        + `约束文件有而 docs/04 没有 [${missingInDocs.join(', ')}]`,
+    };
   }
   return { ok: true, reason: null };
 }
@@ -359,6 +414,10 @@ function checkStage2(root) {
   const dl = denylistLocalized(root);
   add('拒绝列表已本地化（非模板原文）', dl.localized, dl.reason,
     '按本仓库实际情况增删拒绝路径：加上真实的高危目录，删掉不存在的');
+
+  const drift = denylistDrift(root);
+  add('两份拒绝列表一致（loop-constraints.md ↔ docs/04-safety.md）', drift.ok, drift.reason,
+    '两边逐条对齐：文档说禁止的路径，机器必须也禁止');
 
   add('回退测试被实际执行过（需人工确认）', null,
     '至少有一次：新测试在修复前的代码上真的挂掉，且失败信息指出了错误的行为。'

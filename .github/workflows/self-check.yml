@@ -44,15 +44,15 @@ jobs:
           fi
           # gate-check 的冒烟测试必须覆盖 gate 路径，且同时断言 escalate 分支。
           # 证据必须带 `### Checks not run` 节（即使为空也写 `—`）——闸门现在真的读它。
-          printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → PASS\n- Red check: `npm run red` → PASS\n\n### Checks not run\n- —\n' > /tmp/evidence-probe.md
+          printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n- Red check: `true` → PASS\n\n### Checks not run\n- —\n' > /tmp/evidence-probe.md
           node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
+            --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts \
             --evidence-file /tmp/evidence-probe.md > /dev/null
           # 自相矛盾的报告必须被拦下：一份写着 Tests → FAIL 的 APPROVE 报告
           # 曾经拿到 proceed exit 0——比没有报告更容易过。
           printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → FAIL\n\n### Checks not run\n- —\n' > /tmp/evidence-contra.md
           if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
+            --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts \
             --evidence-file /tmp/evidence-contra.md > /dev/null 2>&1; then
             echo "::error::APPROVE with a failing check must escalate"
             exit 1
@@ -66,7 +66,7 @@ jobs:
           fi
           # approve 不带证据必须升级（verdict 是断言，不是证据）
           if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null 2>&1; then
+            --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts > /dev/null 2>&1; then
             echo "::error::approve without evidence must escalate"
             exit 1
           fi

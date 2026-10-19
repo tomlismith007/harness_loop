@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readJson, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
+import { parseArgs, readJson, printJson, fail, rejectUnknownFlags, loadBudget } from './lib/common.mjs';
 
 export const DEFAULT_BREAKER = {
   maxIterations: 10,
@@ -214,29 +214,45 @@ export function checkLedger(ledger, opts = {}) {
       next: 'STOP — consecutive failures without progress. Escalate to human.',
     };
   }
+  // 预算比例始终输出（未配置时为 null）。80% 不是停止，是降级：
+  // 不派执行者、只报告——继续跑完整子智能体链正是要防的 token 燃烧。
+  const budgetRatio = tokenBudget !== null && tokenBudget > 0
+    ? Number((tokensUsed / tokenBudget).toFixed(4))
+    : null;
+  const withRatio = (r) => ({ ...r, budget_ratio: budgetRatio });
+
   if (tokenBudget !== null && tokensUsed >= tokenBudget) {
-    return {
+    return withRatio({
       ...base,
       verdict: 'token-budget',
       exit_code: 2,
       next: 'STOP — token budget exceeded. Escalate to human.',
-    };
+    });
   }
+  // 迭代上限是硬停止，必须排在"预算降级"之前。否则一旦配置预算，
+  // 跑到 10 次迭代的循环会以 report-only exit 0 继续，熔断器被静默关掉。
   if (iterations >= maxIterations) {
-    return {
+    return withRatio({
       ...base,
       verdict: 'max-iterations',
       exit_code: 2,
       next: 'STOP — max iterations reached. Escalate to human.',
-    };
+    });
   }
-
-  return {
+  if (budgetRatio !== null && budgetRatio >= 0.8) {
+    return withRatio({
+      ...base,
+      verdict: 'report-only',
+      exit_code: 0,
+      next: 'token spend is at 80%+ of the daily cap — report only, do not dispatch an implementer.',
+    });
+  }
+  return withRatio({
     ...base,
     verdict: 'ok',
     exit_code: 0,
     next: 'Continue. Append this attempt to the ledger before retrying.',
-  };
+  });
 }
 
 /** 生成升级说明 */
@@ -307,7 +323,7 @@ function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
     'ledger', 'stagnation', 'noProgress', 'maxIterations', 'tokenBudget',
-    'pattern', 'escalation', 'json', 'help',
+    'pattern', 'escalation', 'constraintsRoot', 'json', 'help',
   ], 'ledger-check');
   if (args.help) {
     process.stdout.write(`ledger-check — loop circuit breaker
@@ -351,6 +367,12 @@ Exit codes:
 
   // 阈值来自内置默认值，CLI 参数覆盖单项。
   const opts = {};
+  // 未显式传 --token-budget 时读 loop-constraints.md 的 ## Budget 段。
+  // 预算写在策略文件里，账本只负责记录用量。
+  if (args.tokenBudget === undefined) {
+    const b = loadBudget(typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd());
+    if (b.tokenBudget !== null) opts.tokenBudget = b.tokenBudget;
+  }
   if (args.stagnation !== undefined) opts.stagnationThreshold = numArg(args.stagnation, '--stagnation');
   if (args.noProgress !== undefined) opts.noProgressThreshold = numArg(args.noProgress, '--no-progress');
   if (args.maxIterations !== undefined) opts.maxIterations = numArg(args.maxIterations, '--max-iterations');

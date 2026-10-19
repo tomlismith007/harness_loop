@@ -204,22 +204,21 @@ node scripts/gate-check.mjs --item p --phase fix --diff-files a.ts --state "$T";
 **改前**：证据只做正则形状校验。
 
 **改后**：
-1. 证据文件必须含 `### Evidence commands` 节，节内每行格式：
-   ```
-   - `<command>` → `<exit code>`
-   ```
-2. `--phase gate` 时，`gate-check` 在 `--evidence-cwd`（默认 cwd）下逐条执行，超时 120s，比对退出码；任一不符 → `escalate`，`gate: "verification-evidence"`，`reason` 列出不符的命令。
-3. `--no-replay`：跳过执行，结果里 `checks_not_run` 追加 `Evidence replay`，并在输出 `warning` 里写明"证据未重放"。
-4. 执行环境继承当前环境；命令不含 shell 元字符时用 `execFile`，否则用 `shell: true`。
+1. 证据文件里的每条检查行 `- Tests: `<command>` → PASS|FAIL` 都带命令。**不引入第二个格式**：一个概念一个定义。
+2. `--phase gate` 时，`gate-check` 在 `--evidence-cwd`（默认 cwd）下逐条执行，超时 120s，比对**退出码与 PASS/FAIL 是否一致**；任一不符 → `escalate`，`gate: "verification-evidence"`，`reason` 列出不符的命令。没有命令的检查行无法重放 → escalate。
+3. `--no-replay`：跳过执行，结果里 `checks_not_run` 追加 `Evidence replay`。
+4. 执行环境继承当前环境；命令一律原样交给 shell（不自己拆引号——拆引号会让带引号的失败命令被读成退出 0）。
 
 **验收**：
 ```bash
 T=$(mktemp -d); cd "$T"
-printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n\n### Evidence commands\n- `true` → `0`\n\n### Checks not run\n- —\n' > ev.md
+printf -- '- ' > STATE.md   # gate-check 现在要求 cwd 里有状态文件（fail-closed）
+printf '## Paths\n\n```\n.env\n```\n' > loop-constraints.md
+printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n\n### Checks not run\n- —\n' > ev.md
 node <repo>/scripts/gate-check.mjs --item p --phase gate --verdict approve --red-check pass \
   --reviewed-sha <sha> --head-sha <sha> --diff-files a.ts --evidence-file ev.md --evidence-cwd .; echo $?  # 0
-printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n\n### Evidence commands\n- `false` → `0`\n\n### Checks not run\n- —\n' > ev2.md
-node <repo>/scripts/gate-check.mjs ... --evidence-file ev2.md; echo $?   # 2（实际退出码 1 ≠ 声称 0）
+printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `false` → PASS\n\n### Checks not run\n- —\n' > ev2.md
+node <repo>/scripts/gate-check.mjs ... --evidence-file ev2.md; echo $?   # 2 (command exits 1, report claims PASS)
 ```
 
 **风险**：闸门变慢；命令必须可重入。`--no-replay` 是逃生口，但会记 NOT RUN。回滚：把不符降级为 warning。

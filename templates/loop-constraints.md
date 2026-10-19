@@ -34,6 +34,14 @@ k8s/production/**
 auth/**
 payments/**
 billing/**
+loop-constraints.md
+scripts/gate-check.mjs
+scripts/ledger-check.mjs
+scripts/lib/common.mjs
+.github/workflows/**
+package.json
+package-lock.json
+templates/**
 ```
 
 - 命中任一模式的路径：**停止编辑，写升级条目，交给人**。不做"顺便的小改动"。
@@ -65,6 +73,10 @@ billing/**
 - `loop-pause-all` **独占一行**写在 `STATE.md` 或本文件里 → `/harness-loop` 立即退出。
 - 散文里提到不算；清除标记后人工重启。
 - `gate-check.mjs --state <dir>` 会真的读它并返回退出码 3。
+
+## Budget
+
+- 日 token 上限：0        # 0 = 不启用；>0 时 ledger-check 读取
 
 ## Lessons
 

@@ -398,6 +398,26 @@ export function parseDenylistFrom(text) {
     .filter(Boolean);
 }
 
+/**
+ * 解析 `## Budget` 段的 `- 日 token 上限：<N>`。
+ * 0 或缺失 = 不启用。预算是策略，和拒绝列表放在同一个文件、同一次人工编辑。
+ */
+export function parseBudgetFrom(text) {
+  const section = (text || '').split(/^##\s*Budget\s*$/m)[1] ?? '';
+  const body = section.split(/^##\s/m)[0];
+  const m = body.match(/^\s*-\s*日\s*token\s*上限\s*[：:]\s*(\d+)/im)
+    || body.match(/^\s*-\s*daily\s*token\s*cap\s*[：:]\s*(\d+)/im);
+  const n = m ? Number(m[1]) : 0;
+  return { tokenBudget: Number.isFinite(n) && n > 0 ? n : null };
+}
+
+/** 读项目的 loop-constraints.md 预算；读不到返回 null（不启用）。 */
+export function loadBudget(root = '.') {
+  const p = path.join(root, 'loop-constraints.md');
+  if (!exists(p)) return { tokenBudget: null };
+  return parseBudgetFrom(readText(p));
+}
+
 /** 读项目的 loop-constraints.md 拒绝列表；文件不存在或为空时回落到 JS 常量。 */
 export function loadDenylist(root = '.') {
   const p = path.join(root, 'loop-constraints.md');

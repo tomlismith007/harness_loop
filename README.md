@@ -82,7 +82,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 | `gate-check.mjs` | 闸门判定 + kill switch | 0 通过；1 参数错误；2 升级；3 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 继续；2 停止并升级 |
 | `install-skills.mjs` | 安装 / `--list` / `--check` / `--uninstall` | 0 成功；1 错误或漂移 |
-| `test.mjs` | 自检（354 项断言） | 0 全通过 |
+| `test.mjs` | 自检（391 项断言） | 0 全通过 |
 
 装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs` 与 `lib/common.mjs`。
 
@@ -103,6 +103,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 | 7 | `verification-evidence` | `approve` 无证据、证据自相矛盾、缺 `Checks not run` 节 | escalate |
 | 8 | `verification` | 验证者 `reject` / `escalate-human` | escalate |
 | 9 | `awaiting-verification` | gate 阶段没有 verdict | escalate（与"验失败"区分） |
+| 10 | `wip-limit` | `STATE.md` 的 `## Active` 有多于一项 | escalate |
 
 ---
 
@@ -152,7 +153,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 354 项断言
+node scripts/test.mjs           # 391 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
