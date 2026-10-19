@@ -4,15 +4,24 @@
 
 ---
 
-## 三类状态，各司其职
+## 五个状态源，各司其职
 
-| 工件 | 作用域 | 更新者 | 回答的问题 |
-|---|---|---|---|
-| `STATE.md` | 仓库级、跨循环 | 每个循环每轮 | 现在在做什么？什么在等人？上次运行何时？ |
-| `feature_list.json` | 功能级、机器可读 | agent（有证据时） | 哪些功能做完了？证据是什么？依赖关系？ |
-| `loop-ledger.json` | 尝试级、熔断用 | 执行者每次尝试 | 试了几次？什么错误？是否停滞？ |
+| 工件 | 作用域 | 更新者 | 机械读者 | 回答的问题 |
+|---|---|---|---|---|
+| `STATE.md` | 仓库级 | 每轮 | `gate-check`（kill switch、WIP=1） | 现在做什么？什么在等人？ |
+| `feature_list.json` | 功能级 | 有证据时 | `harness-stage` 阶段 1 | 哪些功能完成了？证据是什么？ |
+| `loop-ledger.json` | 尝试级 | 每次尝试 | `ledger-check` | 试了几次？什么错误？是否停滞？ |
+| `loop-run-log.md` | 运行级 | 每轮 | `harness-stage`（存在性） | 这一轮的结果与成本？ |
+| `LESSONS.md` | 返工级 | 发生返工时 | 无（模型读） | 哪些错犯过第二次？ |
 
-**不要合并它们。** 三者粒度和更新频率不同：`STATE.md` 每轮都变，`feature_list.json` 只在有验证证据时变，`loop-ledger.json` 每次尝试都追加。
+**工作队列唯一来源 = `STATE.md` 的 `## High Priority`。** 其余四个文件不产生待办；
+`feature_list.json` 只回答"这项做完没有、证据是什么"。
+
+**不要合并它们。** 五者粒度和更新频率不同：`STATE.md` 每轮都变，`feature_list.json`
+只在有验证证据时变，`loop-ledger.json` 每次尝试都追加，`loop-run-log.md` 只追加，
+`LESSONS.md` 只在返工时写。
+
+`## Active` 表同时只能有一行非占位数据——`gate-check` 会读它，多于一行直接升级（WIP=1）。
 
 ---
 
@@ -27,7 +36,7 @@
 | `id` | string | `pr-123`、`issue-456`、`ci-<sha>-<job>` |
 | `event` | string | 产生它的事件名 |
 | `phase` | enum | `intake` / `review` / `fix` / `verify` / `gate` / `post-merge` / `release` / `escalated` |
-| `level` | enum | `L0` / `L1` / `L2` / `L3` |
+| `level` | enum | `L1` / `L2`（由 `harness-stage` 判据给出；本框架不授予 L3） |
 | `attempts` | number | 已尝试次数（上限 3） |
 | `acting_on` | string | 锁：正在操作的分支或 PR |
 | `skills` | string[] | 本阶段要用的技能 |
@@ -181,10 +190,10 @@
 |---|---|---|
 | `stagnation` | 3 × 同一错误 | 错误签名相同出现 3 次 |
 | `no-progress` | 5 次连续失败 | 连续失败无成功 |
-| `token-budget` | 显式或从 pattern 推导 | 超预算 |
+| `token-budget` | 显式传入 `--token-budget`，或从 `loop-constraints.md` 的 `## Budget` 读取 | 超预算；≥80% 降级为 `report-only` |
 | `max-iterations` | 10 | 总迭代数上限 |
 
-**错误签名归一化**：抹掉 ISO 时间戳、十六进制地址、路径（折叠为 basename）、行列号、其余数字。这样"同一个错误"能被识别出来。
+**错误签名归一化**：抹掉 ISO 时间戳、十六进制地址、路径（折叠为 basename）、行列号、位置/时长类数字。退出码、HTTP 状态码、断言期望值等裸数字**保留**——否则根因不同的失败会被误判为同一错误。细节见 `docs/05-failure-modes.md` 第六节。
 
 **退出码**：`0` = 继续；`2` = 停止，交给人类。
 

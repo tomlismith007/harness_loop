@@ -23,6 +23,7 @@ import {
 } from './lib/common.mjs';
 import { checkLedger, normalizeError } from './ledger-check.mjs';
 import { checkGates, isPaused } from './gate-check.mjs';
+import { localToday } from './clean-state.mjs';
 
 const VERBOSE = process.argv.includes('--verbose');
 let passed = 0;
@@ -310,7 +311,9 @@ section('5. 闸门判定');
     '### Checks not run',
     '- —',
   ].join('\n'));
-  const GATE = { phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass', reviewedSha: 'abc123', headSha: 'abc123', evidenceFile: EV };
+  // 本节测的是证据**格式**解析；重放由第 17 节单独测。
+  // 直接调 checkGates 时用 noReplay，避免让格式测试去跑 `npm test`。
+  const GATE = { phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass', reviewedSha: 'a'.repeat(40), headSha: 'a'.repeat(40), evidenceFile: EV, noReplay: true };
 
   eq('干净通过', checkGates({ item: 'p', ...GATE }).decision, 'proceed');
   eq('pause → exit', checkGates({ item: 'p', pause: true }).decision, 'exit');
@@ -449,7 +452,9 @@ section('5. 闸门判定');
   // NOT RUN 声明
   const n1 = checkGates({ item: 'p', ...GATE, notRun: ['real-device', 'load-test'] });
   eq('有未跑项仍可 proceed', n1.decision, 'proceed');
-  ok('未跑项出现在输出', Array.isArray(n1.checks_not_run) && n1.checks_not_run.length === 2);
+  ok('未跑项出现在输出',
+    Array.isArray(n1.checks_not_run)
+    && n1.checks_not_run.includes('real-device') && n1.checks_not_run.includes('load-test'));
   ok('未跑项在 next 中被提示列出', /NOT RUN/.test(n1.next));
 
   // 优先级
@@ -492,6 +497,9 @@ section('5. 闸门判定');
   // 单文件 PR 的 `git diff --name-only` 输出恰好一行；曾被当成"单个路径"→ proceed。
   {
     const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-diff-'));
+    // --state 默认 cwd，且读不到状态文件就 fail-closed。这些用例测的是 diff-files
+    // 解析，不是状态文件，所以给一个最小的合法状态目录。
+    fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
     const runGate = (args) => {
       try {
         const o = execFileSync(process.execPath,
@@ -835,7 +843,7 @@ section('14. 两阶段驱动器');
     && !fs.existsSync(path.join(empty, 'loop-run-log.md')));
 
   // 运行层脚本随装配进入目标仓库
-  for (const f of ['gate-check.mjs', 'ledger-check.mjs', 'lib/common.mjs']) {
+  for (const f of ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'lib/common.mjs']) {
     ok(`消费者项目有 scripts/${f}`, fs.existsSync(path.join(empty, 'scripts', f)));
   }
   for (const f of ['test.mjs', 'harness-stage.mjs', 'install-skills.mjs']) {
@@ -861,6 +869,9 @@ section('14. 两阶段驱动器');
     runInConsumer('ledger-check.mjs', ['--ledger', path.join(empty, 'nope.json')]).code, 1);
   eq('消费者内 gate-check 可运行',
     runInConsumer('gate-check.mjs', ['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts']).code, 0);
+  // 装配后的仓库必须能自己演练护栏——drill-check 随装配进入消费者项目。
+  eq('消费者内 drill-check 可运行',
+    runInConsumer('drill-check.mjs', ['--state', '.', '--only', 'breaker']).code, 0);
 
   // 跳级保护：阶段 1 未达成时不得直接装阶段 2
   {
@@ -883,7 +894,12 @@ section('14. 两阶段驱动器');
   // 阶段 2 判据 5 要求拒绝列表已本地化——模板原文不算。
   fs.writeFileSync(path.join(empty, 'loop-constraints.md'),
     fs.readFileSync(path.join(empty, 'loop-constraints.md'), 'utf8')
-      .replace('auth/**', 'auth/**\ninfra/prod/**'));
+      .replace('auth/**', 'auth/**\ninfra/prod/**\nops/runbooks/**'));
+  // 阶段 2 现在要求护栏演练记录；记录绑定约束文件的 sha256，所以必须在
+  // 本地化之后生成，否则一生成就是过期的。
+  execFileSync(process.execPath,
+    [path.join(PACK_ROOT, 'scripts', 'drill-check.mjs'), '--record', '--state', empty],
+    { encoding: 'utf8' });
   eq('替换 goal + 本地化拒绝列表后阶段 2 机械判据全过', runStage(empty, ['--stage', '2', '--require']).code, 0);
 
   // 自引用防护：目标就是 pack 自己时，判据记为 NOT RUN 而不是递归
@@ -927,22 +943,935 @@ section('15. 超时杀整棵树');
   ok('不存在的命令被识别为 spawn 失败', missing.spawnFailed === true, JSON.stringify(missing));
 }
 
+// ---------------------------------------------------------------- 16. 升级回归（批次 1）
+
+section('16. 升级回归（批次 1）');
+{
+  const runGateIn = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+
+  // U-01：--state 接受文件；读不到必须 fail-closed，不得静默 proceed。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-state-'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), 'loop-pause-all\n');
+    eq('U-01 文件形式 --state 读到暂停 → 3',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', path.join(t, 'STATE.md')], t).code, 3);
+    eq('U-01 目录形式 --state 读到暂停 → 3',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', t], t).code, 3);
+    const empty = path.join(t, 'empty');
+    fs.mkdirSync(empty);
+    eq('U-01 目录里没有状态文件 → 参数错误 1',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', empty], t).code, 1);
+    eq('U-01 不存在的路径 → 参数错误 1',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', path.join(t, 'nope')], t).code, 1);
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // U-02：fix + approve 必须带非阻断 warning；gate + approve 无证据必须拦。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-phase-'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
+    const fixRun = runGateIn(['--item', 'p', '--phase', 'fix', '--verdict', 'approve',
+      '--diff-files', 'a.ts', '--state', t], t);
+    eq('U-02 fix+approve 仍 proceed', fixRun.code, 0);
+    ok('U-02 fix+approve 带 warning', /"warning":\s*"approve at fix phase is not a gate/.test(fixRun.out), fixRun.out);
+    const gateRun = runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve',
+      '--red-check', 'pass', '--reviewed-sha', 'a'.repeat(40), '--head-sha', 'a'.repeat(40),
+      '--diff-files', 'a.ts', '--state', t], t);
+    eq('U-02 gate+approve 无证据 → 2', gateRun.code, 2);
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // U-09：空状态文件不算"存在"；技能必须有可加载 frontmatter。
+  {
+    const stage = (target) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), target, '--json'],
+          { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    };
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-empty-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), t, '--upgrade', '--stage', '1'],
+      { encoding: 'utf8' });
+    writeRealFeatures(path.join(t, 'feature_list.json'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), '   \n\n<!-- 只有注释 -->\n');
+    const j = JSON.parse(stage(t).out);
+    const stateCheck = j.stages[0].checks.find((c) => /状态文件/.test(c.label));
+    ok('U-09 空 STATE.md 不算存在', stateCheck && stateCheck.ok === false, JSON.stringify(stateCheck));
+    fs.rmSync(t, { recursive: true, force: true });
+
+    // 无 frontmatter 的 SKILL.md 不算可加载
+    const s = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-skill-'));
+    fs.mkdirSync(path.join(s, '.claude', 'skills', 'harness-loop'), { recursive: true });
+    // 正文用结构化行：structuredText 会丢掉普通段落，纯文本会让判据"因为别的原因"失败。
+    fs.writeFileSync(path.join(s, '.claude', 'skills', 'harness-loop', 'SKILL.md'),
+      '# no frontmatter\n\n- kill switch\n- 验证\n');
+    const j2 = JSON.parse(stage(s).out);
+    const skillCheck = j2.stages[1].checks.find((c) => /harness-loop/.test(c.label));
+    ok('U-09 无 frontmatter 的技能不算已装', skillCheck && skillCheck.ok === false, JSON.stringify(skillCheck));
+    fs.rmSync(s, { recursive: true, force: true });
+  }
+
+  // U-11：缺一整个宿主副本必须被 --check 发现。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t],
+      { encoding: 'utf8' });
+    fs.rmSync(path.join(t, '.agents', 'skills', 'harness-loop'), { recursive: true, force: true });
+    let code = 0;
+    try {
+      execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t, '--check'],
+        { encoding: 'utf8' });
+    } catch (e) { code = e.status; }
+    eq('U-11 缺一个宿主副本 → --check exit 1', code, 1);
+    fs.rmSync(t, { recursive: true, force: true });
+
+    // 整个宿主目录被删掉，也必须被发现——只报 missing 会让它静默通过。
+    const t2 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host2-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t2],
+      { encoding: 'utf8' });
+    fs.rmSync(path.join(t2, '.agents'), { recursive: true, force: true });
+    let code2 = 0;
+    let out2 = '';
+    try {
+      out2 = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t2, '--check', '--json'],
+        { encoding: 'utf8' });
+    } catch (e) { code2 = e.status; out2 = e.stdout || ''; }
+    eq('U-11 整个宿主目录缺失 → --check exit 1', code2, 1);
+    ok('U-11 整个宿主目录缺失 → in_sync=false', /"in_sync":\s*false/.test(out2), out2.slice(0, 200));
+    fs.rmSync(t2, { recursive: true, force: true });
+
+    // 单宿主安装不应因为另一个宿主没装而报错。
+    const t3 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host3-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t3, '--layout', 'claude'],
+      { encoding: 'utf8' });
+    let code3 = 0;
+    try {
+      execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t3, '--check', '--layout', 'claude'],
+        { encoding: 'utf8' });
+    } catch (e) { code3 = e.status; }
+    eq('U-11 单宿主安装 --check 不误报', code3, 0);
+    fs.rmSync(t3, { recursive: true, force: true });
+
+    // 检查范围不能由调用方临时收窄：两宿主装过、删掉 .agents 之后，
+    // 即使传 --layout claude 也必须报漂移。
+    const t4 = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-host4-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t4],
+      { encoding: 'utf8' });
+    fs.rmSync(path.join(t4, '.agents'), { recursive: true, force: true });
+    let code4 = 0;
+    try {
+      execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'install-skills.mjs'), '--target', t4, '--check', '--layout', 'claude'],
+        { encoding: 'utf8' });
+    } catch (e) { code4 = e.status; }
+    eq('U-11 收窄 --layout 不能藏掉已声明宿主的漂移', code4, 1);
+    fs.rmSync(t4, { recursive: true, force: true });
+  }
+
+  // U-09b：frontmatter 必须在文件开头，正文里的 name:/description: 不算。
+  {
+    const s = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-fm-'));
+    fs.mkdirSync(path.join(s, '.claude', 'skills', 'harness-loop'), { recursive: true });
+    fs.writeFileSync(path.join(s, '.claude', 'skills', 'harness-loop', 'SKILL.md'),
+      '# body\n\n- kill switch\n- 验证\n\n---\nname: fake\ndescription: fake\n');
+    let out = '';
+    try {
+      out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), s, '--json'], { encoding: 'utf8' });
+    } catch (e) { out = e.stdout || ''; }
+    const j = JSON.parse(out);
+    const check = j.stages[1].checks.find((c) => /harness-loop/.test(c.label));
+    ok('U-09 正文里的 name/description 不算 frontmatter', check && check.ok === false, JSON.stringify(check));
+    fs.rmSync(s, { recursive: true, force: true });
+  }
+
+  // U-07：STATE.md 的 Active 表出现第二行 → 拒绝（WIP=1）。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wip-'));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    fs.writeFileSync(path.join(t, 'STATE.md'),
+      '## Active\n\n| Work item | acting_on | 状态 |\n|---|---|---|\n| a | x | 进行中 |\n| b | y | 进行中 |\n');
+    eq('U-07 两个活动项 → 2',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', t], t).code, 2);
+    fs.writeFileSync(path.join(t, 'STATE.md'),
+      '## Active\n\n| Work item | acting_on | 状态 |\n|---|---|---|\n| a | x | 进行中 |\n| — | — | — |\n');
+    eq('U-07 占位行不算活动项 → 0',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', t], t).code, 0);
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 技能里的命令必须可执行：从 SKILL.md 提取命令串并在临时目录跑。
+  {
+    const skill = readText(path.join(SKILLS_DIR, 'harness-loop', 'SKILL.md'));
+    const step0 = skill.match(/node scripts\/gate-check\.mjs --item probe[^\n]*/);
+    ok('技能第 0 步命令存在', Boolean(step0), '未找到 probe 命令');
+    if (step0) {
+      const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-skillcmd-'));
+      fs.mkdirSync(path.join(t, 'scripts'), { recursive: true });
+      for (const f of ['gate-check.mjs', 'ledger-check.mjs']) {
+        fs.copyFileSync(path.join(PACK_ROOT, 'scripts', f), path.join(t, 'scripts', f));
+      }
+      fs.mkdirSync(path.join(t, 'scripts', 'lib'), { recursive: true });
+      fs.copyFileSync(path.join(PACK_ROOT, 'scripts', 'lib', 'common.mjs'), path.join(t, 'scripts', 'lib', 'common.mjs'));
+      fs.writeFileSync(path.join(t, 'STATE.md'), 'loop-pause-all\n');
+      fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+      const r = (() => {
+        try {
+          const out = execFileSync('bash', ['-c', step0[0]], { encoding: 'utf8', cwd: t });
+          return { code: 0, out };
+        } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+      })();
+      eq('技能第 0 步命令在暂停时 → exit 3', r.code, 3);
+      fs.rmSync(t, { recursive: true, force: true });
+    }
+  }
+}
+
+// ---------------------------------------------------------------- 17. 升级回归（批次 2）
+
+section('17. 升级回归（批次 2）');
+{
+  const runGateIn = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  const SHA = 'a'.repeat(40);
+
+  // U-03：证据里的命令必须被真的重放，退出码不符即拒。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-replay-'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    const base = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
+      '--reviewed-sha', SHA, '--head-sha', SHA, '--diff-files', 'a.ts', '--state', t];
+    const report = (cmd, status) => `## Verdict: APPROVE\n\n### Evidence\n- Tests: \`${cmd}\` → ${status}\n\n### Checks not run\n- —\n`;
+
+    fs.writeFileSync(path.join(t, 'ok.md'), report('true', 'PASS'));
+    eq('U-03 命令重放一致 → 0',
+      runGateIn([...base, '--evidence-file', 'ok.md'], t).code, 0);
+
+    fs.writeFileSync(path.join(t, 'bad.md'), report('false', 'PASS'));
+    const bad = runGateIn([...base, '--evidence-file', 'bad.md'], t);
+    eq('U-03 命令实际失败但报告 PASS → 2', bad.code, 2);
+    ok('U-03 不符原因点名命令', /false/.test(bad.out), bad.out.slice(0, 200));
+
+    // APPROVE 与 FAIL 自相矛盾本身就会被拦，与重放无关。
+    fs.writeFileSync(path.join(t, 'fail-claim.md'), report('false', 'FAIL'));
+    eq('U-03 APPROVE + FAIL 仍被自相矛盾闸拦下 → 2',
+      runGateIn([...base, '--evidence-file', 'fail-claim.md'], t).code, 2);
+
+    const skip = runGateIn([...base, '--evidence-file', 'bad.md', '--no-replay'], t);
+    eq('U-03 --no-replay 跳过重放 → 0', skip.code, 0);
+    ok('U-03 --no-replay 记 NOT RUN', /Evidence replay/.test(skip.out), skip.out.slice(0, 200));
+    ok('U-03 --no-replay 输出 warning', /not replayed/.test(skip.out), skip.out.slice(0, 300));
+
+    // 没有命令的检查行无法重放
+    fs.writeFileSync(path.join(t, 'no-cmd.md'),
+      '## Verdict: APPROVE\n\n### Evidence\n- Red check: PASS — 说明\n\n### Checks not run\n- —\n');
+    eq('U-03 无命令可重放 → 2',
+      runGateIn([...base, '--evidence-file', 'no-cmd.md'], t).code, 2);
+
+    // 带引号参数的命令必须原样交给 shell。曾经无元字符时自己 split，
+    // `node --eval "process.exitCode=1"` 的引号被拆掉，变成退出 0。
+    fs.writeFileSync(path.join(t, 'quoted.md'),
+      report('node --eval "process.exitCode=1"', 'PASS'));
+    eq('U-03 带引号的失败命令不能被读成 PASS',
+      runGateIn([...base, '--evidence-file', 'quoted.md'], t).code, 2);
+
+    // 重放在 --evidence-cwd 指定的目录里跑
+    fs.mkdirSync(path.join(t, 'sub'));
+    fs.writeFileSync(path.join(t, 'sub', 'marker.txt'), 'x');
+    fs.writeFileSync(path.join(t, 'cwd.md'), report('test -f marker.txt', 'PASS'));
+    eq('U-03 重放在 --evidence-cwd 下执行',
+      runGateIn([...base, '--evidence-file', 'cwd.md', '--evidence-cwd', 'sub'], t).code, 0);
+    eq('U-03 不在 --evidence-cwd 下则失败',
+      runGateIn([...base, '--evidence-file', 'cwd.md'], t).code, 2);
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // U-04：sha 必须是合法 hex；head 缺省时脚本自己取。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-sha-'));
+    fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    fs.writeFileSync(path.join(t, 'ev.md'),
+      '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n\n### Evidence commands\n- `true` → `0`\n\n### Checks not run\n- —\n');
+    const base = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
+      '--diff-files', 'a.ts', '--state', t, '--evidence-file', 'ev.md'];
+    eq('U-04 非法 reviewed-sha → 参数错误 1',
+      runGateIn([...base, '--reviewed-sha', 'deadbeef', '--head-sha', SHA], t).code, 1);
+    eq('U-04 非 git 目录缺 head-sha → 1',
+      runGateIn([...base, '--reviewed-sha', SHA], t).code, 1);
+
+    // 在真实 git 仓库里：head 自取
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-sha-repo-'));
+    // 必须清掉继承的 GIT_DIR：pre-commit hook 里跑测试时它指向外层仓库，
+    // 于是临时目录里的 `git init` 会改到外层仓库的 config（实测把 core.bare 改成 true）。
+    const gitEnv = { ...process.env };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete gitEnv[k];
+    execFileSync('git', ['init', '-q'], { cwd: repo, env: gitEnv });
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: repo, env: gitEnv });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo, env: gitEnv });
+    fs.writeFileSync(path.join(repo, 'STATE.md'), '—\n');
+    fs.writeFileSync(path.join(repo, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    fs.writeFileSync(path.join(repo, 'ev.md'),
+      '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n\n### Evidence commands\n- `true` → `0`\n\n### Checks not run\n- —\n');
+    fs.writeFileSync(path.join(repo, 'a.ts'), 'export const x = 1;\n');
+    execFileSync('git', ['add', '-A'], { cwd: repo, env: gitEnv });
+    execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo, env: gitEnv });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8', env: gitEnv }).trim();
+    eq('U-04 head-sha 缺省时自取 git HEAD',
+      runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
+        '--reviewed-sha', head, '--diff-files', 'a.ts', '--state', repo,
+        '--evidence-file', 'ev.md'], repo).code, 0);
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // U-06：策略面路径进入拒绝列表；根与模板一致；两份拒绝列表漂移会被发现。
+  {
+    const rootDeny = parseDenylistFrom(readText(path.join(PACK_ROOT, 'loop-constraints.md')));
+    for (const p of ['loop-constraints.md', 'scripts/gate-check.mjs', 'package.json']) {
+      ok(`U-06 拒绝列表含 ${p}`, rootDeny.includes(p), JSON.stringify(rootDeny));
+    }
+    const tplDeny = parseDenylistFrom(readText(path.join(TEMPLATE_DIR, 'loop-constraints.md')));
+    // 根仓库的列表是模板的超集：模板给基线，仓库按自己情况加。
+    // 相等曾经是判据，但那样"本地化"就永远无法达成——本地化本来就意味着与模板不同。
+    ok('U-06 模板的每条路径都在根列表里',
+      tplDeny.every((p) => rootDeny.includes(p)),
+      JSON.stringify(tplDeny.filter((p) => !rootDeny.includes(p))));
+    ok('U-06 根列表至少比模板多 2 条', rootDeny.length >= tplDeny.length + 2,
+      `${rootDeny.length} vs ${tplDeny.length}`);
+
+    // 照抄模板不能被判成"已本地化"：判据里内置的模板清单必须跟着模板走。
+    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-copy-'));
+    fs.copyFileSync(path.join(TEMPLATE_DIR, 'loop-constraints.md'), path.join(copy, 'loop-constraints.md'));
+    let copyOut = '';
+    try {
+      copyOut = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), copy, '--json'], { encoding: 'utf8' });
+    } catch (e) { copyOut = e.stdout || ''; }
+    const copyJ = JSON.parse(copyOut);
+    const loc = copyJ.stages[1].checks.find((c) => /本地化/.test(c.label));
+    ok('U-06 照抄模板 → 本地化判据失败', loc && loc.ok === false, JSON.stringify(loc));
+    fs.rmSync(copy, { recursive: true, force: true });
+
+    // 判据本身的三个边界：只写自身、模板+1、模板+2。
+    const tpl = parseDenylistFrom(readText(path.join(TEMPLATE_DIR, 'loop-constraints.md')));
+    const localizeCase = (entries) => {
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-loc-'));
+      fs.writeFileSync(path.join(d, 'loop-constraints.md'),
+        `## Paths\n\n\`\`\`\n${entries.join('\n')}\n\`\`\`\n`);
+      let out = '';
+      try {
+        out = execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), d, '--json'], { encoding: 'utf8' });
+      } catch (e) { out = e.stdout || ''; }
+      const j = JSON.parse(out);
+      fs.rmSync(d, { recursive: true, force: true });
+      return j.stages[1].checks.find((c) => /本地化/.test(c.label));
+    };
+    ok('U-06 只写自身一条 → 本地化失败',
+      localizeCase(['loop-constraints.md']).ok === false);
+    ok('U-06 模板 + 1 条 → 本地化失败',
+      localizeCase([...tpl, 'only-one/**']).ok === false);
+    ok('U-06 模板 + 2 条 → 本地化通过',
+      localizeCase([...tpl, 'one/**', 'two/**']).ok === true);
+
+    // 漂移：改 docs/04 的一条，阶段 2 必须失败
+    const drift = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drift-'));
+    fs.mkdirSync(path.join(drift, 'docs'));
+    fs.writeFileSync(path.join(drift, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\nauth/**\n```\n');
+    fs.writeFileSync(path.join(drift, 'docs', '04-safety.md'),
+      '## 拒绝列表（Denylist）\n\n```\n.env\npayments/**\n```\n');
+    let out = '';
+    try {
+      out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), drift, '--json'], { encoding: 'utf8' });
+    } catch (e) { out = e.stdout || ''; }
+    const j = JSON.parse(out);
+    const check = j.stages[1].checks.find((c) => /拒绝列表.*一致|漂移/.test(c.label));
+    ok('U-06 两份拒绝列表漂移 → 阶段 2 判据失败', check && check.ok === false, JSON.stringify(check));
+    fs.rmSync(drift, { recursive: true, force: true });
+  }
+
+  // U-08：预算从约束文件读，80% report-only，100% 停止。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-budget-'));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\n```\n\n## Budget\n\n- 日 token 上限：100\n');
+    const ledger = (tokens) => JSON.stringify({
+      goal: 'g', attempts: [{ iteration: 1, action: 'a', outcome: 'success', tokensUsed: tokens }],
+    });
+    const runLedger = (tokens) => {
+      fs.writeFileSync(path.join(t, 'l.json'), ledger(tokens));
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'ledger-check.mjs'), '--ledger', 'l.json', '--json'],
+          { encoding: 'utf8', cwd: t }) };
+      } catch (e) { return { code: e.status, out: e.stdout || '' }; }
+    };
+    const r85 = runLedger(85);
+    eq('U-08 85% → exit 0', r85.code, 0);
+    ok('U-08 85% → verdict report-only', /"verdict":\s*"report-only"/.test(r85.out), r85.out.slice(0, 200));
+    ok('U-08 budget_ratio 可见', /"budget_ratio":\s*0\.85/.test(r85.out), r85.out.slice(0, 300));
+    const r100 = runLedger(100);
+    eq('U-08 100% → exit 2', r100.code, 2);
+    ok('U-08 100% → verdict token-budget', /"verdict":\s*"token-budget"/.test(r100.out), r100.out.slice(0, 200));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    const rNone = runLedger(999);
+    eq('U-08 未配置预算 → 不触发', rNone.code, 0);
+    ok('U-08 未配置预算 → budget_ratio null', /"budget_ratio":\s*null/.test(rNone.out), rNone.out.slice(0, 200));
+
+    // 迭代上限是硬停止，不能被预算降级盖住。
+    const many = JSON.stringify({
+      goal: 'g',
+      attempts: Array.from({ length: 10 }, (_, i) => ({ iteration: i + 1, action: 'a', outcome: 'success', tokensUsed: 9 })),
+    });
+    fs.writeFileSync(path.join(t, 'l.json'), many);
+    let capOut = '';
+    let capCode = 0;
+    try {
+      capOut = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'ledger-check.mjs'), '--ledger', 'l.json', '--json'],
+        { encoding: 'utf8', cwd: t });
+    } catch (e) { capCode = e.status; capOut = e.stdout || ''; }
+    eq('U-08 80%+ 且到迭代上限 → 仍是硬停止 2', capCode, 2);
+    ok('U-08 迭代上限优先于 report-only', /"verdict":\s*"max-iterations"/.test(capOut), capOut.slice(0, 200));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // U-10：两个读第三方文本的技能必须带同一段不可信输入说明。
+  {
+    const loop = readText(path.join(SKILLS_DIR, 'harness-loop', 'SKILL.md'));
+    const issue = readText(path.join(SKILLS_DIR, 'harness-loop-issue', 'SKILL.md'));
+    const block = (s) => {
+      const m = s.match(/<!-- untrusted-input:start[\s\S]*?untrusted-input:end -->/);
+      return m ? m[0] : null;
+    };
+    ok('U-10 harness-loop 有不可信输入段', Boolean(block(loop)));
+    ok('U-10 harness-loop-issue 有不可信输入段', Boolean(block(issue)));
+    ok('U-10 两段逐字相同', block(loop) && block(loop) === block(issue));
+  }
+
+  // 文档与代码的闸门数必须一致（批次 1 新增 wip-limit 后未同步过一次）。
+  {
+    const codeGates = [...new Set([...readText(path.join(PACK_ROOT, 'scripts', 'gate-check.mjs'))
+      .matchAll(/gate: '([a-z-]+)'/g)].map((m) => m[1]))].sort();
+    const readme = readText(path.join(PACK_ROOT, 'README.md'));
+    const docGates = [...readme.matchAll(/^\| \d+ \| `([a-z-]+)` \|/gm)].map((m) => m[1]).sort();
+    eq('README 闸门表与代码 gate 名一致', docGates.join(','), codeGates.join(','));
+  }
+}
+
+// ---------------------------------------------------------------- 18. 护栏演练（U-05）
+
+section('18. 护栏演练（U-05）');
+{
+  const runDrill = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'drill-check.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+
+  // 拒绝列表逐条命中（敏感性）+ 良性路径不命中（特异性）
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-'));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\nauth/**\n**/secrets/**\n```\n');
+    const r = runDrill(['--record', '--state', t], t);
+    eq('U-05 全命中 → exit 0', r.code, 0);
+    ok('U-05 记录文件生成', fs.existsSync(path.join(t, 'loop-drill.json')));
+    const rec = JSON.parse(readText(path.join(t, 'loop-drill.json')));
+    ok('U-05 记录含 gate 组', Boolean(rec.guardrails && rec.guardrails.gate), JSON.stringify(Object.keys(rec.guardrails || {})));
+    ok('U-05 记录含 constraints 指纹', /"sha256":\s*"[0-9a-f]{64}"/.test(readText(path.join(t, 'loop-drill.json'))));
+
+    // 篡改约束文件 → 记录失效
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\nauth/**\n**/secrets/**\npayments/**\n```\n');
+    const stale = runDrill(['--state', t], t);
+    eq('U-05 约束文件变了 → 记录失效 exit 1', stale.code, 1);
+    ok('U-05 失效原因可见', /STALE|过期|已改动/.test(stale.out), stale.out.slice(0, 300));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 熔断器演练：三个具体触发 + 健康账本不触发
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-b-'));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
+    const r = runDrill(['--record', '--only', 'breaker', '--state', t], t);
+    eq('U-05 breaker 演练全过 → 0', r.code, 0);
+    const rec = JSON.parse(readText(path.join(t, 'loop-drill.json')));
+    const ids = (rec.guardrails.breaker.results || []).map((x) => x.id).sort();
+    ok('U-05 breaker 含 stagnation', ids.includes('breaker.stagnation'), ids.join(','));
+    ok('U-05 breaker 含 no-progress', ids.includes('breaker.no-progress'), ids.join(','));
+    ok('U-05 breaker 含 healthy（特异性）', ids.includes('breaker.healthy'), ids.join(','));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 拒绝列表有一条匹配不上 → 演练失败，exit 2
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-f-'));
+    // `**` 之外的畸形模式：合成路径无法命中它
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n.env\n[unclosed\n```\n');
+    const r = runDrill(['--record', '--only', 'gate', '--state', t], t);
+    eq('U-05 某条拒绝列表不命中 → 2', r.code, 2);
+    ok('U-05 失败项被点名', /\[unclosed\]/.test(r.out), r.out.slice(0, 400));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 记录必须真的能证明东西：空记录、缺组、缺指纹、少条目都不算。
+  {
+    const stage = (dir) => {
+      let out = '';
+      try {
+        out = execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), dir, '--json'], { encoding: 'utf8' });
+      } catch (e) { out = e.stdout || ''; }
+      const j = JSON.parse(out);
+      return j.stages[1].checks.find((x) => /护栏|drill/.test(x.label));
+    };
+    const mk = () => {
+      const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-r-'));
+      fs.writeFileSync(path.join(d, 'loop-constraints.md'), '## Paths\n\n```\n.env\nauth/**\n```\n');
+      return d;
+    };
+
+    const empty = mk();
+    fs.writeFileSync(path.join(empty, 'loop-drill.json'), JSON.stringify({ schema: 1, guardrails: {} }));
+    ok('U-05 空记录 → 判据失败', stage(empty).ok === false, JSON.stringify(stage(empty)));
+    fs.rmSync(empty, { recursive: true, force: true });
+
+    const noSha = mk();
+    fs.writeFileSync(path.join(noSha, 'loop-drill.json'), JSON.stringify({
+      schema: 1,
+      guardrails: {
+        gate: { results: [{ id: 'gate.benign', outcome: 'passed' }] },
+        breaker: { results: [{ id: 'breaker.healthy', outcome: 'passed' }] },
+      },
+    }));
+    ok('U-05 缺 sha256 的记录 → 判据失败', stage(noSha).ok === false, JSON.stringify(stage(noSha)));
+    fs.rmSync(noSha, { recursive: true, force: true });
+
+    // breaker-only 记录：拒绝列表是否命中没有证据
+    const onlyBreaker = mk();
+    runDrill(['--record', '--only', 'breaker', '--state', onlyBreaker], onlyBreaker);
+    ok('U-05 只有 breaker 的记录 → 判据失败', stage(onlyBreaker).ok === false, JSON.stringify(stage(onlyBreaker)));
+    fs.rmSync(onlyBreaker, { recursive: true, force: true });
+
+    // 正常记录通过
+    const good = mk();
+    runDrill(['--record', '--state', good], good);
+    ok('U-05 完整记录 → 判据通过', stage(good).ok === true, JSON.stringify(stage(good)));
+
+    // gate 结果全 skipped：拒绝列表在那里，没有"跳过"这种合法结局。
+    const rec = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec.guardrails.gate.results = rec.guardrails.gate.results.map((r) => ({ ...r, outcome: 'skipped' }));
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec));
+    ok('U-05 gate 结果全 skipped → 判据失败', stage(good).ok === false, JSON.stringify(stage(good)));
+
+    // breaker 只留 healthy：证明不了它会停。
+    const rec2 = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec2.guardrails.gate.results = rec2.guardrails.gate.results.map((r) => ({ ...r, outcome: 'passed' }));
+    rec2.guardrails.breaker.results = [{ id: 'breaker.healthy', outcome: 'passed' }];
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec2));
+    ok('U-05 breaker 只留 healthy → 判据失败', stage(good).ok === false, JSON.stringify(stage(good)));
+
+    // 未知 outcome 不得被当成通过。
+    const rec4 = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec4.guardrails.gate.results = rec4.guardrails.gate.results.map((r) => ({ ...r, outcome: 'PASSED' }));
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec4));
+    ok('U-05 非规范 outcome → 判据失败', stage(good).ok === false, JSON.stringify(stage(good)));
+
+    // 非对象元素不得让 stage driver 崩掉。
+    const rec3 = JSON.parse(readText(path.join(good, 'loop-drill.json')));
+    rec3.guardrails.gate.results = [null];
+    fs.writeFileSync(path.join(good, 'loop-drill.json'), JSON.stringify(rec3));
+    ok('U-05 记录含 null 元素 → 判据失败而不崩溃', stage(good).ok === false, JSON.stringify(stage(good)));
+    fs.rmSync(good, { recursive: true, force: true });
+  }
+
+  // 被别的模式遮住的死条目必须被点名，而不是算通过。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-m-'));
+    // 每条结果必须由**它自己的**模式拦下。曾经拿整表匹配，
+    // 于是一条更宽的模式会把另一条的样本也拦掉，结果里写着别人的名字，
+    // 死条目因此永远看不出来。
+    // 顺序有讲究：宽模式在前，整表匹配时它会把窄模式的样本也拦下，
+    // 于是旧代码给窄模式记的"命中"其实是宽模式干的。新代码只拿 [glob]
+    // 匹配，两条都归因到自己。这个 fixture 在旧代码上会红。
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      '## Paths\n\n```\n**/src/**\n**/secret/**\n```\n');
+    const r = runDrill(['--only', 'gate', '--state', t, '--json'], t);
+    const j = JSON.parse(r.out);
+    const secret = j.results.find((x) => x.id === 'gate.denylist[**/secret/**]');
+    ok('U-05 命中归因到自己的模式',
+      secret && /blocked by \*\*\/secret\/\*\*/.test(secret.actual), JSON.stringify(secret));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+
+  // 阶段 2 新增判据：没有 drill 记录 → 未达成
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-drill-s-'));
+    execFileSync(process.execPath,
+      [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), t, '--upgrade', '--stage', '1'],
+      { encoding: 'utf8' });
+    writeRealFeatures(path.join(t, 'feature_list.json'));
+    let out = '';
+    try {
+      out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'harness-stage.mjs'), t, '--json'], { encoding: 'utf8' });
+    } catch (e) { out = e.stdout || ''; }
+    const j = JSON.parse(out);
+    const c = j.stages[1].checks.find((x) => /护栏|drill/.test(x.label));
+    ok('U-05 阶段 2 有 drill 判据', Boolean(c), JSON.stringify(j.stages[1].checks.map((x) => x.label)));
+    ok('U-05 无记录时判据失败', c && c.ok === false, JSON.stringify(c));
+    fs.rmSync(t, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------- 19. 清洁交接（U-12）
+
+section('19. 清洁交接（U-12）');
+{
+  const runClean = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'clean-state.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  // 必须与 clean-state.mjs 的判据同源：本地日期，不是 UTC。
+  // 用 toISOString 会让套件在 UTC+8 的 00:00–07:59 每天红 4 条。
+  const today = localToday();
+  const mkRepo = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-clean-'));
+    const env = { ...process.env };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+    execFileSync('git', ['init', '-q'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: d, env });
+    fs.writeFileSync(path.join(d, 'STATE.md'), `# Loop State\n\nLast run: ${today}\n`);
+    fs.writeFileSync(path.join(d, 'init.sh'), '#!/usr/bin/env bash\nset -e\nnpm test\n');
+    fs.writeFileSync(path.join(d, '.gitignore'), 'node_modules/\n');
+    execFileSync('git', ['add', '-A'], { cwd: d, env });
+    execFileSync('git', ['commit', '-qm', 'init'], { cwd: d, env });
+    return d;
+  };
+
+  {
+    const d = mkRepo();
+    const r = runClean(['--state', d], d);
+    eq('U-12 干净仓库 → 0', r.code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'debug-login.log'), 'x\n');
+    const r = runClean(['--state', d], d);
+    eq('U-12 未跟踪的 *.log → 2', r.code, 2);
+    ok('U-12 调试文件被点名', /debug-login\.log/.test(r.out), r.out.slice(0, 300));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'debug-repro.ts'), 'x\n');
+    eq('U-12 未跟踪的 debug-* → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'tmp-scratch.txt'), 'x\n');
+    eq('U-12 未跟踪的 tmp-* → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // 已跟踪的 .log 是仓库资产，不是残留——只查未跟踪。
+    const d = mkRepo();
+    const env = { ...process.env };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+    fs.writeFileSync(path.join(d, 'audit.log'), 'x\n');
+    execFileSync('git', ['add', 'audit.log'], { cwd: d, env });
+    execFileSync('git', ['commit', '-qm', 'log'], { cwd: d, env });
+    eq('U-12 已跟踪的 .log 不算残留 → 0', runClean(['--state', d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // 普通未跟踪文件（源码、配置）不算调试残留。
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'new-feature.ts'), 'x\n');
+    eq('U-12 普通未跟踪文件不误报 → 0', runClean(['--state', d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'STATE.md'), '# Loop State\n\nLast run: 2020-01-01\n');
+    const r = runClean(['--state', d], d);
+    eq('U-12 Last run 不是今天 → 2', r.code, 2);
+    ok('U-12 旧时间戳被点名', /Last run/.test(r.out), r.out.slice(0, 300));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    fs.writeFileSync(path.join(d, 'init.sh'),
+      '#!/usr/bin/env bash\nset -e\necho "No package manifest detected."\n');
+    eq('U-12 init.sh 仍是占位 → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // 不在 git 仓库里：无法判断哪些是未跟踪文件 → 参数错误，不静默放行。
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-clean-ng-'));
+    fs.writeFileSync(path.join(d, 'STATE.md'), `Last run: ${today}\n`);
+    fs.writeFileSync(path.join(d, 'init.sh'), '#!/usr/bin/env bash\nset -e\nnpm test\n');
+    eq('U-12 非 git 目录 → 参数错误 1', runClean(['--state', d], d).code, 1);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // git 默认会把含空格/非 ASCII 的路径 C-quote 成 `"my folder/x.log"`。
+    // 用非 `-z` 输出时 basename 带引号，`.log` 匹配不上——静默放行。
+    const d = mkRepo();
+    fs.mkdirSync(path.join(d, 'my folder'));
+    fs.writeFileSync(path.join(d, 'my folder', 'x.log'), 'x\n');
+    eq('U-12 带空格的路径里的 .log → 2', runClean(['--state', d], d).code, 2);
+    fs.rmSync(d, { recursive: true, force: true });
+
+    const d2 = mkRepo();
+    fs.mkdirSync(path.join(d2, '我的目录'));
+    fs.writeFileSync(path.join(d2, '我的目录', 'x.log'), 'x\n');
+    eq('U-12 非 ASCII 路径里的 .log → 2', runClean(['--state', d2], d2).code, 2);
+    fs.rmSync(d2, { recursive: true, force: true });
+  }
+
+  {
+    // "今天"必须是本地日期。UTC+8 的凌晨，toISOString 会把它算成昨天。
+    const d = mkRepo();
+    const local = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const todayLocal = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`;
+    fs.writeFileSync(path.join(d, 'STATE.md'), `Last run: ${todayLocal}\n`);
+    eq('U-12 Last run 用本地日期 → 0', runClean(['--state', d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    eq('U-12 --state 缺值 → 参数错误 1', runClean(['--state', '--json'], d).code, 1);
+    eq('U-12 位置参数可用', runClean([d], d).code, 0);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    const d = mkRepo();
+    const j = runClean(['--state', d, '--json'], d);
+    const parsed = JSON.parse(j.out);
+    ok('U-12 --json 输出每项检查', Array.isArray(parsed.checks) && parsed.checks.length >= 3,
+      j.out.slice(0, 300));
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------- 20. worktree manifest（U-13）
+
+section('20. worktree manifest（U-13）');
+{
+  const runWt = (args, cwd) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [path.join(PACK_ROOT, 'scripts', 'worktree.mjs'), ...args],
+        { encoding: 'utf8', cwd });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  const mkRepo = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wt-'));
+    const env = { ...process.env };
+    for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: d, env });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: d, env });
+    fs.writeFileSync(path.join(d, 'a.txt'), 'x\n');
+    execFileSync('git', ['add', '-A'], { cwd: d, env });
+    execFileSync('git', ['commit', '-qm', 'init'], { cwd: d, env });
+    return { dir: d, env };
+  };
+  const gitOut = (args, cwd, env) => execFileSync('git', args, { cwd, encoding: 'utf8', env }).trim();
+  // 记录不存在时返回 null，让断言红而不是让整个套件抛异常——
+  // 一个崩掉的测试不会告诉人"哪个行为错了"。
+  const readManifestSafe = (dir) => {
+    try { return JSON.parse(readText(path.join(dir, '.loop-worktrees', 'manifest.json'))); }
+    catch { return null; }
+  };
+
+  {
+    const { dir, env } = mkRepo();
+    const r = runWt(['create', '--run-id', 't1', '--state', dir], dir);
+    eq('U-13 create → 0', r.code, 0);
+    ok('U-13 manifest 生成', fs.existsSync(path.join(dir, '.loop-worktrees', 'manifest.json')));
+    const manifest = readManifestSafe(dir) || { worktrees: [] };
+    const entry = manifest.worktrees.find((w) => w.id === 't1');
+    ok('U-13 manifest 记录 active', entry && entry.status === 'active', JSON.stringify(entry));
+    ok('U-13 worktree 目录存在', entry ? fs.existsSync(path.join(dir, entry.path)) : false);
+    ok('U-13 分支创建', gitOut(['branch', '--list', 'loop/t1'], dir, env).includes('loop/t1'));
+
+    // 同一 run-id 重复 create 必须拒绝
+    eq('U-13 重复 run-id → 非零', runWt(['create', '--run-id', 't1', '--state', dir], dir).code !== 0 ? 1 : 0, 1);
+
+    // 未提交改动时 cleanup 不得删除
+    if (!entry) {
+      ok('U-13 后续断言需要 manifest 条目', false, 'create 没有写入条目');
+    } else {
+    fs.writeFileSync(path.join(dir, entry.path, 'dirty.txt'), 'x\n');
+    runWt(['mark', '--run-id', 't1', '--status', 'rejected', '--state', dir], dir);
+    const clean = runWt(['cleanup', '--state', dir], dir);
+    eq('U-13 有未提交改动 → cleanup 报告而不删除', clean.code, 2);
+    ok('U-13 未提交改动被点名',
+      /modified or untracked|uncommitted|未提交|dirty/.test(clean.out), clean.out.slice(0, 300));
+    ok('U-13 worktree 仍在', fs.existsSync(path.join(dir, entry.path)));
+
+    // 清掉改动后可以删除
+    fs.rmSync(path.join(dir, entry.path, 'dirty.txt'));
+    eq('U-13 干净后 cleanup → 0', runWt(['cleanup', '--state', dir], dir).code, 0);
+    ok('U-13 worktree 目录已删', !fs.existsSync(path.join(dir, entry.path)));
+    ok('U-13 分支已删', !gitOut(['branch', '--list', 'loop/t1'], dir, env).includes('loop/t1'));
+    const after = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 manifest 移除条目', !after.worktrees.some((w) => w.id === 't1'));
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // active 状态的 worktree 永远不被 cleanup 扫到
+    const { dir, env } = mkRepo();
+    runWt(['create', '--run-id', 'live', '--state', dir], dir);
+    eq('U-13 active 不被 cleanup 删除', runWt(['cleanup', '--state', dir], dir).code, 0);
+    const m = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 active 条目仍在', m.worktrees.some((w) => w.id === 'live' && w.status === 'active'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // merged 也不自动删：合并后的分支可能还要人看
+    const { dir } = mkRepo();
+    runWt(['create', '--run-id', 'm1', '--state', dir], dir);
+    runWt(['mark', '--run-id', 'm1', '--status', 'merged', '--state', dir], dir);
+    eq('U-13 merged 不被 cleanup 自动删除', runWt(['cleanup', '--state', dir], dir).code, 0);
+    const m = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 merged 条目仍在', m.worktrees.some((w) => w.id === 'm1'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // 分支删不掉（被锁）时，条目不能从 manifest 里消失——否则分支永远残留，
+    // 而 manifest 说"已清理"。用 ref lock 强制这个失败。
+    const { dir, env } = mkRepo();
+    runWt(['create', '--run-id', 'locked', '--state', dir], dir);
+    runWt(['mark', '--run-id', 'locked', '--status', 'rejected', '--state', dir], dir);
+    const lockFile = path.join(dir, '.git', 'refs', 'heads', 'loop', 'locked.lock');
+    fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+    fs.writeFileSync(lockFile, '');
+    const r = runWt(['cleanup', '--state', dir], dir);
+    eq('U-13 分支删不掉 → cleanup exit 2', r.code, 2);
+    ok('U-13 分支残留被点名', /branch/.test(r.out), r.out.slice(0, 400));
+    const m = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 分支残留的条目仍在 manifest', m.worktrees.some((w) => w.id === 'locked'), JSON.stringify(m));
+    ok('U-13 分支仍存在', gitOut(['branch', '--list', 'loop/locked'], dir, env).includes('loop/locked'));
+
+    // 恢复路径必须存在：解锁后再 cleanup，条目与分支都要清掉。
+    // 否则条目永远卡在 manifest 里，没有任何出路。
+    fs.rmSync(lockFile, { force: true });
+    const again = runWt(['cleanup', '--state', dir], dir);
+    eq('U-13 解锁后 cleanup → 0', again.code, 0);
+    const m2 = readManifestSafe(dir) || { worktrees: [] };
+    ok('U-13 解锁后条目已移除', !m2.worktrees.some((w) => w.id === 'locked'), JSON.stringify(m2));
+    ok('U-13 解锁后分支已删', !gitOut(['branch', '--list', 'loop/locked'], dir, env).includes('loop/locked'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    const { dir } = mkRepo();
+    eq('U-13 未知 status → 参数错误', runWt(['mark', '--run-id', 'x', '--status', 'nope', '--state', dir], dir).code, 1);
+    eq('U-13 不存在的 run-id → 非零', runWt(['mark', '--run-id', 'nope', '--status', 'rejected', '--state', dir], dir).code !== 0 ? 1 : 0, 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    // 非 git 目录 → 参数错误
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-wt-ng-'));
+    eq('U-13 非 git 目录 → 1', runWt(['create', '--run-id', 'x', '--state', d], d).code, 1);
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+
+  {
+    // run-id 不能逃出 .loop-worktrees/
+    const { dir } = mkRepo();
+    eq('U-13 run-id 含路径分隔符 → 1', runWt(['create', '--run-id', '../evil', '--state', dir], dir).code, 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  {
+    const { dir } = mkRepo();
+    const j = runWt(['list', '--state', dir, '--json'], dir);
+    eq('U-13 list 空 manifest → 0', j.code, 0);
+    ok('U-13 list --json 是数组', Array.isArray(JSON.parse(j.out).worktrees), j.out.slice(0, 200));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ---------------------------------------------------------------- 汇总
 
 // 文档里声称的断言数必须与实测一致，否则"验证已完成"这句话本身就是不可信的。
 const docChecks = [
-  ['README.md', /\b(\d{3,4})\s*项断言/],
+  // 全局匹配：README 里有多处断言数声明，只读第一处会让第二处静默过期。
+  ['README.md', /\b(\d{3,4})\s*项断言/g],
 ];
 // 本节自身的断言尚未计入 passed，偏移量等于待检查的文档数。
 const DOC_OFFSET = docChecks.length;
 const expectedTotal = passed + failed + DOC_OFFSET;
 for (const [file, re] of docChecks) {
-  const m = fs.readFileSync(path.join(PACK_ROOT, file), 'utf8').match(re);
-  if (!m) {
+  const text = fs.readFileSync(path.join(PACK_ROOT, file), 'utf8');
+  const claimed = [...text.matchAll(re)].map((m) => Number(m[1]));
+  if (!claimed.length) {
     ok(`${file} 声称了断言数`, false, '未找到断言数声明');
     continue;
   }
-  ok(`${file} 声称的断言数与实测一致`, Number(m[1]) === expectedTotal, `文档写 ${m[1]}，实测 ${expectedTotal}`);
+  const stale = claimed.filter((n) => n !== expectedTotal);
+  ok(`${file} 声称的断言数与实测一致（全部 ${claimed.length} 处）`, stale.length === 0,
+    `文档写 ${stale.join('/')}，实测 ${expectedTotal}`);
 }
 
 process.stdout.write(`\n${'='.repeat(60)}\n`);

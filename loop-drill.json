@@ -1,0 +1,216 @@
+{
+  "schema": 1,
+  "tool": "harness-loop drill-check",
+  "guardrails": {
+    "breaker": {
+      "recordedAt": "2026-10-19T04:10:13.929Z",
+      "results": [
+        {
+          "id": "breaker.stagnation",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "stagnation",
+          "actual": "stagnation"
+        },
+        {
+          "id": "breaker.no-progress",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "no-progress",
+          "actual": "no-progress"
+        },
+        {
+          "id": "breaker.token-budget",
+          "direction": "sensitivity",
+          "outcome": "skipped",
+          "expected": "token-budget",
+          "actual": "no tokenBudget configured"
+        },
+        {
+          "id": "breaker.healthy",
+          "direction": "specificity",
+          "outcome": "passed",
+          "expected": "ok",
+          "actual": "ok"
+        }
+      ]
+    },
+    "gate": {
+      "recordedAt": "2026-10-19T04:10:13.925Z",
+      "input": {
+        "file": "loop-constraints.md",
+        "sha256": "f862653963542ca6ecfed3cc2ebc7c7df099a6369a88728f7a7f36bf73c64fdc"
+      },
+      "results": [
+        {
+          "id": "gate.denylist[.env]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching .env is blocked by .env",
+          "actual": "blocked by .env"
+        },
+        {
+          "id": "gate.denylist[.env.*]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching .env.sample is blocked by .env.*",
+          "actual": "blocked by .env.*"
+        },
+        {
+          "id": "gate.denylist[**/secrets/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching src/secrets/src/drill-file.txt is blocked by **/secrets/**",
+          "actual": "blocked by **/secrets/**"
+        },
+        {
+          "id": "gate.denylist[**/credentials/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching src/credentials/src/drill-file.txt is blocked by **/credentials/**",
+          "actual": "blocked by **/credentials/**"
+        },
+        {
+          "id": "gate.denylist[**/*_key*]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching src/drill_keysample is blocked by **/*_key*",
+          "actual": "blocked by **/*_key*"
+        },
+        {
+          "id": "gate.denylist[**/*_secret*]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching src/drill_secretsample is blocked by **/*_secret*",
+          "actual": "blocked by **/*_secret*"
+        },
+        {
+          "id": "gate.denylist[.terraform/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching .terraform/src/drill-file.txt is blocked by .terraform/**",
+          "actual": "blocked by .terraform/**"
+        },
+        {
+          "id": "gate.denylist[k8s/production/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching k8s/production/src/drill-file.txt is blocked by k8s/production/**",
+          "actual": "blocked by k8s/production/**"
+        },
+        {
+          "id": "gate.denylist[**/migrations/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching src/migrations/src/drill-file.txt is blocked by **/migrations/**",
+          "actual": "blocked by **/migrations/**"
+        },
+        {
+          "id": "gate.denylist[auth/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching auth/src/drill-file.txt is blocked by auth/**",
+          "actual": "blocked by auth/**"
+        },
+        {
+          "id": "gate.denylist[payments/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching payments/src/drill-file.txt is blocked by payments/**",
+          "actual": "blocked by payments/**"
+        },
+        {
+          "id": "gate.denylist[billing/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching billing/src/drill-file.txt is blocked by billing/**",
+          "actual": "blocked by billing/**"
+        },
+        {
+          "id": "gate.denylist[loop-constraints.md]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching loop-constraints.md is blocked by loop-constraints.md",
+          "actual": "blocked by loop-constraints.md"
+        },
+        {
+          "id": "gate.denylist[scripts/gate-check.mjs]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching scripts/gate-check.mjs is blocked by scripts/gate-check.mjs",
+          "actual": "blocked by scripts/gate-check.mjs"
+        },
+        {
+          "id": "gate.denylist[scripts/ledger-check.mjs]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching scripts/ledger-check.mjs is blocked by scripts/ledger-check.mjs",
+          "actual": "blocked by scripts/ledger-check.mjs"
+        },
+        {
+          "id": "gate.denylist[scripts/lib/common.mjs]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching scripts/lib/common.mjs is blocked by scripts/lib/common.mjs",
+          "actual": "blocked by scripts/lib/common.mjs"
+        },
+        {
+          "id": "gate.denylist[.github/workflows/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching .github/workflows/src/drill-file.txt is blocked by .github/workflows/**",
+          "actual": "blocked by .github/workflows/**"
+        },
+        {
+          "id": "gate.denylist[package.json]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching package.json is blocked by package.json",
+          "actual": "blocked by package.json"
+        },
+        {
+          "id": "gate.denylist[package-lock.json]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching package-lock.json is blocked by package-lock.json",
+          "actual": "blocked by package-lock.json"
+        },
+        {
+          "id": "gate.denylist[templates/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching templates/src/drill-file.txt is blocked by templates/**",
+          "actual": "blocked by templates/**"
+        },
+        {
+          "id": "gate.denylist[.githooks/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching .githooks/src/drill-file.txt is blocked by .githooks/**",
+          "actual": "blocked by .githooks/**"
+        },
+        {
+          "id": "gate.denylist[scripts/test.mjs]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching scripts/test.mjs is blocked by scripts/test.mjs",
+          "actual": "blocked by scripts/test.mjs"
+        },
+        {
+          "id": "gate.denylist[audits/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching audits/src/drill-file.txt is blocked by audits/**",
+          "actual": "blocked by audits/**"
+        },
+        {
+          "id": "gate.benign",
+          "direction": "specificity",
+          "outcome": "passed",
+          "expected": "src/app.ts is allowed",
+          "actual": "allowed"
+        }
+      ]
+    }
+  }
+}

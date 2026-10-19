@@ -47,15 +47,15 @@ node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null 2>&1 \
   || echo "  ledger-check  OK (placeholder ledger rejected)"
 # gate 阶段的 approve 需要证据文件（verdict 是断言，不是证据）。
 EVIDENCE_PROBE="$(mktemp)"
-printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → PASS\n\n### Checks not run\n- —\n' > "$EVIDENCE_PROBE"
+printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n\n### Checks not run\n- —\n' > "$EVIDENCE_PROBE"
 node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-  --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts \
+  --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts \
   --evidence-file "$EVIDENCE_PROBE" > /dev/null \
   && echo "  gate-check    OK (proceed path)"
 rm -f "$EVIDENCE_PROBE"
 # 无证据的 approve 必须被拦下
 node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-  --reviewed-sha abc123 --head-sha abc123 --diff-files a.ts > /dev/null 2>&1 \
+  --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts > /dev/null 2>&1 \
   && echo "  gate-check    BROKEN (approve without evidence should escalate)" \
   || echo "  gate-check    OK (evidence required)"
 node scripts/gate-check.mjs --item pr-1 --phase gate --verdict none --diff-files a.ts > /dev/null \

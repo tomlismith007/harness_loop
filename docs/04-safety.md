@@ -18,6 +18,9 @@
 
 未经人工批准，**绝不自动编辑**以下路径：
 
+> 本代码块与 `loop-constraints.md` 的 `## Paths` 必须逐条一致。
+> `harness-stage.mjs` 在阶段 2 判据里逐条比对两者；不一致即判失败。
+
 ```
 .env
 .env.*
@@ -31,6 +34,17 @@ k8s/production/**
 auth/**
 payments/**
 billing/**
+loop-constraints.md
+scripts/gate-check.mjs
+scripts/ledger-check.mjs
+scripts/lib/common.mjs
+.github/workflows/**
+package.json
+package-lock.json
+templates/**
+.githooks/**
+scripts/test.mjs
+audits/**
 ```
 
 ### 强制写入技能
@@ -63,7 +77,7 @@ billing/**
 
 允许列表写入 `loop-auto-merge-allowlist.md`，**必须逐条列出路径**。不接受 `docs/**` 这类宽松模式——那等于把整个文档树变成可自动写入区域。
 
-> **该文件目前不存在，也不在脚手架里生成。** 它只在真的要开启自动合并时才需要创建，而 `patterns/registry.yaml` 的 `defaults.auto_merge` 是全局 `false`——所以当前缺失是安全的：不存在任何可自动合并的路径。
+> **该文件目前不存在，也不在脚手架里生成。** 它只在真的要开启自动合并时才需要创建。当前没有任何代码路径会执行自动合并，所以缺失是安全的。
 
 启用自动合并前必须满足：
 - verifier 已连续两周可靠工作
@@ -145,6 +159,16 @@ billing/**
 
 ---
 
+## 回退测试（Red check）
+
+新增的测试必须能在**修复前的代码**上真的挂掉，且失败信息要指出是哪个行为错了。
+
+- 编译不过、测试被跳过、测试通过——都不算通过。
+- 为什么：这是唯一能区分"有效测试"和"永远通过的装饰性测试"的机械手段。
+- 闸门入口：`gate-check.mjs --red-check pass|fail|not-run`；默认 `not-run`，在 gate 阶段直接 escalate。
+
+---
+
 ## 事件响应：循环合并了有问题的代码
 
 按顺序执行：
@@ -159,17 +183,17 @@ billing/**
 
 ---
 
-## L3 前运行前安全检查（5 项）
+## 接入无人值守前的人工检查（5 项）
 
-启用无人值守运行前，逐项确认：
+本框架不授予 L3，**本节不改变等级判定**——L1/L2 由 `harness-stage.mjs` 的阶段判据给出（见 `docs/03-gates-and-levels.md`）。若你将来在本框架之外接入无人值守运行，先逐项确认：
 
 - [ ] 技能中已包含拒绝列表
-- [ ] 已关闭自动合并（默认就是关的：`defaults.auto_merge: false`），或配置了严格的逐条允许列表 `loop-auto-merge-allowlist.md`（该文件尚未创建，只在真要开启自动合并时才需要）
+- [ ] 自动合并保持关闭（默认就是关的），没有配置任何允许列表
 - [ ] 已审计连接器权限范围（确认没有 write 到生产）
 - [ ] 模式文档中已记录人工审核关卡
 - [ ] 已记录并测试过紧急停止开关
 
-**五项全过才允许 L3。** 任一项缺失，停在 L2。
+五项是无人值守的最低门槛，不是本框架的等级条件。
 
 ---
 
@@ -200,5 +224,5 @@ billing/**
 ## 下一步
 
 - 循环出错时的诊断 → [05-failure-modes.md](05-failure-modes.md)
-- 预算与熔断 → [06-cost-and-observability.md](06-cost-and-observability.md)
+- 预算与熔断 → [05-failure-modes.md](05-failure-modes.md) 第六节
 - 约束文件模板 → `loop-constraints.md`
