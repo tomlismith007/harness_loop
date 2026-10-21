@@ -143,6 +143,8 @@ jobs:
           echo "All CLI entry points respond."
 
       - name: Check for credential literals
+        # 同上：PowerShell 不认 bash 的 if/grep 语法。
+        shell: bash
         run: |
           # 源码与示例中不得出现可用的凭据字面量
           if grep -rEn "(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})" \
