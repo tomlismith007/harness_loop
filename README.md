@@ -109,7 +109,7 @@ user-scope 安装（`~/.claude/skills`）不计入。
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`，manifest 记状态 | 0 成功；2 有未提交改动未清理 |
 | `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗并包成 code span | 0 写入；2 自检失败 |
 | `state-commit.mjs` | 一轮结束时原子更新 `STATE.md` + `loop-run-log.md`（备份 → tmp → rename，失败回滚） | 0 写入；2 写入失败已回滚 |
-| `test.mjs` | 自检（613 项断言） | 0 全通过 |
+| `test.mjs` | 自检（614 项断言） | 0 全通过 |
 
 装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs`、`worktree.mjs` 与 `lib/common.mjs`。
 
@@ -189,7 +189,7 @@ user-scope 安装（`~/.claude/skills`）不计入。
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 613 项断言
+node scripts/test.mjs           # 614 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
@@ -202,7 +202,7 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 
 | 验证 | 方式 | 结果 | 可重跑？ |
 |---|---|---|---|
-| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 613 项断言全绿 | **是** |
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 614 项断言全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
 | 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |
