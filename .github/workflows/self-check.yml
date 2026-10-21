@@ -18,7 +18,13 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # 三个平台都跑：测试套件曾经用 POSIX 的 true/false 当夹具，
+    # 在 Windows 上必红，而 CI 只在 ubuntu 上跑，红了一年没人看见。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +34,12 @@ jobs:
 
       - name: Run test suite
         run: node scripts/test.mjs
+
+      - name: Stage gate (pack self-mode)
+        run: node scripts/harness-stage.mjs . --stage 1 --require --self
+
+      - name: Untrusted-input sanitizer self-test
+        run: node scripts/state-write.mjs --self-test
 
       - name: Verify scripts are executable entry points
         run: |

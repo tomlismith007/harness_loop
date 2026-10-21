@@ -33,9 +33,24 @@ kill switch → 加载约束 → 选定唯一一项 → 执行者（独立 workt
 
 ## 这个仓库解决什么问题
 
-1. **可靠性**：同一个模型，harness 不同，成功率能从 20% 到接近 100%——差别在指令、工具、环境、状态、反馈。
+1. **可靠性**：上游课程报告，在它的四次迭代里成功率从 20% 提升到 80–100%
+   （`learn-harness-engineering` lecture-02:77-85，通过逐步补齐五个子系统）。
+   同一课程也引用了 ETH Zurich 的研究指出仓库上下文文件并非普遍提升成功率，
+   且增加 20%+ 推理成本（lecture-02:100）。
+   **本仓库没有复现这个实验。本仓库验证的是闸门与脚本行为（见「已验证到什么程度」）。**
 2. **持续性**：会话结束即失忆。没有仓库内的持久状态，每一轮都要重新推导项目是什么、做到哪了。
-3. **自主性**：没人按"开始"键。`/harness-loop` 负责把选定的一项做完、做对、留下证据。
+3. **可重复性**：同一套流程可以反复跑，每次留下的状态能被下一轮读懂。
+   **本包不含调度器**——`/harness-loop` 由人触发，一次处理一个 work item。
+
+---
+
+## 这不是什么
+
+- **不是调度器。** 没有 cron、没有 `schedule:`、没有守护进程。循环由人开始。
+- **不是自动合并。** 没有任何代码路径执行 merge；合并永远由人做。
+- **不是 CI 的替代品。** 闸门检查的是"这一轮改动能不能继续"，不是"这个仓库长期健康"。
+- **不是 agent 行为评测。** 断言套件测的是脚本与闸门的形状，不是模型会不会绕过它们。
+  唯一的例外是护栏演练（`drill-check.mjs`），它证明拒绝列表与熔断器会响。
 
 ---
 
@@ -71,14 +86,17 @@ user-scope 安装（`~/.claude/skills`）不计入。
 
 | 阶段 | 目标 | 判据 | 等级 |
 |---|---|---|---|
-| **1 初始化** | 6 个地基文件，下一会话可重启 | 7 项，全机械 | L1 |
-| **2 装配 loop 机制** | 账本、运行日志、熔断、独立验证入口、护栏演练 | 7 机械 + 2 人工 | L2 |
+| **1 初始化** | 6 个地基文件（含 `harness-constraints.md`），下一会话可重启 | 7 项，全机械 | L1 |
+| **2 装配 loop 机制** | 账本、运行日志、熔断、独立验证入口、护栏演练、`loop-constraints.md` | 7 机械 + 2 人工 | L2 |
 
 **不要跳级。** 阶段 1 让文件存在，阶段 2 让机制**起作用**。`--upgrade` 有跳级保护，前一阶段未达成时拒绝写入。
 
+**两层可以分开用**：阶段 1 的产物不依赖任何 loop 机制——`gate-check.mjs` 在只有
+`harness-constraints.md` 的仓库里照样拦拒绝列表、读 kill switch。想要 loop 再加阶段 2。
+
 ---
 
-## 脚本（8 个）
+## 脚本（10 个）
 
 | 脚本 | 用途 | 退出码 |
 |---|---|---|
@@ -89,7 +107,9 @@ user-scope 安装（`~/.claude/skills`）不计入。
 | `drill-check.mjs` | 护栏演练：拒绝列表逐条命中 + 熔断器具体触发（`--record` 写 `loop-drill.json`） | 0 全过；2 护栏没响 |
 | `clean-state.mjs` | 结束前检查：init.sh 无占位、无调试残留、Last run 是今天 | 0 干净；2 有未清理项 |
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`，manifest 记状态 | 0 成功；2 有未提交改动未清理 |
-| `test.mjs` | 自检（484 项断言） | 0 全通过 |
+| `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗并包成 code span | 0 写入；2 自检失败 |
+| `state-commit.mjs` | 一轮结束时原子更新 `STATE.md` + `loop-run-log.md`（备份 → tmp → rename，失败回滚） | 0 写入；2 写入失败已回滚 |
+| `test.mjs` | 自检（611 项断言） | 0 全通过 |
 
 装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs`、`worktree.mjs` 与 `lib/common.mjs`。
 
@@ -102,40 +122,48 @@ user-scope 安装（`~/.claude/skills`）不计入。
 | # | 闸门 | 触发 | 决策 |
 |---|---|---|---|
 | 1 | `pause` | `loop-pause-all` 独占一行，或 `--pause` | exit 3 |
-| 2 | `denylist` | 改动命中拒绝列表 | escalate |
-| 3 | `max-attempts` | `--attempts ≥ 3` | escalate |
-| 4 | `scope` | 文件数 > 5（cleanup 为 10） | escalate |
-| 5 | `head-commit` | gate 阶段 sha 缺失或不一致 | escalate |
-| 6 | `red-check` | 回退测试 `fail` / `not-run` | escalate |
-| 7 | `verification-evidence` | `approve` 无证据、证据自相矛盾、缺 `Checks not run` 节 | escalate |
-| 8 | `verification` | 验证者 `reject` / `escalate-human` | escalate |
-| 9 | `awaiting-verification` | gate 阶段没有 verdict | escalate（与"验失败"区分） |
-| 10 | `wip-limit` | `STATE.md` 的 `## Active` 有多于一项 | escalate |
+| 2 | `wip-limit` | `STATE.md` 的 `## Active` 有多于一项，或表结构损坏 | escalate |
+| 3 | `denylist` | 改动命中拒绝列表（含 `.secrets/` 等隐藏目录） | escalate |
+| 4 | `untrusted-shape` | `STATE.md` 里带 `src:untrusted` 的条目没有包成 code span | escalate |
+| 5 | `scope` | 文件数超过 `loop-constraints.md` 的阈值（默认 5，cleanup 10） | escalate |
+| 6 | `head-commit` | gate 阶段 sha 缺失或不一致 | escalate |
+| 7 | `red-check` | 回退测试 `fail`；`behavior` 类改动的 `not-run` | escalate |
+| 8 | `verification-evidence` | `approve` 无证据、证据自相矛盾、缺 `Checks not run`、缺 `Author`/`Reviewed commit`、PASS 无输出片段 | escalate |
+| 9 | `verification` | 验证者 `reject` / `escalate-human` | escalate |
+| 10 | `awaiting-verification` | gate 阶段没有 verdict | escalate（与"验失败"区分） |
+
+「该不该继续试」不在这里判：尝试次数是账本的事实，由 `ledger-check.mjs --item <id>` 的 `attempt-limit` 判定（默认 3，可用 `--max-attempts` 或约束文件的「最多 N 次」覆盖）。
 
 ---
 
 ## 硬约束
 
-1. **写代码的人不能验证自己的代码。** 执行者与验证者必须是不同实例、不同指令。
-2. **同一事项最多尝试 3 次。** 之后升级给人，而不是继续循环。
-3. **没有机器可判定的停止条件，就不算一个循环。**
-4. **合并必须绑定审查过的 commit。** `--match-head-commit <sha>`——策略靠自觉，这个靠 git 拒绝。
-5. **新增测试必须通过回退测试。** 能在修复前的代码上真的挂掉，并指出是哪个行为错了。
-6. **未跑的检查必须显式列为 NOT RUN。**
-7. **触及拒绝列表路径立即升级**，不做任何编辑。
-8. **`loop-pause-all` 生效时立即退出。**
+**唯一真相源是 [`AGENTS.md`](AGENTS.md#硬约束不可协商) 的 11 条。** 这里只列摘要，不复制正文——
+两份清单各自演进过一次，结果 README 写 8 条、AGENTS.md 写 11 条且内容不同，
+而实际被注入生效的是 AGENTS.md。测试断言两边的条数一致。
+
+1. 执行者与验证者必须是不同实例
+2. 同一事项最多 3 次自动尝试
+3. 拒绝列表路径未经批准绝不自动编辑
+4. 没有显式允许列表时绝不自动合并
+5. 绝不为让 CI 变绿而禁用测试
+6. `loop-pause-all` 生效时立即退出
+7. 合并必须绑定审查过的 commit
+8. 新增测试必须通过回退测试
+9. 未跑的检查必须显式列为 NOT RUN
+10. 改了厂商接入必须真机验证
+11. "机械判定"的机制必须有真正读它的代码入口
 
 ---
 
-## 经验 → 规则棘轮
+## 经验 → 规则（人工，无机械棘轮）
 
-```
-本轮发生返工  → 在 LESSONS.md 记一行（Seen 1×）
-再次出现      → Seen 2×
-第三次出现    → 转正进 loop-constraints.md → 之后每轮逐条对
-```
+`LESSONS.md` 是**人读的错题本**：本轮发生返工时记一行，写清原因与证据。
+把一条经验转正进 `loop-constraints.md` 是**人的判断**，不是脚本判定。
 
-**延迟提升**是关键：一条经验第一次出现时不够格成为规则（可能是一次性偶发），出现 3 次才说明它是系统性的。
+**当前没有任何代码统计 `Seen N×` 或自动提示转正。** 此前 README 用一整节把它描述成
+自动棘轮，而实现为零——一条只存在于文档里的机制比没有更糟。等真的需要时再实现
+（触发条件：`LESSONS.md` 里出现 ≥ 3 条 `Seen 2×`）。
 
 ---
 
@@ -145,13 +173,14 @@ user-scope 安装（`~/.claude/skills`）不计入。
 .
 ├── AGENTS.md                  # harness 入口（路由器，不是百科）
 ├── STATE.md                   # 活状态：人类收件箱 + 当前活动
-├── LESSONS.md                 # 错题本：返工记录，经验→规则棘轮的载体
-├── loop-constraints.md        # 机器可读约束（拒绝列表/kill switch/闸门），每轮必读
+├── LESSONS.md                 # 错题本：返工记录（人读，转正靠人工判断）
+├── harness-constraints.md     # 阶段 1：拒绝列表 / 代码规则 / kill switch，每轮必读
+├── loop-constraints.md        # 阶段 2：验证 / 预算 / 教训 / 清理
 ├── loop-run-log.md            # 只追加运行日志
 ├── docs/                      # 方法论（7 篇）+ archive/（v1 结构，仅参考）
 ├── skills/                    # 4 个技能：两个建设阶段 + 顶层编排 + GitHub 发现
-├── templates/                 # 可直接复制进项目的 6 个模板（init.sh 由装配器生成）
-├── scripts/                   # 5 个零依赖 Node 脚本
+├── templates/                 # 可直接复制进项目的 8 个模板（init.sh 由装配器生成）
+├── scripts/                   # 10 个零依赖 Node 脚本 + lib/（装配时复制 6 个运行时脚本）
 └── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```
 
@@ -160,7 +189,7 @@ user-scope 安装（`~/.claude/skills`）不计入。
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 484 项断言
+node scripts/test.mjs           # 611 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
@@ -171,12 +200,15 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 
 ## 已验证到什么程度
 
-| 验证 | 方式 | 结果 |
-|---|---|---|
-| 两阶段装配 | 临时项目端到端 | 阶段 1 出 6 文件、阶段 2 出 2 文件，`--require` 退出 0 |
-| 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 |
-| `/harness-loop-issue` 发现 | 沙箱仓库 `harness-loop-sandbox` | 写入带完成标准的待办；确认只读 |
-| `/harness-loop-issue` CI 分类 | 沙箱里造的真实红 PR | `TypeError` 由该 PR 引入 → 判 **regression**，未误判为 env/flake |
+| 验证 | 方式 | 结果 | 可重跑？ |
+|---|---|---|---|
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 611 项断言全绿 | **是** |
+| 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
+| 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
+| 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |
+| `/harness-loop-issue` 发现 | 沙箱仓库 `harness-loop-sandbox` | 写入带完成标准的待办；确认只读 | 否（手工一次性） |
+| `/harness-loop-issue` CI 分类 | 沙箱里造的真实红 PR | `TypeError` 由该 PR 引入 → 判 **regression**，未误判为 env/flake | 否（手工一次性） |
+| **agent 行为层**（验证者会不会偷懒、执行者会不会伪造证据） | — | **未验证**。闸门能抓"报告说 PASS、命令实际失败"与"PASS 无输出片段"，抓不到"输出片段本身是编的" | — |
 
 真机验证抓出并修掉了两个框架 bug：闸门证据正则不接受技能文档里的报告格式；`install-skills --check` 把别家技能误报成清单残留。
 

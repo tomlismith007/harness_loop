@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -18,6 +19,16 @@ export const SKILLS_DIR = path.join(PACK_ROOT, 'skills');
  * 装配工具是 pack 级工具，技能必须能从清单找到 pack 再调用。
  */
 export const INSTALL_MANIFEST = '.harness-loop-install.json';
+
+/** pack 版本。安装清单与 --check 都读它，回答"宿主上装的是哪一版"。 */
+export const PACK_VERSION = (() => {
+  const p = path.join(PACK_ROOT, 'VERSION');
+  try {
+    return fs.readFileSync(p, 'utf8').trim() || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 /**
  * 两个路径是否指向同一个文件/目录。
@@ -58,6 +69,13 @@ export const DENYLIST_PATTERNS = [
 export const SKILL_DIRS = [
   '.claude/skills', '.agents/skills',
   '.zcode/skills', '.grok/skills', '.codex/skills',
+];
+
+/** 用户级技能目录。`install-skills --scope user` 装到这里，跨项目复用。 */
+export const USER_SKILL_DIRS = [
+  path.join(os.homedir(), '.claude', 'skills'),
+  path.join(os.homedir(), '.agents', 'skills'),
+  path.join(os.homedir(), '.codex', 'skills'),
 ];
 
 /** 忽略的目录 */
@@ -417,21 +435,86 @@ export function parseBudgetFrom(text) {
   return { tokenBudget: Number.isFinite(n) && n > 0 ? n : null };
 }
 
-/** 读项目的 loop-constraints.md 预算；读不到返回 null（不启用）。 */
+/** 读项目的预算；读不到返回 null（不启用）。 */
 export function loadBudget(root = '.') {
-  const p = path.join(root, 'loop-constraints.md');
-  if (!exists(p)) return { tokenBudget: null };
-  return parseBudgetFrom(readText(p));
+  for (const p of constraintsFiles(root)) {
+    const v = parseBudgetFrom(readText(p));
+    if (v.tokenBudget !== null) return v;
+  }
+  return { tokenBudget: null };
 }
 
-/** 读项目的 loop-constraints.md 拒绝列表；文件不存在或为空时回落到 JS 常量。 */
-export function loadDenylist(root = '.') {
-  const p = path.join(root, 'loop-constraints.md');
-  if (exists(p)) {
-    const parsed = parseDenylistFrom(readText(p));
-    if (parsed.length) return parsed;
+/**
+ * 约束文件的读取顺序。
+ *
+ * harness 与 loop 是两层：阶段 1 只有 harness-constraints.md（拒绝列表、
+ * 代码规则、沟通），阶段 2 追加 loop-constraints.md（验证、预算、教训）。
+ * 拆开后"只用 harness 不用 loop"才成立。
+ *
+ * 兼容：拆之前的仓库只有 loop-constraints.md，两个读取函数都回落它。
+ */
+export const HARNESS_CONSTRAINTS = 'harness-constraints.md';
+export const LOOP_CONSTRAINTS = 'loop-constraints.md';
+
+export function constraintsFiles(root = '.') {
+  return [HARNESS_CONSTRAINTS, LOOP_CONSTRAINTS]
+    .map((n) => path.join(root, n))
+    .filter((p) => exists(p));
+}
+
+/** 依次读多个约束文件，取第一个非空结果。 */
+function firstParsed(files, parse) {
+  for (const p of files) {
+    const v = parse(readText(p));
+    if (v !== null && v !== undefined) return v;
   }
-  return DENYLIST_PATTERNS;
+  return null;
+}
+
+/** 读项目的拒绝列表；两个文件都没有或都为空时回落到 JS 常量。 */
+export function loadDenylist(root = '.') {
+  const parsed = firstParsed(constraintsFiles(root), (t) => {
+    const v = parseDenylistFrom(t);
+    return v.length ? v : null;
+  });
+  return parsed || DENYLIST_PATTERNS;
+}
+
+/**
+ * 从约束文件读阈值：`## Code` 的「超过 N 个文件」与「最多 N 次」，
+ * `## Cleanup` 的「N 个文件」（可选）。
+ *
+ * 阈值是策略，和拒绝列表放在同一个文件。此前 maxFilesPerFix: 5 是脚本里的常量，
+ * 改约束文件对闸门毫无影响——文档说"5 是约束"，实现说"5 是常量"。
+ * 读不到时返回 null，由调用方回落到 DEFAULTS 并在输出里标出来源。
+ */
+export function parseLimitsFrom(text) {
+  const section = (name) => ((text || '').split(new RegExp(`^##\\s*${name}\\s*$`, 'm'))[1] ?? '').split(/^##\s/m)[0];
+  const code = section('Code');
+  const cleanup = section('Cleanup');
+  const num = (body, re) => {
+    const m = body.match(re);
+    if (!m) return null;
+    const n = Number(m[1]);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  return {
+    maxFilesPerFix: num(code, /超过\s*(\d+)\s*个文件/),
+    maxFilesPerCleanup: num(cleanup, /(\d+)\s*个文件/),
+    maxAttempts: num(code, /最多\s*(\d+)\s*次/),
+  };
+}
+
+/** 读项目的约束阈值；缺失项为 null。两个文件合并，先出现的非 null 值优先。 */
+export function loadLimits(root = '.') {
+  const out = { maxFilesPerFix: null, maxFilesPerCleanup: null, maxAttempts: null };
+  for (const p of constraintsFiles(root)) {
+    const v = parseLimitsFrom(readText(p));
+    for (const k of Object.keys(out)) {
+      if (out[k] === null && v[k] !== null) out[k] = v[k];
+    }
+  }
+  return out;
 }
 
 /** 判断路径是否命中拒绝列表 */
@@ -469,10 +552,17 @@ function globToRegex(pattern) {
   //     auth/** 要命中 src/auth/login.ts（嵌套 auth 同样敏感），
   //     但不能命中 tests/billing.test.ts（那是测试文件，不是 billing 目录）。
   //   * → 段内任意字符。
+  //   隐藏变体：字面量段允许前导点，`.secrets/` 与 `secrets/` 同等对待。
+  //     敏感目录最常见的形态恰恰是隐藏目录，而 `.` 不是 `/`，旧的段匹配
+  //     要求整段等于 `secrets`，于是 `.secrets/prod.json` 被静默放行。
   const dirTail = pattern.endsWith('/**');
   const core = dirTail ? pattern.slice(0, -3) : pattern;
   const anyDepth = core.startsWith('**/');
-  const body = (anyDepth ? core.slice(3) : core).replace(/\*/g, '[^/]*');
+  const body = (anyDepth ? core.slice(3) : core)
+    .split('/')
+    .map((seg) => (seg.includes('*') || seg.startsWith('.') ? seg : `\\.?${seg}`))
+    .join('/')
+    .replace(/\*/g, '[^/]*');
 
   if (dirTail) {
     const fileForm = anyDepth ? '(?:\\.[A-Za-z0-9]+)?' : '';
@@ -571,6 +661,29 @@ export function runWithTreeKill(cmd, args, opts = {}) {
       timedOut, spawnFailed, treeKill: false,
     };
   }
+}
+
+// ---------------------------------------------------------------- 不可信输入
+
+const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;
+export const MAX_UNTRUSTED_LENGTH = 160;
+
+/**
+ * 清洗第三方文本：去不可见字符、折叠空白、截断。
+ *
+ * issue 标题、review 评论、CI 日志会被抄进 STATE.md，而 STATE.md 是下一轮
+ * 第一个加载的输入——"洗过一遍再存"是这条通道上唯一可机械检查的动作。
+ * 清洗不等于信任：它只保证形状（单行、无控制字符、有长度上限），
+ * 语义上的"这是数据不是指令"仍靠阅读者。
+ */
+export function sanitizeUntrusted(value, max = MAX_UNTRUSTED_LENGTH) {
+  const s = String(value ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+/** 包成惰性 code span：即使被读进上下文，也不会被当成 Markdown 结构或指令。 */
+export function untrusted(value) {
+  return `\`${sanitizeUntrusted(value).replace(/`/g, "'")}\``;
 }
 
 // ---------------------------------------------------------------- 输出

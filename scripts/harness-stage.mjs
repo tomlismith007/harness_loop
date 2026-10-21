@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
-  PACK_ROOT, SKILLS_DIR, SKILL_DIRS, INSTALL_MANIFEST, parseDenylistFrom, detectProject,
+  PACK_ROOT, PACK_VERSION, SKILLS_DIR, SKILL_DIRS, USER_SKILL_DIRS, INSTALL_MANIFEST, parseDenylistFrom, detectProject,
   verificationCommands, initScriptFromCommands, textHas, structuredText, fail,
   samePath, runWithTreeKill,
 } from './lib/common.mjs';
@@ -133,9 +133,13 @@ function stripHtmlComments(text) {
  */
 function skillInDiscoverablePath(root, skillName, requiredText) {
   const dirs = SKILL_DIRS.filter((d) => d !== 'skills');
-  const file = dirs
-    .map((d) => path.join(root, d, skillName, 'SKILL.md'))
-    .find((p) => exists(p));
+  // 项目内优先；README 的快速开始是 `--scope user`，那条路径同样算"可发现"。
+  // 只认项目内会让主推路径永远到不了阶段 2。
+  const candidates = [
+    ...dirs.map((d) => path.join(root, d, skillName, 'SKILL.md')),
+    ...USER_SKILL_DIRS.map((d) => path.join(d, skillName, 'SKILL.md')),
+  ];
+  const file = candidates.find((p) => exists(p));
   if (!file) return false;
   const text = readText(file);
   // 没有 name + description frontmatter 的 SKILL.md 宿主不会加载——
@@ -157,7 +161,8 @@ const TEMPLATE_DENYLIST = [
   '.env', '.env.*', '**/secrets/**', '**/credentials/**',
   '**/*_key*', '**/*_secret*', '.terraform/**', 'k8s/production/**',
   '**/migrations/**', 'auth/**', 'payments/**', 'billing/**',
-  'loop-constraints.md', 'scripts/gate-check.mjs', 'scripts/ledger-check.mjs',
+  'harness-constraints.md', 'loop-constraints.md',
+  'scripts/gate-check.mjs', 'scripts/ledger-check.mjs',
   'scripts/lib/common.mjs', '.github/workflows/**', 'package.json',
   'package-lock.json', 'templates/**',
 ];
@@ -169,8 +174,10 @@ const TEMPLATE_DENYLIST = [
  * 判据：与模板原文有实质差异（增删了路径），才说明有人按本仓库调整过。
  */
 function denylistLocalized(root) {
-  const p = path.join(root, 'loop-constraints.md');
-  if (!exists(p)) return { localized: false, reason: 'loop-constraints.md 不存在' };
+  // 拒绝列表在 harness-constraints.md；旧仓库可能还只有 loop-constraints.md。
+  const p = ['harness-constraints.md', 'loop-constraints.md']
+    .map((n) => path.join(root, n)).find((f) => exists(f));
+  if (!p) return { localized: false, reason: 'harness-constraints.md 不存在' };
 
   // 解析逻辑与 gate-check 的强制执行共用 common.parseDenylistFrom。
   const lines = parseDenylistFrom(readText(p));
@@ -307,16 +314,18 @@ function runLogHasSection(root) {
  */
 function denylistDrift(root) {
   const docs = path.join(root, 'docs', '04-safety.md');
-  if (!exists(docs)) return { ok: true, reason: null, skipped: true };
+  // 没有第二份列表 → NOT RUN，不是 PASS。"不存在的文件被判一致"是 7 项机械
+  // 判据里的一项空转，而空转的判据比没有判据更糟：它看起来像通过。
+  if (!exists(docs)) return { ok: null, reason: 'docs/04-safety.md 不存在', skipped: true };
   const md = readText(docs);
   const heading = md.split(/^##\s*拒绝列表/m)[1];
-  if (heading === undefined) return { ok: true, reason: null, skipped: true };
+  if (heading === undefined) return { ok: null, reason: 'docs/04-safety.md 没有「## 拒绝列表」节', skipped: true };
   const block = (heading.split('```')[1] || '')
     .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
     .map((l) => l.split(/\s+#/)[0].trim()).filter(Boolean);
-  if (!block.length) return { ok: true, reason: null, skipped: true };
+  if (!block.length) return { ok: null, reason: 'docs/04-safety.md 的拒绝列表代码块为空', skipped: true };
 
-  const constraints = parseDenylistFrom(readText(path.join(root, 'loop-constraints.md')));
+  const constraints = parseDenylistFrom(readText(path.join(root, 'harness-constraints.md')));
   const a = new Set(constraints);
   const b = new Set(block);
   const missingInConstraints = block.filter((p) => !a.has(p));
@@ -331,11 +340,11 @@ function denylistDrift(root) {
   return { ok: true, reason: null };
 }
 
-/** 阶段 1 判据 */
-function checkStage1(root) {
+/** 阶段 1 判据。`opts.self` 见 detectSelfReference。 */
+function checkStage1(root, opts = {}) {
   const c = [];
-  const add = (label, ok, evidence, action, opts = {}) =>
-    c.push({ label, ok: Boolean(ok), evidence, action, ...(opts.notRun ? { notRun: true } : {}) });
+  const add = (label, ok, evidence, action, extra = {}) =>
+    c.push({ label, ok: ok === null ? null : Boolean(ok), evidence, action, ...(extra.notRun ? { notRun: true } : {}) });
 
   const instr = hasFile(root, 'AGENTS.md') || hasFile(root, 'CLAUDE.md');
   add('指令文件存在（AGENTS.md / CLAUDE.md）', instr,
@@ -350,12 +359,25 @@ function checkStage1(root) {
     hasFile(root, 'STATE.md') ? null : 'STATE.md 不存在',
     '复制 templates/STATE.md');
 
-  const selfRef = detectSelfReference(root);
+  const selfRef = opts.self ? { self: true, reason: 'SELF-MODE：init.sh 会回调 harness-stage，不执行（递归）' }
+    : detectSelfReference(root);
   const ph = initScriptHasPlaceholder(root);
+  // 自引用时不能执行 init.sh（会递归），但"语法正确"仍是机械可判的：
+  // 从"NOT RUN"升级成 `bash -n`，让包自身也有一条真正跑过的判据。
+  const syntaxOk = (() => {
+    const r = runWithTreeKill('bash', ['-n', path.join(root, 'init.sh')], { cwd: root, timeoutMs: 30000 });
+    if (r.ok) return { ok: true, reason: null };
+    // 没有 bash 是环境缺失，不是脚本错误：记为 NOT RUN，不伪装成失败。
+    if (r.spawnFailed) return { ok: null, notRun: true, reason: `无法执行 bash -n：${(r.stderr || '').trim().slice(0, 160)}` };
+    return { ok: false, reason: `bash -n init.sh 失败：${(r.stderr || '').trim().slice(0, 200)}` };
+  })();
   const runnable = ph.placeholder
     ? { ok: false, reason: ph.reason }
     : selfRef.self
-      ? { ok: false, notRun: true, reason: selfRef.reason }
+      // 自动识别到自引用时（没有 --self）保持三态里的 NOT RUN：执行者没有要求
+      // 走 self 模式，不能替它把一条没跑的判据升级成 PASS。
+      ? (opts.self ? { ...syntaxOk, notRun: false, selfMode: true }
+        : { ok: null, notRun: true, reason: selfRef.reason })
       : (() => {
         const initPath = path.join(root, 'init.sh');
         const r = runWithTreeKill('bash', [initPath], {
@@ -375,7 +397,8 @@ function checkStage1(root) {
         const treeNote = r.treeKill ? '' : '（注意：本平台无 GNU timeout，孙进程可能未被回收）';
         return { ok: false, reason: `init.sh 退出码 ${r.status}——启动路径跑不通：${out.trim().slice(0, 200)}${treeNote}` };
       })();
-  add('init.sh 存在、可执行且真的能跑通', !ph.placeholder && runnable.ok,
+  add(runnable.selfMode ? 'init.sh 存在且语法正确（SELF-MODE：不执行，避免递归）' : 'init.sh 存在、可执行且真的能跑通',
+    !ph.placeholder && runnable.ok,
     runnable.ok ? null : runnable.reason,
     runnable.notRun
       ? '这一项没跑完（见 evidence）。在消费方仓库上重跑，或修掉自引用后重试'
@@ -387,8 +410,8 @@ function checkStage1(root) {
     wr.declared ? null : wr.reason,
     '在 AGENTS.md 的「工作规则」章节写明这三条不变式');
 
-  add('约束文件存在（loop-constraints.md：拒绝列表与闸门）', hasFile(root, 'loop-constraints.md'), null,
-    '复制 templates/loop-constraints.md。阶段 1 就要有底线：没有拒绝列表意味着 agent 可以编辑 .env');
+  add('约束文件存在（harness-constraints.md：拒绝列表与闸门）', hasFile(root, 'harness-constraints.md'), null,
+    '复制 templates/harness-constraints.md。阶段 1 就要有底线：没有拒绝列表意味着 agent 可以编辑 .env');
 
   add('错题本存在（LESSONS.md）', hasFile(root, 'LESSONS.md'), null,
     '复制 templates/LESSONS.md。没有它，返工不会被记录，经验无法转正');
@@ -396,11 +419,11 @@ function checkStage1(root) {
   return c;
 }
 
-/** 阶段 2 判据 */
-function checkStage2(root) {
+/** 阶段 2 判据。`opts.self` 见 detectSelfReference。 */
+function checkStage2(root, opts = {}) {
   const c = [];
-  const add = (label, ok, evidence, action, human = false) =>
-    c.push({ label, ok: Boolean(ok), evidence, action, human });
+  const add = (label, ok, evidence, action, human = false, extra = {}) =>
+    c.push({ label, ok: ok === null ? null : Boolean(ok), evidence, action, human, ...extra });
 
   const ledger = ledgerIsReal(root);
   add('熔断账本就位（loop-ledger.json，goal 已替换）', ledger.ok, ledger.reason,
@@ -422,19 +445,23 @@ function checkStage2(root) {
   add('验证命令是真实的（无占位符）', !ph.placeholder, ph.reason,
     '编辑 init.sh，把占位命令换成项目实际命令');
 
-  const dl = denylistLocalized(root);
+  // 包自身就是模板的源头：它的拒绝列表必然与模板相同，这条判据在这里
+  // 永远不可能通过。标 N/A 而不是 FAIL——永久红会让整个报告失去参考价值。
+  const dl = opts.self
+    ? { localized: null, na: true, reason: 'N/A：pack 是模板源头，拒绝列表与模板相同是预期' }
+    : denylistLocalized(root);
   add('拒绝列表已本地化（非模板原文）', dl.localized, dl.reason,
-    '按本仓库实际情况增删拒绝路径：加上真实的高危目录，删掉不存在的');
+    '按本仓库实际情况增删拒绝路径：加上真实的高危目录，删掉不存在的', false, { na: dl.na });
 
   const drift = denylistDrift(root);
-  add('两份拒绝列表一致（loop-constraints.md ↔ docs/04-safety.md）', drift.ok, drift.reason,
+  add('两份拒绝列表一致（harness-constraints.md ↔ docs/04-safety.md）', drift.ok, drift.reason,
     '两边逐条对齐：文档说禁止的路径，机器必须也禁止');
 
   // 护栏必须被证明会响，而不只是存在。记录绑定约束文件的 sha256：
   // 改了策略而没重跑 drill，旧记录不再证明任何东西。
   const drill = recordStatus(root);
   const drillOk = drill.present && !drill.stale && drill.failed.length === 0;
-  add('护栏演练通过（loop-drill.json 与当前约束一致、无失败项）', drillOk,
+  add('护栏演练通过（拒绝列表/熔断器/验证者 canary，记录与当前约束一致）', drillOk,
     drillOk ? null
       : drill.reason
         || `演练有 ${drill.failed.length} 项失败：${drill.failed.join(', ')}`,
@@ -452,14 +479,20 @@ function checkStage2(root) {
   return c;
 }
 
+/** 判据函数接受 (root, opts)；opts.self 表示目标就是 pack 自身。 */
 export const STAGE_CHECKS = { 1: checkStage1, 2: checkStage2 };
 
 // ---------------------------------------------------------------- 阶段检测
 
-/** 返回某阶段是否达成（忽略人工确认项）。memo 可选——传了就不重算判据 */
-export function stageComplete(stageId, root, memo) {
-  const checks = memo ? memo.get(stageId) : STAGE_CHECKS[stageId](root);
-  return checks.filter((c) => !c.human).every((c) => c.ok);
+/**
+ * 返回某阶段是否达成。
+ *
+ * 人工项不参与（它们不是机械判据），NOT RUN（ok === null）也**不**算达成：
+ * "没跑"与"通过"必须可区分，否则跳过的判据会静默变成绿灯。
+ */
+export function stageComplete(stageId, root, memo, opts = {}) {
+  const checks = memo ? memo.get(stageId) : STAGE_CHECKS[stageId](root, opts);
+  return checks.filter((c) => !c.human && !c.na).every((c) => c.ok === true);
 }
 
 /** 检测当前处于哪个阶段（已完成的最高阶段） */
@@ -478,11 +511,11 @@ export function detectStage(root, memo) {
  * 判据 4 会真的执行 init.sh；checksByStage、detectStage、JSON 输出各调一次
  * 就是执行三遍（实测一个挂起的脚本因此耗时 6 分钟）。同一进程内算一次就够。
  */
-function memoStageChecks(root) {
+function memoStageChecks(root, opts = {}) {
   const cache = {};
   return {
     get(id) {
-      if (!cache[id]) cache[id] = STAGE_CHECKS[id](root);
+      if (!cache[id]) cache[id] = STAGE_CHECKS[id](root, opts);
       return cache[id];
     },
   };
@@ -501,12 +534,17 @@ const STAGE1_FILES = [
   ['feature_list.json', 'feature_list.json'],
   ['STATE.md', 'STATE.md'],
   ['LESSONS.md', 'LESSONS.md'],
-  ['loop-constraints.md', 'loop-constraints.md'],
+  // 约束拆两层：阶段 1 只有 harness 底线，阶段 2 追加 loop 规则。
+  ['harness-constraints.md', 'harness-constraints.md'],
+  // 验证者报告的格式模板：没有它，独立验证只能靠人即兴发挥，
+  // 而闸门要求的 Author / Reviewed commit / 输出片段就无从对齐。
+  ['verifier-report.md', 'verifier-report.md'],
 ];
 
 /** 阶段 2 产出 loop 机制文档。账本在 upgrade() 里单独创建。 */
 const STAGE2_FILES = [
   ['loop-run-log.md', 'loop-run-log.md'],
+  ['loop-constraints.md', 'loop-constraints.md'],
 ];
 
 /** 技能安装目录：两个宿主路径都装（Claude Code 与跨 agent 约定）。 */
@@ -541,6 +579,7 @@ function writeInstallManifest(target, results) {
     fs.writeFileSync(dest, JSON.stringify({
       installedAt: new Date().toISOString(),
       packRoot: PACK_ROOT,
+      packVersion: PACK_VERSION,
       scope: 'workspace',
       layout: 'both',
       skills: ['harness-init', 'harness-loop-init', 'harness-loop', 'harness-loop-issue'],
@@ -558,7 +597,7 @@ function writeInstallManifest(target, results) {
  * 不复制：`test.mjs`（源仓库自检套件）、`install-skills.mjs` 与
  * `harness-stage.mjs`（装配工具，依赖 pack 内的 templates/ 与 skills/）。
  */
-const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'clean-state.mjs', 'worktree.mjs'];
+const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'clean-state.mjs', 'worktree.mjs', 'state-write.mjs', 'state-commit.mjs'];
 
 function copyRuntimeScripts(root, force, results) {
   const packScripts = path.join(PACK_ROOT, 'scripts');
@@ -646,7 +685,7 @@ function upgrade(root, targetStage, force, results, opts = {}) {
 function renderReport(root, current, checksByStage, memo) {
   const lines = [];
   const next = STAGES.find((s) => s.id === current + 1);
-  lines.push(`Harness Stage Report — ${root}`);
+  lines.push(`harness-loop v${PACK_VERSION} — Harness Stage Report — ${root}`);
   lines.push('');
   lines.push(`Current stage: ${current === 0 ? '0（尚无 harness）' : `${current} ${STAGES[current - 1].name}`}`);
   lines.push(`Next stage:    ${next ? `${next.id} ${next.name}（${next.en}）` : '— 已完成全部两个阶段'}`);
@@ -654,15 +693,16 @@ function renderReport(root, current, checksByStage, memo) {
 
   for (const stage of STAGES) {
     const checks = checksByStage[stage.id];
-    const mechanical = checks.filter((c) => !c.human);
-    const done = mechanical.filter((c) => c.ok).length;
+    const mechanical = checks.filter((c) => !c.human && !c.na);
+    const done = mechanical.filter((c) => c.ok === true).length;
     const state = stageComplete(stage.id, root, memo) ? 'COMPLETE' : (current + 1 === stage.id ? 'IN PROGRESS' : 'NOT STARTED');
     lines.push(`── 阶段 ${stage.id} · ${stage.name}（${stage.en}） [${state}] ${done}/${mechanical.length}`);
     lines.push(`   目标：${stage.goal}`);
     lines.push(`   对应等级：${stage.level}`);
     for (const c of checks) {
       // 三态：PASS / FAIL / NOT RUN。没跑的检查必须显式列出来。
-      const mark = c.human ? 'HUMAN' : (c.ok ? 'PASS ' : (c.notRun ? 'NOT RUN' : 'FAIL '));
+      // 三态：PASS / FAIL / NOT RUN。ok === null 是 NOT RUN，不是 PASS。
+      const mark = c.human ? 'HUMAN' : c.na ? 'N/A  ' : (c.ok === true ? 'PASS ' : (c.ok === null || c.notRun ? 'NOT RUN' : 'FAIL '));
       lines.push(`   ${mark}  ${c.label}`);
       if (!c.human && !c.ok) {
         if (c.evidence) lines.push(`          evidence: ${c.evidence}`);
@@ -708,6 +748,9 @@ Options:
                     means the stage-1 criterion that actually runs the startup
                     script fails for the wrong reason.
   --package-manager PM   Force npm|pnpm|yarn|bun instead of auto-detecting
+  --self          Target is the harness pack itself: init.sh is syntax-checked
+                  instead of run (it would recurse), and the denylist-localization
+                  criterion is N/A because the pack is the template source.
   --json          JSON output
   --help          Show this help
 
@@ -721,8 +764,15 @@ Exit codes:
   const root = path.resolve(typeof args._[0] === 'string' ? args._[0] : '.');
   if (!exists(root)) fail(`target not found: ${root}`);
 
+  // --self 只在目标确实是 pack 自身时生效：否则它会变成"跳过判据"的开关。
+  const selfMode = Boolean(args.self);
+  if (selfMode && !exists(path.join(root, 'scripts', 'harness-stage.mjs'))
+    && !samePath(root, PACK_ROOT)) {
+    fail('--self only applies to the harness pack itself (no scripts/harness-stage.mjs here)', 1);
+  }
+
   // 判据只算一次：判据 4 会真的执行 init.sh，重复计算 = 重复执行。
-  const memo = memoStageChecks(root);
+  const memo = memoStageChecks(root, { self: selfMode });
   const checksByStage = {};
   for (const s of STAGES) checksByStage[s.id] = memo.get(s.id);
   const current = detectStage(root, memo);
@@ -751,7 +801,8 @@ Exit codes:
       const unmet = [];
       for (let s = 1; s < to; s++) {
         const checks = checksByStage[s] || [];
-        if (!checks.every((c) => c.ok || c.human)) unmet.push(s);
+        // NOT RUN 不算达成：跳级保护的输入必须是"确实跑过且通过"。
+        if (!checks.every((c) => c.ok === true || c.human || c.na)) unmet.push(s);
       }
       if (unmet.length) {
         process.stderr.write(

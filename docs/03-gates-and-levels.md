@@ -1,6 +1,6 @@
 # 03 · 闸门与等级：什么条件下允许做什么
 
-本文档定义 L1–L2 两个阶段等级、10 道闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
+本文档定义 L1–L2 两个阶段等级、闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
 
 ---
 
@@ -23,11 +23,15 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ---
 
-## 10 道闸门
+## 闸门
 
-闸门是"允许继续"的条件。任一不通过，work item 进入 `escalated`。代码里的 gate 名共 10 个：
-`pause`、`denylist`、`max-attempts`、`scope`、`head-commit`、`red-check`、
-`verification-evidence`、`verification`、`awaiting-verification`、`wip-limit`。
+闸门是"允许继续"的条件。任一不通过，work item 进入 `escalated`。代码里的 gate 名共 10 个
+（顺序即判定顺序，由 `gate-check.mjs` 的 `GATE_ORDER` 定义，测试断言本文与它一致）：
+`pause`、`wip-limit`、`denylist`、`untrusted-shape`、`scope`、`head-commit`、`red-check`、
+`verification-evidence`、`verification`、`awaiting-verification`。
+
+「该不该继续试」不在这里判：尝试次数是账本的事实，归 `ledger-check.mjs --item <id>` 的
+`attempt-limit`（默认 3）。闸门只看这次改动本身。
 
 ### 1. 拒绝列表闸门（Denylist Gate）
 
@@ -54,13 +58,14 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 **为什么**：范围蔓延是 agent 的典型失败模式。表现为改了 12 个文件、800 行代码，却没有一条端到端可用的路径。小 diff 是可靠性的前提。
 
-### 3. 尝试上限闸门（Max Attempts Gate）
+### 3. 尝试上限（Attempt Limit）—— 由熔断器判定，不是闸门
 
-**判定**：`attempts >= 3`。
+**判定**：`loop-ledger.json` 里该 item 的尝试数 ≥ 3（`ledger-check.mjs --item <id>`）。
 
 **动作**：强制 `escalated`，**覆盖其他所有规则**。
 
 **为什么**：三次尝试不成功说明问题不在实现细节，而在理解层面——可能是根因判断错了、需求不清楚、或者是环境问题。继续重试只会烧 token 并污染状态。
+计数必须来自账本：曾经这条判定读的是命令行参数 `--attempts`，传 0 就能在账本已有 5 次失败时继续。
 
 熔断器的三个阈值（见 `docs/05-failure-modes.md` 第六节）：
 
@@ -82,19 +87,6 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 | 发现测试被禁用/跳过/注释 | `REJECT` + 记录为作弊 |
 
 **为什么**：写代码的模型给自己打分系统性偏高。这不是诚实问题，是生成模型的性质——它在生成过程中说服了自己。
-
-### 5. 预算闸门（Budget Gate）
-
-预算写在 `loop-constraints.md` 的 `## Budget` 段，由 `ledger-check.mjs` 读取；`0` 表示不启用。
-
-**判定**：今日 token 花费占日上限的比例。
-
-| 花费 | 动作 |
-|---|---|
-| < 80% | 正常运行 |
-| ≥ 80% | `report-only`：不派发执行子智能体 |
-| ≥ 100% | 立即退出 |
-| `loop-pause-all` | 立即退出 |
 
 ### 6. 合并闸门（Merge Gate）—— 默认关闭
 
@@ -119,19 +111,21 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ```
 1.  loop-pause-all 生效？          → exit 3（gate-check 读 --state 目录）
-2.  触及拒绝列表？                  → escalate（不执行编辑）
-3.  attempts >= 3？                → escalate
-4.  改动 > 5 文件（清理类 > 10）？   → escalate
-5.  gate 阶段 sha 缺失 / 不一致？    → escalate（约束 7）
-6.  回退测试 fail / not-run？        → escalate（约束 8）
-7.  approve 但证据缺失 / 自相矛盾 / 缺 Checks not run？ → escalate
-8.  verifier reject / escalate-human？ → escalate
-9.  gate 阶段无 verdict？            → escalate（awaiting-verification）
-10. `## Active` 多于一项？            → escalate（wip-limit）
-11. 预算 ≥80% / ≥100%？              → report-only / exit
+2.  `## Active` 多于一项 / 表损坏？  → escalate（wip-limit）
+3.  触及拒绝列表？                  → escalate（不执行编辑）
+4.  第三方条目未包成 code span？     → escalate（untrusted-shape）
+5.  改动超过约束文件的文件数阈值？    → escalate（scope）
+6.  gate 阶段 sha 缺失 / 不一致？    → escalate（约束 7）
+7.  回退测试 fail；behavior 类 not-run？ → escalate（约束 8）
+8.  approve 但证据缺失 / 自相矛盾 / 缺 Checks not run / 无输出片段？ → escalate
+9.  verifier reject / escalate-human？ → escalate
+10. gate 阶段无 verdict？            → escalate（awaiting-verification）
 ```
 
-顺序有讲究：**退出类判定在最前**（避免在应该停的时候还在分析），**拒绝列表在尝试上限之前**（安全优先于效率）。
+预算（`## Budget`）与尝试上限由 `ledger-check.mjs` 判定，不属于闸门：
+`report-only` 是它的 verdict，不是闸门的 decision。
+
+顺序有讲究：**退出类判定在最前**（避免在应该停的时候还在分析），**WIP 与拒绝列表在内容检查之前**（前置条件与安全优先于效率）。
 
 第 5、6 条对应 `loop-constraints.md` 的两条硬约束，此前本文档完全没有列出——
 读者按这份清单理解闸门会漏掉它们。第 7 条在 `--phase gate` 且 verdict 为 `approve` 时
@@ -149,7 +143,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 | 拒绝列表命中 | **机械** | `gate-check.mjs` 读 `loop-constraints.md` 的 `## Paths` |
 | 文件数超限 | **机械** | `gate-check.mjs` 数 diff 清单 |
 | head-commit 一致 | **机械** | 字符串比对两个 sha |
-| 回退测试结论 | **机械** | 读 `--red-check` 的值 |
+| 回退测试结论 | **机械** | 读 `--red-check` 的值；`behavior` 类强制，其余三类要求报告里写理由 |
 | kill switch | **机械** | `gate-check.mjs --state` 读 `STATE.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` |
 | **改动是否与 work item 相关** | **人工** | 脚本不知道 work item 的目标，无法判定"范围蔓延" |
 | **verdict 是否诚实** | **半机械** | 闸门会重放证据里的命令并比对退出码；能抓"报告说 PASS、命令实际失败"，抓不到"命令覆盖不到这次改动" |
@@ -213,7 +207,7 @@ node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state .
 此前文档里的示例输出不可能由文档里的命令产生——说明那个示例从未被执行过，
 而这正是"文档说 A、代码做 B"这类漂移最容易藏身的地方。
 
-`decision` 枚举：`proceed` | `escalate` | `exit`（预算降级由 `ledger-check.mjs` 以 `verdict: report-only` 表达）
+`decision` 枚举：`proceed` | `escalate` | `exit`。
 
 **退出码**：`0` = `proceed`；`2` = `escalate`；`3` = `exit`。
 **参数错误（未知标志、非法枚举值、非数字阈值）退出 `1`**——它不属于上面四态，
@@ -229,7 +223,7 @@ v2 移除了 0–100 的就绪度评分（它被技能存在性抬高，分数�
 | 等级 | 判据 |
 |---|---|
 | L1 | 阶段 1 的 7 项全过：6 个地基文件 + `init.sh` 真的能跑通 |
-| L2 | 阶段 2 的 7 项机械判据全过：账本、运行日志、验证入口、真实命令、本地化拒绝列表、两份拒绝列表一致、护栏演练记录 |
+| L2 | 阶段 2 的机械判据全过：账本、运行日志、验证入口、真实命令、本地化拒绝列表、两份拒绝列表一致、护栏演练记录。`NOT RUN` 不算通过 |
 
 没有 L3。无人值守不是靠分数授予的——它需要事件接线与长期运行记录，本框架不再假装能机械判定。
 

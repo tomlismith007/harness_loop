@@ -55,8 +55,9 @@
 
 ## 五构件 + 记忆层（Loop 层）
 
-> 参考仓库自身有两种数法：`docs/concepts.md` 写"六原语（+ 记忆）"，`docs/primitives.md`
-> 写"Five Primitives + Memory"。本框架采用后者的结构：记忆是贯穿层，不与其余五个并列。
+> 上游参考仓库自身有两种数法：`docs/concepts.md` 写"六原语（+ 记忆）"，`docs/primitives.md`
+> 写"Five Primitives + Memory"（两者都是上游仓库的文件，本仓库没有）。
+> 本框架采用后者的结构：记忆是贯穿层，不与其余五个并列。
 
 **Automation（自动化/调度）**
 循环的心跳。没有调度，循环只是你手动跑的一次性运行。形式：`/loop`、cron、GitHub Actions、事件触发器。
@@ -109,9 +110,10 @@ work item 的处理步骤：`intake` / `review` / `fix` / `verify` / `gate` / `p
 ## 闸门与等级
 
 **Gate（闸门）**
-"允许继续"的条件。代码里有 9 个 gate 名：pause、denylist、max-attempts、scope、
+"允许继续"的条件。代码里有 10 个 gate 名：pause、wip-limit、denylist、untrusted-shape、scope、
 head-commit、red-check、verification-evidence、verification、awaiting-verification。
-文档按章节叙述（拒绝列表、范围、尝试上限、验证、预算、合并），与代码 gate 名的对应关系见 `docs/03-gates-and-levels.md`。
+尝试上限与预算**不是闸门**，由 `ledger-check.mjs` 判定（`attempt-limit` / `report-only`）。
+与代码 gate 名的对应关系见 `docs/03-gates-and-levels.md`；顺序由 `GATE_ORDER` 定义并被测试断言。
 
 **Denylist（拒绝列表）**
 未经人工批准绝不自动编辑的路径：`.env*`、`secrets/`、`credentials/`、`auth/`、`payments/`、`billing/`、`.terraform/`、`k8s/production/`、`migrations/`。

@@ -14,12 +14,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { parseArgs, readJson, printJson, fail, rejectUnknownFlags, loadBudget } from './lib/common.mjs';
+import { parseArgs, readJson, printJson, fail, rejectUnknownFlags, loadBudget, loadLimits } from './lib/common.mjs';
 
 export const DEFAULT_BREAKER = {
   maxIterations: 10,
   stagnationThreshold: 3,
   noProgressThreshold: 5,
+  maxAttempts: 3,
 };
 
 /**
@@ -120,6 +121,32 @@ export function checkLedger(ledger, opts = {}) {
   const attempts = opts.pattern
     ? all.filter((a) => a.pattern === opts.pattern || a.item === opts.pattern)
     : all;
+
+  // 尝试上限：数**这个 item** 的尝试，来源是账本而不是命令行参数。
+  // 此前这条判定在 gate-check 里读 `--attempts`，调用方写 0 就能在账本已有
+  // 5 次失败时继续——两个状态源之间没有唯一真相，等于没有上限。
+  const maxAttempts = opts.maxAttempts ?? DEFAULT_BREAKER.maxAttempts;
+  if (opts.item) {
+    const itemAttempts = all.filter((a) => a.item === opts.item).length;
+    if (itemAttempts >= maxAttempts) {
+      return {
+        iterations: itemAttempts,
+        consecutive_failures: 0,
+        tokens_used: 0,
+        last_error_signature: null,
+        thresholds: {
+          max_iterations: maxIterations,
+          stagnation: stagnationThreshold,
+          no_progress: noProgressThreshold,
+          token_budget: tokenBudget,
+          max_attempts: maxAttempts,
+        },
+        verdict: 'attempt-limit',
+        exit_code: 2,
+        next: `STOP — ${opts.item} 已在账本里尝试 ${itemAttempts} 次（上限 ${maxAttempts}）。升级给人，不要再试。`,
+      };
+    }
+  }
   if (opts.pattern && all.length && attempts.length === 0) {
     return {
       ...unreadableLedger(`账本有 ${all.length} 条记录，但没有一条属于 pattern '${opts.pattern}'`,
@@ -280,6 +307,10 @@ export function renderEscalation(ledger, result) {
     case 'max-iterations':
       lines.push(`${result.iterations} iterations reached the limit of ${result.thresholds.max_iterations}.`);
       break;
+    case 'attempt-limit':
+      lines.push(`${result.iterations} attempts recorded for this item (limit ${result.thresholds.max_attempts}).`);
+      lines.push('The attempt count comes from the ledger, so it cannot be reset by passing a smaller number.');
+      break;
     case 'no-ledger':
       lines.push(`The ledger could not be read: ${result.unreadable_reason}.`);
       lines.push('A circuit breaker with no readable state cannot judge whether the loop is stuck,');
@@ -322,8 +353,8 @@ export function renderEscalation(ledger, result) {
 function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
-    'ledger', 'stagnation', 'noProgress', 'maxIterations', 'tokenBudget',
-    'pattern', 'escalation', 'constraintsRoot', 'json', 'help',
+    'ledger', 'stagnation', 'noProgress', 'maxIterations', 'maxAttempts', 'tokenBudget',
+    'item', 'pattern', 'escalation', 'constraintsRoot', 'json', 'help',
   ], 'ledger-check');
   if (args.help) {
     process.stdout.write(`ledger-check — loop circuit breaker
@@ -337,6 +368,11 @@ Options:
   --no-progress <n>      Consecutive-failure threshold (default: 5)
   --max-iterations <n>   Total iteration limit (default: 10)
   --token-budget <n>     Token budget for this loop
+  --item <id>            Enforce the per-item attempt limit from the ledger
+                         (default 3; override with --max-attempts). The count comes
+                         from loop-ledger.json, not from a caller-supplied number.
+  --max-attempts <n>     Per-item attempt limit (default: 3, or "最多 N 次" in
+                         loop-constraints.md ## Code)
   --pattern <id>         Only judge attempts belonging to this loop. A shared ledger
                          would otherwise let one loop's failures trip another's breaker.
   --escalation           Emit an escalation markdown document
@@ -389,6 +425,14 @@ Exit codes:
   if (args.maxIterations !== undefined) opts.maxIterations = numArg(args.maxIterations, '--max-iterations');
   if (args.tokenBudget !== undefined) opts.tokenBudget = numArg(args.tokenBudget, '--token-budget');
   if (args.pattern !== undefined) opts.pattern = String(args.pattern);
+  if (args.item !== undefined) opts.item = String(args.item);
+  if (args.maxAttempts !== undefined) {
+    opts.maxAttempts = numArg(args.maxAttempts, '--max-attempts');
+  } else if (opts.item !== undefined) {
+    // 阈值同样来自策略文件：改了 loop-constraints.md 的"最多 N 次"要真的生效。
+    const limits = loadLimits(typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd());
+    if (limits.maxAttempts !== null) opts.maxAttempts = limits.maxAttempts;
+  }
 
   const result = checkLedger(ledger, opts);
 

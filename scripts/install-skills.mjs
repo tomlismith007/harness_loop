@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseArgs, exists, readText, writeText, printJson, PACK_ROOT, INSTALL_MANIFEST, fail } from './lib/common.mjs';
+import { parseArgs, exists, readText, writeText, printJson, PACK_ROOT, PACK_VERSION, INSTALL_MANIFEST, fail } from './lib/common.mjs';
 
 const MANIFEST_NAME = INSTALL_MANIFEST;
 // 旧清单名：v2 早期版本用过。安装/卸载时一并清理，避免两个清单并存。
@@ -80,6 +80,48 @@ function resolveDestinations(args) {
   };
 }
 
+export const BACKUP_DIR = '.harness-loop-backup';
+const MAX_BACKUPS = 5;
+
+/** 覆盖前备份旧副本，只保留最近 MAX_BACKUPS 份。 */
+function backupSkill(dir, name) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dest = path.join(dir, BACKUP_DIR, stamp, name);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.cpSync(path.join(dir, name), dest, { recursive: true });
+  const root = path.join(dir, BACKUP_DIR);
+  const keep = fs.readdirSync(root).sort().slice(-MAX_BACKUPS);
+  for (const entry of fs.readdirSync(root)) {
+    if (!keep.includes(entry)) fs.rmSync(path.join(root, entry), { recursive: true, force: true });
+  }
+}
+
+/** 从最近一份备份恢复。 */
+function rollback(args) {
+  const dest = resolveDestinations(args);
+  let restored = 0;
+  for (const target of dest.dirs) {
+    const root = path.join(target.dir, BACKUP_DIR);
+    if (!exists(root)) continue;
+    const stamps = fs.readdirSync(root).sort();
+    if (!stamps.length) continue;
+    const latest = path.join(root, stamps[stamps.length - 1]);
+    for (const name of fs.readdirSync(latest)) {
+      const src = path.join(latest, name);
+      if (!exists(path.join(src, 'SKILL.md'))) continue;
+      fs.cpSync(src, path.join(target.dir, name), { recursive: true });
+      restored++;
+    }
+    // 恢复过的备份不再保留：连续 rollback 应该逐版回退，而不是重复恢复同一份。
+    fs.rmSync(latest, { recursive: true, force: true });
+    process.stdout.write(`restored ${target.dot}/skills from ${stamps[stamps.length - 1]}
+`);
+  }
+  if (!restored) fail(`no backup found under ${dest.dirs.map((d) => path.join(d.dir, BACKUP_DIR)).join(', ')}`, 1);
+  process.stdout.write(`Rolled back ${restored} skill(s) to the previous version.
+`);
+}
+
 function install(args) {
   const dest = resolveDestinations(args);
   const skills = listSkillNames();
@@ -111,21 +153,44 @@ function install(args) {
         if (same) written.push(name);
         continue;
       }
+      // --force 覆盖前把旧副本存一份：装了坏版本要能退回去。
+      if (exists(targetFile) && args.force) backupSkill(target.dir, name);
       fs.mkdirSync(targetDir, { recursive: true });
       fs.copyFileSync(src, targetFile);
       results.push({ name, status: 'installed' });
       written.push(name);
     }
 
-    // 清单只记本次真正写入的技能。记整包列表会让 uninstall 把用户自己的
-    // 同名技能删掉——安装器承诺"不覆盖"，卸载却销毁。
-    writeText(path.join(target.dir, MANIFEST_NAME), JSON.stringify({
+    // 清单记"本包在宿主上管理了哪些技能"，不是"本轮写了哪些"。
+    //
+    // 只记本轮写入项时，漂移状态（skipped-exists）下重跑会把清单清空，
+    // `--uninstall` 随即永久失效。但也不能把目录里的同名技能全算进来——
+    // 用户自己写的同名技能被卸载器删掉更糟。所以取并集：上一轮清单里
+    // 仍在磁盘上的 + 本轮确认属于本包的（写入 / 内容相同）。
+    const manifestPath = path.join(target.dir, MANIFEST_NAME);
+    const previous = (() => {
+      try { return JSON.parse(readText(manifestPath)).skills || []; } catch { return []; }
+    })();
+    const managed = [...new Set([
+      ...previous.filter((n) => exists(path.join(target.dir, n))),
+      ...written,
+      // skipped-exists 的内容属于用户（可能被改过），但技能名是本包的；
+      // 记进清单才能卸载。uninstall 只删清单里列出的目录，不碰其他。
+      ...results.filter((r) => r.status === 'skipped-exists').map((r) => r.name),
+    ])].sort();
+    writeText(manifestPath, JSON.stringify({
       installedAt: new Date().toISOString(),
       packRoot: PACK_ROOT,
+      packVersion: PACK_VERSION,
       scope: dest.scope,
       layout: dest.layout,
       dotDir: target.dot,
-      skills: written,
+      skills: managed,
+      lastRun: {
+        installed: results.filter((r) => r.status === 'installed').map((r) => r.name),
+        skippedExists: results.filter((r) => r.status === 'skipped-exists').map((r) => r.name),
+        unchanged: results.filter((r) => r.status === 'unchanged').map((r) => r.name),
+      },
     }, null, 2) + '\n');
     // 旧清单名一并清掉：两个清单并存时，uninstall 会按新清单删一次、
     // 旧清单留在原地，下一次 `--list` 又显示“已安装过”。
@@ -141,7 +206,11 @@ function install(args) {
     process.stdout.write(`\n  destination: ${target.dir}\n`);
     process.stdout.write(`  installed:   ${installed}\n`);
     if (unchanged) process.stdout.write(`  unchanged:   ${unchanged}\n`);
-    if (skipped) process.stdout.write(`  skipped:     ${skipped} (already present, different content — use --force to overwrite)\n`);
+    if (skipped) {
+      process.stdout.write(`  skipped:     ${skipped} (already present, different content)\n`);
+      process.stdout.write(`               re-run with --force to update: `
+        + `node scripts/install-skills.mjs ${typeof args.target === 'string' ? `--target ${args.target}` : '--scope user'} --force\n`);
+    }
     process.stdout.write(`\nSkills:\n`);
     for (const r of results) process.stdout.write(`  ${r.status.padEnd(16)} ${r.name}\n`);
   }
@@ -311,14 +380,27 @@ function checkInstalled(args) {
     }
   }
 
+  // 版本：宿主装的是哪一版、源码是哪一版。没有版本号时只能回答"漂移了"，
+  // 不能回答"漂移到哪个方向"。
+  const installedVersions = new Set();
+  for (const target of targets) {
+    const mp = [MANIFEST_NAME, LEGACY_MANIFEST_NAME]
+      .map((n) => path.join(target.dir, n)).find((p) => exists(p));
+    if (!mp) continue;
+    try { installedVersions.add(JSON.parse(readText(mp)).packVersion || 'unknown'); } catch { /* 坏清单已计入漂移 */ }
+  }
+
   if (args.json) {
-    printJson({ checked, drifted, in_sync: drifted.length === 0 });
+    printJson({ checked, drifted, in_sync: drifted.length === 0,
+      installed_version: [...installedVersions].join(',') || null, source_version: PACK_VERSION });
   } else {
     process.stdout.write(`Checked ${checked} installed skill(s)\n`);
+    process.stdout.write(`  installed: ${[...installedVersions].join(',') || 'unknown'} / source: ${PACK_VERSION}\n`);
     if (drifted.length) {
       process.stdout.write(`\nDRIFT — the host runs the installed copy, not the source:\n`);
       for (const d of drifted) process.stdout.write(`  ${d}\n`);
-      process.stdout.write(`\nRe-run without --check to push updates.\n`);
+      process.stdout.write(`\nRe-run without --check to push updates:\n`
+        + `  node scripts/install-skills.mjs --force\n`);
     } else if (checked) {
       process.stdout.write(`\nAll installed skills match the source.\n`);
     }
@@ -421,7 +503,9 @@ Options:
                         The host loads the INSTALLED copy, so a stale install means the
                         skill the agent runs is not the skill this repo tests.
   --uninstall           Remove skills listed in the install manifest
+  --rollback            Restore the most recent backup (made by --force)
   --force               Overwrite existing skills of the same name
+                        (the previous copy is backed up under .harness-loop-backup/)
   --json                JSON output (with --list / --check)
   --help                Show this help
 
@@ -435,6 +519,7 @@ also exists at user scope is discovered but shadowed by the user-level copy.
     return;
   }
 
+  if (args.rollback) return rollback(args);
   if (args.uninstall) return uninstall(args);
   if (args.check) return checkInstalled(args);
   if (args.list) return listInstalled(args);

@@ -18,7 +18,7 @@
 
 未经人工批准，**绝不自动编辑**以下路径：
 
-> 本代码块与 `loop-constraints.md` 的 `## Paths` 必须逐条一致。
+> 本代码块与 `harness-constraints.md` 的 `## Paths` 必须逐条一致。
 > `harness-stage.mjs` 在阶段 2 判据里逐条比对两者；不一致即判失败。
 
 ```
@@ -34,6 +34,7 @@ k8s/production/**
 auth/**
 payments/**
 billing/**
+harness-constraints.md
 loop-constraints.md
 scripts/gate-check.mjs
 scripts/ledger-check.mjs
@@ -44,6 +45,8 @@ package-lock.json
 templates/**
 .githooks/**
 scripts/test.mjs
+scripts/state-write.mjs
+scripts/state-commit.mjs
 audits/**
 ```
 

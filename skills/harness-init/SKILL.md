@@ -3,7 +3,7 @@ name: harness-init
 description: >-
   Stage 1 of harness building: create the 6 foundation files so a project has a complete,
   restartable harness structure — AGENTS.md, feature_list.json, STATE.md, init.sh,
-  loop-constraints.md and LESSONS.md. Use when starting harness work on a new or
+  harness-constraints.md, loop-constraints.md and LESSONS.md. Use when starting harness work on a new or
   un-harnessed project. Deliberately does NOT install the loop mechanism (ledger, run log);
   that is stage 2, harness-loop-init. Do not use this skill to add a verifier or a circuit
   breaker.
@@ -43,7 +43,7 @@ node <packRoot>/scripts/harness-stage.mjs <target>
 | 3 | `STATE.md` | 跨轮记忆；没有它循环每轮失忆 |
 | 4 | **`init.sh` 真的能跑通**（实际执行，退出码 0） | 格式对但命令跑不通的脚本不算 |
 | 5 | 指令文件声明了**工作规则**（一次一个 item / 不验证不宣称完成 / 完成定义） | 行为约束必须写在 `AGENTS.md` 里 |
-| 6 | `loop-constraints.md` | 拒绝列表与闸门。阶段 1 就要有底线 |
+| 6 | `harness-constraints.md` | 拒绝列表与闸门。阶段 1 就要有底线（loop 规则在阶段 2 的 `loop-constraints.md`） |
 | 7 | `LESSONS.md` | 经验→规则的载体；没有它返工不会被记录 |
 
 ## 执行
@@ -60,7 +60,7 @@ node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 1
 | `feature_list.json` | 功能清单 + 证据 | 3 条占位 feature 换成真实功能 |
 | `STATE.md` | 活状态：收件箱、当前活动、观察列表 | 一般不用改 |
 | `init.sh` | 标准启动与验证路径 | 把 `npm install && npm test` 换成项目真实命令 |
-| `loop-constraints.md` | 拒绝列表、合并规则、预算与尝试上限 | 按本仓库实际情况增删路径 |
+| `harness-constraints.md` | 拒绝列表、合并规则、kill switch | 按本仓库实际情况增删路径 |
 | `LESSONS.md` | 错题本 | 一般不用改 |
 
 同时把 `harness-loop`、`harness-init`、`harness-loop-init` 装到 `.claude/skills/` 与
