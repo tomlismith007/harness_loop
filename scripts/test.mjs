@@ -1173,7 +1173,9 @@ section('14. 两阶段驱动器');
   const missingLedger = runInConsumer('ledger-check.mjs',
     ['--ledger', path.join(empty, `missing-${process.pid}-${Date.now()}.json`)]);
   eq('消费者内缺账本时 ledger-check 停止并升级', missingLedger.code, 2);
-  ok('缺账本时输出 verdict: no-ledger', /no-ledger/.test(missingLedger.out), missingLedger.out.slice(0, 200));
+  ok('缺账本时输出 verdict: no-ledger', /no-ledger/.test(missingLedger.out),
+    `code=${missingLedger.code} argv=${JSON.stringify(['--ledger', path.join(empty, 'missing.json')])}`
+    + ` out=${String(missingLedger.out).split(String.fromCharCode(10)).join(' ').slice(0, 200)}`);
   eq('消费者内 gate-check 可运行',
     runInConsumer('gate-check.mjs', ['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts']).code, 0);
   // 装配后的仓库必须能自己演练护栏——drill-check 随装配进入消费者项目。
@@ -1270,9 +1272,7 @@ section('14. 两阶段驱动器');
     const c = j.stages[0].checks.find((x) => x.label.includes('init.sh'));
     ok('超时记为 NOT RUN', c && c.notRun === true, JSON.stringify(c));
     ok('超时不会拖住整轮（< 15s）', Date.now() - started < 15000);
-    // Windows 上被 timeout 杀掉的孙进程可能还短暂握着目录，rmSync 会抛 ENOTEMPTY
-    // 让整个套件崩掉——而"清理临时目录失败"不该被读成"某个行为错了"。
-    fs.rmSync(slow, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    rmrf(slow);
   }
 
   rmrf(empty);
