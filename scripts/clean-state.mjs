@@ -20,8 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
+import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint } from './lib/common.mjs';
 
 /** 调试残留的判定。按**文件名模式**，不按后缀——合法的 `.log` 资产很常见。 */
 export const DEBUG_PATTERNS = [
@@ -176,6 +175,6 @@ Exit codes: 0 clean · 1 not a git repo / bad arguments · 2 not clean
   process.exit(failed.length ? 2 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

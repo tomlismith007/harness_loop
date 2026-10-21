@@ -21,8 +21,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, fail, rejectUnknownFlags, untrusted, sanitizeUntrusted } from './lib/common.mjs';
+import { parseArgs, readText, fail, rejectUnknownFlags, untrusted, sanitizeUntrusted, isEntryPoint } from './lib/common.mjs';
 
 /** 把一行待办插到指定 `## <section>` 节的第一条列表项之前（没有则追加到节末）。 */
 export function appendItem(text, section, line) {
@@ -117,6 +116,6 @@ Exit codes: 0 written / self-test passed · 1 bad arguments · 2 self-test faile
   process.stdout.write(`appended to ${section}: ${line}\n`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

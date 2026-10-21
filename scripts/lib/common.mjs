@@ -31,6 +31,25 @@ export const PACK_VERSION = (() => {
 })();
 
 /**
+ * 本模块是否是"被直接执行"的入口脚本。
+ *
+ * 不能用 `import.meta.url === pathToFileURL(process.argv[1]).href`：Node 会把
+ * import.meta.url 解析成 **realpath**，而 argv[1] 保留调用方给的路径。macOS 上
+ * /var 是指向 /private/var 的符号链接，于是 tmpdir 里的一切脚本都"不是入口"，
+ * main() 从不执行、进程静默 exit 0——一个连输出都没有的"成功"。
+ *
+ * 两边都取 realpath 再比；取不到时退回字符串比较。
+ */
+export function isEntryPoint(importMetaUrl, argvPath = process.argv[1]) {
+  if (!argvPath) return false;
+  try {
+    return fs.realpathSync(fileURLToPath(importMetaUrl)) === fs.realpathSync(argvPath);
+  } catch {
+    return importMetaUrl === pathToFileURL(argvPath).href;
+  }
+}
+
+/**
  * 两个路径是否指向同一个文件/目录。
  *
  * 用于"自引用"判定：init.sh 里 `pwd -W` 给出 `D:/repo/init.sh`（正斜杠），

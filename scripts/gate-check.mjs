@@ -18,11 +18,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 import {
   parseArgs, readText, printJson, matchesDenylist, loadDenylist, loadLimits,
-  DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg,
-} from './lib/common.mjs';
+  DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg, isEntryPoint } from './lib/common.mjs';
 
 /**
  * 兜底阈值。只在本目录没有 loop-constraints.md（或解析不出该行）时使用，
@@ -896,6 +894,6 @@ Exit codes:
   process.exit(result.exit_code);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

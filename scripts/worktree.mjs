@@ -23,8 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
+import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint } from './lib/common.mjs';
 
 export const MANIFEST_DIR = '.loop-worktrees';
 export const MANIFEST_FILE = `${MANIFEST_DIR}/manifest.json`;
@@ -257,6 +256,6 @@ Exit codes: 0 ok · 1 bad arguments · 2 something was skipped during cleanup
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

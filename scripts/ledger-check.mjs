@@ -13,8 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readJson, printJson, fail, rejectUnknownFlags, loadBudget, loadLimits } from './lib/common.mjs';
+import { parseArgs, readJson, printJson, fail, rejectUnknownFlags, loadBudget, loadLimits, isEntryPoint } from './lib/common.mjs';
 
 export const DEFAULT_BREAKER = {
   maxIterations: 10,
@@ -455,6 +454,6 @@ Exit codes:
 }
 
 // 仅在直接执行时运行，被 import 时不运行
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

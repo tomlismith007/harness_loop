@@ -11,6 +11,7 @@
  */
 
 import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -967,6 +968,29 @@ section('12. 文档完整性');
     eq('README 与 AGENTS.md 的硬约束条数一致', count(readme), count(agents));
     ok('README 指向 AGENTS.md 作为唯一真相源', /唯一真相源是 \[`AGENTS\.md`\]/.test(readme), 'missing pointer');
     ok('AGENTS.md 的硬约束节非空', count(agents) >= 6, String(count(agents)));
+  }
+
+  // 入口判定必须走 realpath：Node 把 import.meta.url 解析成 realpath，
+  // 而 argv[1] 保留调用方路径。macOS 的 /var → /private/var 让两者不等，
+  // 于是脚本 main() 从不执行、静默 exit 0——一个连输出都没有的"成功"。
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-entry-'));
+    const script = path.join(t, 'probe.mjs');
+    fs.writeFileSync(script, [
+      "import { isEntryPoint } from " + JSON.stringify(pathToFileURL(path.join(PACK_ROOT, 'scripts', 'lib', 'common.mjs')).href) + ';',
+      'console.log(isEntryPoint(import.meta.url) ? "ENTRY" : "NOT_ENTRY");',
+    ].join(String.fromCharCode(10)));
+    const direct = execFileSync(process.execPath, [script], { encoding: 'utf8' }).trim();
+    eq('入口判定：直接执行 → ENTRY', direct, 'ENTRY');
+    // 通过别名路径调用（Windows 上退化为同一路径；macOS/Linux 上创建真符号链接）。
+    const link = path.join(t, 'link.mjs');
+    let linked = false;
+    try { fs.symlinkSync(script, link); linked = true; } catch { /* 无权限创建符号链接 */ }
+    if (linked) {
+      const viaLink = execFileSync(process.execPath, [link], { encoding: 'utf8' }).trim();
+      eq('入口判定：经符号链接执行仍 → ENTRY', viaLink, 'ENTRY');
+    }
+    rmrf(t);
   }
 
   // 无出处的百分比宣称：引用必须标明来源，且不得声称本仓库复现过。

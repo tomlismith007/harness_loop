@@ -20,8 +20,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
+import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint } from './lib/common.mjs';
 import { localToday } from './clean-state.mjs';
 
 export const OUTCOMES = ['no-op', 'report-only', 'fix-proposed', 'verified', 'escalated'];
@@ -192,6 +191,6 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

@@ -22,8 +22,7 @@ import {
   parseArgs, exists, readText, readJson, printJson, copyTemplate,
   PACK_ROOT, PACK_VERSION, SKILLS_DIR, SKILL_DIRS, USER_SKILL_DIRS, INSTALL_MANIFEST, parseDenylistFrom, detectProject,
   verificationCommands, initScriptFromCommands, textHas, structuredText, fail,
-  samePath, runWithTreeKill,
-} from './lib/common.mjs';
+  samePath, runWithTreeKill, isEntryPoint } from './lib/common.mjs';
 import { recordStatus } from './drill-check.mjs';
 
 // ---------------------------------------------------------------- 阶段定义
@@ -846,7 +845,6 @@ Exit codes:
   process.exit(0);
 }
 
-import { pathToFileURL } from 'node:url';
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

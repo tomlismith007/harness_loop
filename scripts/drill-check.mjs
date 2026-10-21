@@ -22,11 +22,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { pathToFileURL } from 'node:url';
 import {
   parseArgs, readText, printJson, fail, rejectUnknownFlags,
-  parseDenylistFrom, matchesDenylist, parseBudgetFrom,
-} from './lib/common.mjs';
+  parseDenylistFrom, matchesDenylist, parseBudgetFrom, isEntryPoint } from './lib/common.mjs';
 import { checkLedger, DEFAULT_BREAKER } from './ledger-check.mjs';
 import { checkGates } from './gate-check.mjs';
 
@@ -461,6 +459,6 @@ Exit codes:
   process.exit(0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }
