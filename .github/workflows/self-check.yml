@@ -18,7 +18,13 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # 三个平台都跑：测试套件曾经用 POSIX 的 true/false 当夹具，
+    # 在 Windows 上必红，而 CI 只在 ubuntu 上跑，红了一年没人看见。
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,7 +35,16 @@ jobs:
       - name: Run test suite
         run: node scripts/test.mjs
 
+      - name: Stage gate (pack self-mode)
+        run: node scripts/harness-stage.mjs . --stage 1 --require --self
+
+      - name: Untrusted-input sanitizer self-test
+        run: node scripts/state-write.mjs --self-test
+
       - name: Verify scripts are executable entry points
+        # Windows 上 run: | 默认走 PowerShell，`{ echo ... }`、`if ...; then` 都是 bash 语法。
+        # 显式指定 bash：三个平台行为一致，探针脚本只有一份。
+        shell: bash
         run: |
           set -e
           node scripts/harness-stage.mjs . > /dev/null
@@ -43,14 +58,48 @@ jobs:
             exit 1
           fi
           # gate-check 的冒烟测试必须覆盖 gate 路径，且同时断言 escalate 分支。
-          # 证据必须带 `### Checks not run` 节（即使为空也写 `—`）——闸门现在真的读它。
-          printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `true` → PASS\n- Red check: `true` → PASS\n\n### Checks not run\n- —\n' > /tmp/evidence-probe.md
+          # 证据必须带 Author / Reviewed commit / 每个 PASS 的输出片段 / Checks not run——
+          # 闸门现在真的读它们，旧格式的报告会被拒。
+          SHA="$(git rev-parse HEAD)"
+          {
+            echo '## Verdict: APPROVE'
+            echo
+            echo 'Author: ci-probe'
+            echo "Reviewed commit: $SHA"
+            echo
+            echo '### Evidence'
+            echo '- Tests: `node -e "process.exit(0)"` → PASS'
+            echo '  ```'
+            echo '  ok'
+            echo '  ```'
+            echo '- Red check: `node -e "process.exit(0)"` → PASS'
+            echo '  ```'
+            echo '  before fix: 1 failing'
+            echo '  ```'
+            echo
+            echo '### Checks not run'
+            echo '- —'
+          } > /tmp/evidence-probe.md
           node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts \
+            --reviewed-sha "$SHA" --diff-files a.ts \
             --evidence-file /tmp/evidence-probe.md > /dev/null
           # 自相矛盾的报告必须被拦下：一份写着 Tests → FAIL 的 APPROVE 报告
           # 曾经拿到 proceed exit 0——比没有报告更容易过。
-          printf '## Verdict: APPROVE\n\n### Evidence\n- Tests: `npm test` → FAIL\n\n### Checks not run\n- —\n' > /tmp/evidence-contra.md
+          {
+            echo '## Verdict: APPROVE'
+            echo
+            echo 'Author: ci-probe'
+            echo "Reviewed commit: $SHA"
+            echo
+            echo '### Evidence'
+            echo '- Tests: `node -e "process.exit(1)"` → FAIL'
+            echo '  ```'
+            echo '  failing'
+            echo '  ```'
+            echo
+            echo '### Checks not run'
+            echo '- —'
+          } > /tmp/evidence-contra.md
           if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
             --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts \
             --evidence-file /tmp/evidence-contra.md > /dev/null 2>&1; then
@@ -66,7 +115,7 @@ jobs:
           fi
           # approve 不带证据必须升级（verdict 是断言，不是证据）
           if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts > /dev/null 2>&1; then
+            --reviewed-sha "$SHA" --diff-files a.ts > /dev/null 2>&1; then
             echo "::error::approve without evidence must escalate"
             exit 1
           fi
@@ -94,6 +143,8 @@ jobs:
           echo "All CLI entry points respond."
 
       - name: Check for credential literals
+        # 同上：PowerShell 不认 bash 的 if/grep 语法。
+        shell: bash
         run: |
           # 源码与示例中不得出现可用的凭据字面量
           if grep -rEn "(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})" \

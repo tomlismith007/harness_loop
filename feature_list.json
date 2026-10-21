@@ -1,6 +1,6 @@
 {
   "project": "harness_loop",
-  "last_updated": "2026-10-17",
+  "last_updated": "2026-10-21",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -86,6 +86,49 @@
         "第二轮：PR #4 CI 红（test job TypeError）→ 分类为 regression 而非 env/flake/config；两条待办均写入 STATE.md；PR #4 与 issue #3 的评论/标签/状态均未改变"
       ],
       "notes": "真机验证于 2026-10-17，覆盖 issue 与 CI 红 PR 两条路径。"
+    },
+    {
+      "id": "remediation-001",
+      "priority": 5,
+      "area": "runtime",
+      "title": "整改方案 P0/P1：闸门读真相源、验证证据可核对、装配与测试可信",
+      "user_visible_behavior": "改一个错别字可以按 docs 类通过闸门而不撒谎；隐藏目录（.secrets/.auth/.migrations）被拒绝列表拦住；账本 3 次失败后 gate 无法靠 --attempts 绕过；手写 APPROVE 报告缺输出片段/署名会被拒；CI 在三平台跑测试并在包自身上跑 --stage 1 --require --self",
+      "status": "passing",
+      "verification": [
+        "node scripts/test.mjs（569 项断言，0 失败）",
+        "bash init.sh（退出 0）",
+        "node scripts/harness-stage.mjs . --stage 1 --require --self（退出 0）",
+        "原生 Windows PATH（无 GNU coreutils）下 node scripts/test.mjs 同样 569/0",
+        "每条新机制的回退测试：改回旧实现后对应断言变红（dotfile 6 条、change-class 1 条、片段 3 条、attempt-limit 1 条、merged cleanup 3 条、README parity 1 条、untrusted-shape 1 条）"
+      ],
+      "evidence": [
+        "test.mjs 569/0（2026-10-21）",
+        "复现：.secrets/prod.json 修复前 ALLOWED；账本 stagnation 与 gate proceed 同时成立；伪造 APPROVE 修复前 EXIT=0",
+        "验收实跑：docs 类 EXIT=0 / behavior 类 red-check / 无片段与自审被拒 / 账本 3 次 attempt-limit / --self 0 与严格模式 2 / 消费方从清单定位 pack 0 / worktree merged 被回收"
+      ],
+      "notes": "未做：R-14 版本号、R-16 verifier canary、R-18 轻量路径、R-19 harness/loop 拆分、R-21 死文件、R-25 状态事务。agent 行为层仍未验证。"
+    },
+    {
+      "id": "remediation-002",
+      "priority": 6,
+      "area": "runtime",
+      "title": "整改方案第二批：版本与回滚、验证者 canary、轻量档、harness/loop 分层、状态事务",
+      "user_visible_behavior": "能回答宿主装的是哪一版并能 --rollback；drill-check 证明伪造 APPROVE 被拒；docs 类改动可走轻量档；只用 harness 不用 loop 也能拦拒绝列表；一轮状态写入要么全成功要么全回滚",
+      "status": "passing",
+      "verification": [
+        "node scripts/test.mjs（611 项断言，0 失败）",
+        "node scripts/drill-check.mjs --only verifier（4 用例全过，mode=offline）",
+        "bash init.sh（退出 0）；harness-stage . --stage 1 --require --self（退出 0）",
+        "原生 Windows PATH 下 test.mjs 同样 611/0"
+      ],
+      "evidence": [
+        "R-14：manifest packVersion=1.1.0；--force 产生备份；--rollback 恢复并 exit 0",
+        "R-16：伪造 APPROVE 无片段 → drill exit 2（回退测试：去掉片段校验后 canary FAIL）",
+        "R-18：docs 类无 sha/无重放 → proceed，checks_not_run 含 Head commit binding 与 Evidence replay",
+        "R-19：阶段 1 仓库无 loop 文件时 gate-check 仍拦 auth/**；阶段 2 追加 loop-constraints.md 与账本",
+        "R-25：注入第二次写入失败 → exit 2，STATE.md 回滚、run-log 未追加"
+      ],
+      "notes": "agent 行为层仍未验证：canary 是离线版，不调模型。"
     }
   ]
 }

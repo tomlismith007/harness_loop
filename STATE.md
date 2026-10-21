@@ -1,11 +1,30 @@
 # Loop State
 
-Last run: 2026-10-19 (REPAIR-SPEC 合并进 main 的升级批次)
+Last run: 2026-10-21
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表。
 **每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
+
+- [x] **按 `audits/harness-loop-remediation-spec-2026-10-21.md` 修复 P0/P1 批次（2026-10-21）**：
+  R-01 change-class、R-02 隐藏目录 denylist、R-03 尝试次数读账本、R-04 验证者模板、R-05 `--self` 与 CI 真跑、
+  R-06 用户级技能路径、R-08 manifest 累积、R-09 worktree 回收、R-10 证据片段与署名、R-11 untrusted 清洗、
+  R-12 阈值读约束、R-13 文档同步断言、R-15 跨平台测试、R-17/R-20/R-22/R-23 文档诚实化、R-24 kill switch、
+  R-26 NOT RUN 不算通过、R-27 clean-state 双模式。
+  证据：`node scripts/test.mjs` **569/0**（原生 Windows PATH 下同样 569/0）；`bash init.sh` 退出 0；
+  `harness-stage . --stage 1 --require --self` 退出 0；每条新机制都做过回退测试（改回旧实现 → 断言变红）。
+- [ ] **待人工**：本轮改动的 `scripts/gate-check.mjs`、`scripts/lib/common.mjs`、`scripts/test.mjs`、`templates/**`、
+  `.github/workflows/**` 都在本仓库拒绝列表里——按 loop-constraints.md 需人工合并。
+- [x] **第二批：补齐剩余整改项（2026-10-21 晚）**：
+  R-14 `VERSION` + `packVersion` + `--force` 备份 + `--rollback`；R-16 验证者 canary（离线，4 用例，
+  阶段 2 判据要求它存在）；R-18 轻量档（docs/config/refactor 跳过 sha 绑定与重放，跳过项记 NOT RUN）；
+  R-19 约束拆两层（`harness-constraints.md` 阶段 1 / `loop-constraints.md` 阶段 2，读取函数双文件回落）；
+  R-21 死链断言 + STATE 历史段移出；R-25 `state-commit.mjs` 原子写（备份 → tmp → rename，失败回滚）。
+  证据：`node scripts/test.mjs` **611/0**（原生 Windows PATH 同样）；`bash init.sh` 0；
+  `harness-stage . --stage 1 --require --self` 0；每项都做过回退测试。
+- [ ] **仍未验证**：agent 行为层（验证者会不会偷懒、输出片段会不会被编造）。闸门能抓形状与自审，
+  抓不到"输出片段是编的"；`drill-check --only verifier` 是**离线** canary，不调模型。
 
 - [x] **在靶场 `/d/loop-harness-test` 跑过一轮 `/harness-loop`**：`sum([])` bug，回退测试失败→修复→独立子智能体验证 APPROVE→闸门 proceed→账本与 run-log 落盘。真机验证抓出一个闸门 bug（证据正则不接受技能文档里的格式），已修并加断言。
 - [x] **`/harness-loop-issue` 真机验证（两轮）**：沙箱上第一轮验 issue 发现，第二轮造了一个真实的红 PR（#4）验 CI 分类——`TypeError` 在 `src/math.mjs:2`、由该 PR 引入 → 判 regression，未误判为 env。两轮均确认只读。
@@ -16,12 +35,12 @@ Last run: 2026-10-19 (REPAIR-SPEC 合并进 main 的升级批次)
 - [x] **批次 1：修坏掉的机制**（U-01/02/09/11 + U-07；完成标准见 `audits/upgrade-plan-2026-10-18.md` §3）— commit `0d88b94`，独立验证 3 轮后 APPROVE
 - [x] **批次 2：收紧闸门与状态**（U-03/04/06/07检查/08/10；完成标准见同上 §3）— commit `9232620`，独立验证 4 轮后 APPROVE
 - [x] **U-05 护栏演练**（drill-check + 阶段 2 判据；完成标准见 `audits/upgrade-plan-2026-10-18.md` §2 U-05）— commit `9b0b4aa`，独立验证 3 轮后 APPROVE
-- [ ] **已知未达成**：本仓库 `harness-stage . --stage 2 --require` 仍退出 2（占位账本按设计保留；技能在 `<repo>/skills/`，worktree 未安装）。CI 不跑 `--require`，故不阻断。
+- [ ] **已知未达成**：本仓库 `harness-stage . --stage 2 --require --self` 仍退出 2（占位账本按设计保留）。CI 现在跑 `--stage 1 --require --self`（阶段 1 已绿），阶段 2 不跑，因为占位账本是有意保留的。
 - [x] **U-12 清洁交接**（clean-state；完成标准见 `audits/upgrade-spec-2026-10-18.md` U-12）— commit `fb1ff93`，独立验证 3 轮后 APPROVE
 - [x] **U-13 worktree manifest**（create/mark/cleanup/list；完成标准见 `audits/upgrade-spec-2026-10-18.md` U-13）— commit `527bfdd`，独立验证 3 轮后 APPROVE
-- [ ] **已知限制**：`worktree.mjs` 的 run-id 只接受 ASCII（中文 item 名无法直接用作 run-id）；`.loop-worktrees/` 未加入 `.gitignore`。
+- [ ] **已知限制**：`worktree.mjs` 的 run-id 只接受 ASCII（中文 item 名无法直接用作 run-id）。`.loop-worktrees/` 现在由 `create` 自动写进 `.gitignore`。
 - [x] `templates/init.sh` 已删除（FIX-12）：装配器用 `initScriptFromCommands` 生成，模板是分叉源。
-- [ ] FIX-14：`--attempts` 与 ledger 交叉校验（可选，未做）。
+- [x] FIX-14 / R-03：`--attempts` 与 ledger 交叉校验——改为 `ledger-check --item` 的 `attempt-limit` 直接读账本，`gate-check` 不再有 max-attempts 闸门。
 
 ## Active
 
@@ -31,7 +50,9 @@ Last run: 2026-10-19 (REPAIR-SPEC 合并进 main 的升级批次)
 
 ## Watch List
 
-- 已完成两轮真机验证（见上方 High Priority）。后续目标：修复框架自身缺陷时仍保持“只报告、先复现”的节奏。
+- 已完成两轮真机验证（见上方 High Priority）。本轮整改先逐条复现再修复，复现结果见下。
+- 本轮复现确认：H-01/H-02/H-03/H-05/H-08/H-09/H-10/H-13/H-14/H-15/H-17/H-22/H-24/H-26/H-28/H-29 均真实存在；
+  H-04/H-23/H-30/H-33 在当前 HEAD 已被上一轮修复（无 `--verify`、无死引用、本地化判据已通过）。
 - `harness-stage` 在本仓库上自引用，判据 4（`init.sh`）记为 NOT RUN——这是有意的，不是缺陷。
 
 ## Human Inbox (ambiguous / cross-loop)
@@ -40,16 +61,10 @@ Last run: 2026-10-19 (REPAIR-SPEC 合并进 main 的升级批次)
 
 ## Post-Run Critique (from last run)
 
-- **返工**：本轮重构中，`test.mjs` 的三处断言先后因期望值错误而失败（技能排序、kill switch 残留标记、阶段 2 本地化前提）。都是测试写错，不是实现错。
+- **返工**：新增断言前先手工跑一遍被测命令，确认期望值来自实际输出而不是推断。
+  （历史：`test.mjs` 曾有三处断言因期望值写错而失败——技能排序、kill switch 残留标记、阶段 2 本地化前提。）
 - **误报**：无。
-- **一项下轮调整**：新增断言前先手工跑一遍被测命令，确认期望值来自实际输出而不是推断。
-
-### 2026-10-18 审计（只读，产出在 `audits/`）
-
-- 三仓库真实读取：A `38ddcd2`、B `54f8c56`、CN `c5e9ef0`（CN 是 B 的 fork，2026-07-15 快照）。
-- 基线：`bash init.sh` 335/0；README 的 5 脚本 / 335 断言 / 4 命令属实；闸门实际 9 个（README 写 8）。
-- 抓到的真 bug：技能第 0 步 `--state STATE.md` 使 kill switch 静默失效；第 5 步 `--phase fix` 使证据与 head-commit 闸门永不触发；`feature_list.json` 的 `rules` 无人读；预算闸门无接线。
-- 产出：`audits/{knowledge-A,knowledge-B,audit,upgrade-spec,docs-patches}-2026-10-18.md`。**未改任何现有文件**（`git status` 仅 `?? audits/`）。docs 补丁待确认后应用。
+- **本轮教训**：审计报告里的"已证实"可能已经过期——先复现再修，4 条发现已被上一轮修掉。
 
 ---
 

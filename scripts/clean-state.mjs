@@ -20,8 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
+import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint } from './lib/common.mjs';
 
 /** 调试残留的判定。按**文件名模式**，不按后缀——合法的 `.log` 资产很常见。 */
 export const DEBUG_PATTERNS = [
@@ -89,7 +88,11 @@ export function untrackedPaths(root) {
 
 function main() {
   const args = parseArgs();
-  rejectUnknownFlags(args, ['state', 'json', 'help'], 'clean-state');
+  // 两个模式互斥；同时给等于没说清要哪种语义。
+  if (args.check !== undefined && args.assertFresh !== undefined) {
+    fail('--check and --assert-fresh are mutually exclusive', 1);
+  }
+  rejectUnknownFlags(args, ['state', 'json', 'help', 'check', 'assertFresh'], 'clean-state');
   if (args.help) {
     process.stdout.write(`clean-state — verify the repo is ready for the next session
 
@@ -99,7 +102,11 @@ Usage:
 Checks:
   1. init.sh has no placeholder commands
   2. no untracked debug artifacts (*.log, debug-*, tmp-*, .DS_Store)
-  3. STATE.md's "Last run" is today
+  3. STATE.md's "Last run" is well-formed (--assert-fresh: must be today)
+
+Options:
+  --check          Repository health. Safe for CI: a stale date is fine. (default)
+  --assert-fresh   Runtime assertion after a loop run: "Last run" must be today.
 
 Exit codes: 0 clean · 1 not a git repo / bad arguments · 2 not clean
 `);
@@ -135,9 +142,23 @@ Exit codes: 0 clean · 1 not a git repo / bad arguments · 2 not clean
     artifacts.length ? artifacts.map((a) => `${a.path}（${a.hit.why}）`).join('、') : null);
 
   // 3. Last run
+  //
+  // 两种语义必须分开，否则同一个脚本既不能进 CI 也不能做本轮断言：
+  //   --check（默认）        仓库健康：格式合法即可，跨天不该红
+  //   --assert-fresh         运行时断言：本轮刚写完状态，必须是今天
+  // 把"本轮刚跑过"当成"仓库健康"，会让 CI 每次 push 都红，检查随即被忽略。
   const stateText = readText(path.join(root, 'STATE.md'));
   const lr = lastRunStatus(stateText);
-  add('STATE.md 的 Last run 是今天', lr.ok, lr.reason);
+  if (args.assertFresh) {
+    add('STATE.md 的 Last run 是今天', lr.ok, lr.reason);
+  } else {
+    const m = stateText.match(/^Last run:\s*(\S+)/m);
+    const value = m ? m[1] : null;
+    const wellFormed = value !== null
+      && (value === 'never' || /^\d{4}-\d{2}-\d{2}/.test(value));
+    add('STATE.md 的 Last run 格式合法', wellFormed,
+      wellFormed ? null : (value === null ? 'STATE.md 没有 Last run 行' : `Last run 不是日期：${value}`));
+  }
 
   const failed = checks.filter((c) => !c.ok);
 
@@ -154,6 +175,6 @@ Exit codes: 0 clean · 1 not a git repo / bad arguments · 2 not clean
   process.exit(failed.length ? 2 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

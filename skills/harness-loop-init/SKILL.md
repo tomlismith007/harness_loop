@@ -40,8 +40,8 @@ node <packRoot>/scripts/harness-stage.mjs <target>
 | 2 | `loop-run-log.md` 存在 | 机械 | 文件存在且有 `## Log` 章节 |
 | 3 | `harness-loop` 已装到可发现路径 | 机械 | 只查**项目内** `.claude/skills/` 或 `.agents/skills/`；user-scope 安装不计入 |
 | 4 | `init.sh` 无占位符 | 机械 | 不含 `replace this line` / `No test script` |
-| 5 | **拒绝列表已本地化** | 机械 | 含 `loop-constraints.md` 自身，且至少 2 条模板外路径 |
-| 6 | **两份拒绝列表一致** | 机械 | `loop-constraints.md` ↔ `docs/04-safety.md` 逐条比对 |
+| 5 | **拒绝列表已本地化** | 机械 | 含 `harness-constraints.md` 自身，且至少 2 条模板外路径 |
+| 6 | **两份拒绝列表一致** | 机械 | `harness-constraints.md` ↔ `docs/04-safety.md` 逐条比对 |
 | 7 | **护栏演练通过** | 机械 | `loop-drill.json` 存在、sha256 与当前约束一致、无失败项 |
 | 8 | **回退测试被实际执行过** | **人工** | 有命令与输出为证，记进 `STATE.md` |
 | 9 | **NOT RUN 声明被实际使用过** | **人工** | 有一份报告把没跑的检查列为 NOT RUN |
@@ -65,7 +65,7 @@ node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 2
 
 **手工改两处**：
 
-1. `loop-constraints.md` 的拒绝列表按本仓库实际路径增删（判据 5）。
+1. `harness-constraints.md` 的拒绝列表按本仓库实际路径增删（判据 5）。
    `gate-check.mjs` 会真的读它——它必须是真的。
 2. 生成护栏演练记录（判据 7）：
 
@@ -74,7 +74,7 @@ node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 2
    git add loop-drill.json
    ```
 
-   记录绑定 `loop-constraints.md` 的 sha256。**改了拒绝列表就要重跑**，否则记录过期，
+   记录绑定 `harness-constraints.md` 的 sha256。**改了拒绝列表就要重跑**，否则记录过期，
    阶段 2 判据 7 会失败——旧记录不能为新策略担保。
 
 ## 核心：验证者为什么是阶段 2 的关键

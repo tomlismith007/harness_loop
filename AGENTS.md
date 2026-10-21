@@ -14,7 +14,10 @@ GitHub issue/PR 是可选模块（`/harness-loop-issue`），不属于核心。
 写任何代码之前，按顺序执行：
 
 1. `pwd` 确认工作目录是仓库根。
-2. 读 `loop-constraints.md` —— **约束是绑定的，必须在任何动作之前加载**。输出一行确认：`Constraints loaded from loop-constraints.md: N rules active.`
+2. 读 `harness-constraints.md`（拒绝列表 / 代码规则 / kill switch，**阶段 1 就有**），
+   以及 `loop-constraints.md`（验证 / 预算 / 教训，阶段 2 才有；不存在就跳过）。
+   **约束是绑定的，必须在任何动作之前加载**。输出一行确认：
+   `Constraints loaded from harness-constraints.md (+ loop-constraints.md): N rules active.`
 3. 读 `STATE.md` 了解当前活动、人类收件箱、上次运行时间。
 4. 读 `LESSONS.md`，避免重复已记录的返工。
 5. 跑 `bash init.sh` 确认环境健康。基线失败先修基线，不要在坏状态上叠新工作。
@@ -35,7 +38,7 @@ GitHub issue/PR 是可选模块（`/harness-loop-issue`），不属于核心。
 
 1. 执行者与验证者必须是不同的智能体实例、不同的指令。同一会话自我验证无效。
 2. 同一事项最多 3 次自动尝试，之后升级给人。
-3. 拒绝列表路径（`.env`、`auth/**` 等）未经人工批准绝不自动编辑。完整清单以 `loop-constraints.md` 的 `## Paths` 代码块为准——`gate-check.mjs` 从那里读取。
+3. 拒绝列表路径（`.env`、`auth/**` 等）未经人工批准绝不自动编辑。完整清单以 `harness-constraints.md` 的 `## Paths` 代码块为准（旧仓库回落 `loop-constraints.md`）——`gate-check.mjs` 从那里读取。
 4. 没有显式允许列表时，绝不自动合并。
 5. 绝不为了让 CI 变绿而禁用测试、跳过断言或注释掉检查。
 6. `loop-pause-all` 生效时立即退出，不做任何动作。
@@ -76,7 +79,8 @@ GitHub issue/PR 是可选模块（`/harness-loop-issue`），不属于核心。
 | 真实生产案例（全自动 loop） | `docs/09-case-magpie.md` |
 | v1 结构（已归档，仅参考） | `docs/archive/` |
 | 具体动作怎么做 | `skills/<技能名>/SKILL.md` |
-| 装配新项目 | `templates/` + `node scripts/harness-stage.mjs <repo> --upgrade --stage 1`（`harness-stage` 是 pack 级工具，消费方靠安装清单的 `packRoot` 定位） |
+| 验证者报告格式 | `templates/verifier-report.md` |
+| 装配新项目 | `templates/` + `node <pack>/scripts/harness-stage.mjs <repo> --upgrade --stage 1`（`harness-stage` 是 pack 级工具，不在消费方的 `scripts/` 里；消费方靠 `.claude/skills/.harness-loop-install.json` 的 `packRoot` 定位 pack） |
 
 ## 两个建设阶段
 

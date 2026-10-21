@@ -23,14 +23,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, fail, rejectUnknownFlags } from './lib/common.mjs';
+import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint } from './lib/common.mjs';
 
 export const MANIFEST_DIR = '.loop-worktrees';
 export const MANIFEST_FILE = `${MANIFEST_DIR}/manifest.json`;
 export const STATUSES = ['active', 'rejected', 'escalated', 'merged'];
 /** cleanup 默认只扫终态；active 与 merged 不动。 */
-export const CLEANUP_STATUSES = ['rejected', 'escalated'];
+// merged 也是终态：验证通过的 worktree 不回收，每轮成功都留一棵完整副本。
+// 删分支前会检查它确实已合并进 base，避免 -D 丢掉未合并的提交。
+export const CLEANUP_STATUSES = ['rejected', 'escalated', 'merged'];
 
 /** 清掉继承的 GIT_*：pre-commit hook 里跑时会指向外层仓库。 */
 function gitEnv() {
@@ -84,6 +85,15 @@ function create(root, runId, base) {
     fail(`run id "${runId}" already has an active worktree at ${existing.path}`, 1);
   }
 
+  // 未忽略的 worktree 目录会让 `git status` 永远有噪音，也会被误提交。
+  // 缺就补一行——比让人每次手动处理更可靠，且是幂等的。
+  const ignore = path.join(root, '.gitignore');
+  const ignoreText = fs.existsSync(ignore) ? fs.readFileSync(ignore, 'utf8') : '';
+  if (!new RegExp(`^${MANIFEST_DIR.replace('.', '\\.')}/?$`, 'm').test(ignoreText)) {
+    fs.writeFileSync(ignore, `${ignoreText}${ignoreText.endsWith('\n') || !ignoreText ? '' : '\n'}${MANIFEST_DIR}/\n`, 'utf8');
+    process.stdout.write(`added ${MANIFEST_DIR}/ to .gitignore\n`);
+  }
+
   const rel = `${MANIFEST_DIR}/${runId}`;
   const branch = `loop/${runId}`;
   try {
@@ -134,6 +144,21 @@ function cleanup(root) {
       // git 改措辞时这里会退化成永久跳过——升级时先跑 U-13 的恢复测试。
       if (!/not a working tree|is not a working tree|no such file/i.test(removeError)) {
         skipped.push({ entry, reason: removeError });
+        continue;
+      }
+    }
+    // merged 的分支只能删"已合并进 base"的：`-D` 会丢掉未合并的提交。
+    // 状态是 merged 而分支没合并进 base，说明 mark 用错了——停下来问人。
+    if (entry.status === 'merged' && entry.branch) {
+      const base = entry.baseBranch || entry.base || "HEAD";
+      let mergedIntoBase = false;
+      try {
+        mergedIntoBase = git(['branch', '--merged', base], root)
+          .split(String.fromCharCode(10)).map((l) => l.replace(/^\*\s*/, '').trim()).includes(entry.branch);
+      } catch { mergedIntoBase = false; }
+      if (!mergedIntoBase) {
+        entry.status = 'escalated';
+        skipped.push({ entry, reason: `marked merged but ${entry.branch} is not merged into ${base} — refusing to delete it` });
         continue;
       }
     }
@@ -231,6 +256,6 @@ Exit codes: 0 ok · 1 bad arguments · 2 something was skipped during cleanup
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

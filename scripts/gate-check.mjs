@@ -18,13 +18,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-import { parseArgs, readText, printJson, matchesDenylist, loadDenylist, DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg } from './lib/common.mjs';
+import {
+  parseArgs, readText, printJson, matchesDenylist, loadDenylist, loadLimits,
+  DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg, isEntryPoint } from './lib/common.mjs';
 
+/**
+ * 兜底阈值。只在本目录没有 loop-constraints.md（或解析不出该行）时使用，
+ * 且输出里会标 `limits_source: defaults`——一个静默接管的第二真相源
+ * 比没有真相源更难查。
+ */
 export const DEFAULTS = {
   maxFilesPerFix: 5,
   maxFilesPerCleanup: 10,
-  maxAttempts: 3,
 };
 
 // 白名单。未识别的值一律参数错误退出，绝不放行——
@@ -32,6 +37,13 @@ export const DEFAULTS = {
 const PHASES = ['fix', 'gate'];
 const VERDICTS = ['approve', 'reject', 'escalate-human', 'none'];
 const RED_CHECKS = ['pass', 'fail', 'not-run'];
+const CHANGE_CLASSES = ['behavior', 'docs', 'config', 'refactor'];
+
+/** 闸门判定顺序。README 与 docs/03 的表格由它驱动，测试断言三者一致。 */
+export const GATE_ORDER = [
+  'pause', 'wip-limit', 'denylist', 'untrusted-shape', 'scope', 'head-commit',
+  'red-check', 'verification-evidence', 'verification', 'awaiting-verification',
+];
 
 /**
  * kill switch：只认独占一行的标记。
@@ -59,10 +71,24 @@ export function runEvidenceCommand(command, cwd, timeoutMs = 120000) {
   }
 }
 
+/**
+ * 剥离围栏代码块，再做行匹配。
+ *
+ * 不剥围栏时，一份"教人怎么暂停"的文档会把循环停死（实测：模板里的示例
+ * 直接触发 exit 3）；不归一化时，行尾一个零宽字符就能绕过刹车。
+ * 两个方向都是真的，所以两个方向都要处理。
+ */
+export function stripFences(text) {
+  return text.replace(/^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[^\n]*$/gm, '');
+}
+
 export function isPaused(statePath) {
   const { files, readable } = stateFiles(statePath);
   for (const { name, text } of files) {
-    if (/^\s*loop-pause-all\s*$/m.test(text)) return { paused: true, where: name, readable };
+    const clean = stripFences(String(text || '').normalize('NFC'))
+      // Zero-width / format chars (U+200B etc.) defeat the line anchor and silently disable the brake.
+      .replace(/\p{Cf}/gu, '');
+    if (/^\s*loop-pause-all\s*$/m.test(clean)) return { paused: true, where: name, readable };
   }
   return { paused: false, where: null, readable };
 }
@@ -84,7 +110,9 @@ export function stateFiles(statePath) {
   }
   // readable 看文件是否存在，不看内容：空 STATE.md 是合法的新装配状态，
   // 只有"路径指错了"才是参数错误。
-  const names = ['STATE.md', 'loop-constraints.md'];
+  // 拆文件后 kill switch 可能写在 harness-constraints.md 里；两个都读，
+  // 否则"暂停标记换个文件放"就静默失效。
+  const names = ['STATE.md', 'harness-constraints.md', 'loop-constraints.md'];
   const files = names.map((name) => ({ name, text: readText(path.join(target, name)) }));
   return { files, readable: names.some((name) => fs.existsSync(path.join(target, name))) };
 }
@@ -96,31 +124,29 @@ export function stateFiles(statePath) {
  * 有表头但零数据行 → 0。两者必须可区分，否则"没写表"会被读成"没有活动项"。
  */
 export function activeItems(text) {
-  if (!text) return null;
+  if (!text) return { count: null, malformed: null };
   const section = text.split(/^##\s+Active\s*$/m)[1];
-  if (section === undefined) return null;
+  if (section === undefined) return { count: null, malformed: null };
   const body = section.split(/^#{1,2}\s/m)[0];
   const rows = body.split('\n').filter((l) => l.trim().startsWith('|'));
+  // 有表但缺分隔行：表格结构已损坏，按 0 项读会把"读不懂"读成"没有活动项"。
+  if (rows.length === 1) {
+    return { count: null, malformed: '## Active 表只有一行（缺表头或分隔行）' };
+  }
   // 前两行是表头与分隔行
   const data = rows.slice(2).filter((l) => {
     const cells = l.split('|').slice(1, -1).map((c) => c.trim());
     return cells.length > 0 && cells.some((c) => c && c !== '—' && c !== '-');
   });
-  return data.length;
+  return { count: data.length, malformed: null };
 }
 
 /**
  * 判定闸门。
  *
- * 检查顺序（先命中者决定结果）：
- *   1. pause
- *   2. denylist
- *   3. attempts >= max
- *   4. scope (files > max)
- *   5. head-commit (TOCTOU)
- *   6. red-check
- *   7. verification-evidence (approve 必须带可核对的 verifier 报告)
- *   8. verification
+ * 检查顺序由 GATE_ORDER 定义（先命中者决定结果）。
+ * 「该不该继续试」不在这里判：尝试次数是账本的事实，归 ledger-check 的
+ * attempt-limit。闸门只看这次改动本身。
  */
 export function checkGates(input, opts = {}) {
   const cfg = { ...DEFAULTS, ...opts };
@@ -135,12 +161,15 @@ export function checkGates(input, opts = {}) {
     reviewedSha = null,
     headSha = null,
     redCheck = 'not-run',
+    changeClass = 'behavior',
+    implementer = null,
     evidenceFile = null,
     evidenceCwd = null,
     noReplay = false,
     notRun = [],
     // 拒绝列表由调用方从 loop-constraints.md 读入；不给则用 JS 常量兜底。
     denylist = DENYLIST_PATTERNS,
+    stateText = null,
   } = input;
 
   const base = {
@@ -149,6 +178,7 @@ export function checkGates(input, opts = {}) {
     attempts,
     files_changed: diffFiles.length,
     verdict,
+    change_class: changeClass,
   };
 
   // 1. 暂停
@@ -161,6 +191,19 @@ export function checkGates(input, opts = {}) {
       allowed_actions: [],
       exit_code: 3,
       next: 'exit immediately; do not dispatch any sub-agent; note the pause in STATE.md',
+    };
+  }
+
+  // 1a. 表格结构损坏：读不懂 ≠ 没有活动项。静默返回 0 会让 WIP=1 失效。
+  if (input.activeMalformed) {
+    return {
+      ...base,
+      decision: 'escalate',
+      gate: 'wip-limit',
+      reason: `STATE.md 的 ## Active 表结构损坏：${input.activeMalformed}`,
+      allowed_actions: ['repair the table to header + separator + data rows'],
+      exit_code: 2,
+      next: '修好 ## Active 表（表头、分隔行、数据行），否则无法判定 WIP',
     };
   }
 
@@ -196,20 +239,29 @@ export function checkGates(input, opts = {}) {
     };
   }
 
-  // 3. 尝试上限
-  if (attempts >= cfg.maxAttempts) {
-    return {
-      ...base,
-      decision: 'escalate',
-      gate: 'max-attempts',
-      reason: `attempts ${attempts} reached the limit (${cfg.maxAttempts})`,
-      allowed_actions: [],
-      exit_code: 2,
-      next: 'STOP — escalate with full context. Do not retry. See docs/05-failure-modes.md',
-    };
+  // 2b. 不可信输入的形状：带 src:untrusted 标记的条目，正文必须已经包成
+  //     code span。裸文本来自第三方，下一轮会被当成自身笔记读进去。
+  if (input.stateText) {
+    const section = String(input.stateText).split(/^##\s+High Priority\s*$/m)[1];
+    if (section !== undefined) {
+      const body = section.split(/^##\s/m)[0];
+      const bad = body.split(String.fromCharCode(10)).filter((l) => /src:untrusted/.test(l))
+        .filter((l) => !/`[^`]+`/.test(l.replace(/<!--[\s\S]*?-->/g, '')));
+      if (bad.length) {
+        return {
+          ...base,
+          decision: 'escalate',
+          gate: 'untrusted-shape',
+          reason: `${bad.length} STATE.md item(s) carry src:untrusted but are not wrapped in a code span`,
+          allowed_actions: ['rewrite the item with scripts/state-write.mjs'],
+          exit_code: 2,
+          next: 'third-party text must be written through state-write.mjs (code span + origin marker)',
+        };
+      }
+    }
   }
 
-  // 4. 范围
+  // 3. 范围
   const fileLimit = isCleanup ? cfg.maxFilesPerCleanup : cfg.maxFilesPerFix;
   if (diffFiles.length > fileLimit) {
     return {
@@ -217,6 +269,7 @@ export function checkGates(input, opts = {}) {
       decision: 'escalate',
       gate: 'scope',
       reason: `diff touches ${diffFiles.length} files, over the limit of ${fileLimit}`,
+      limits_source: cfg.limitsSource || 'defaults',
       allowed_actions: [],
       exit_code: 2,
       next: isCleanup
@@ -228,7 +281,11 @@ export function checkGates(input, opts = {}) {
   // 5. TOCTOU：合并必须绑定审查过的 commit
   // 审查期间若有人又 push，head 变了，合并必须失败——否则未审查的代码会进 main。
   // 缺 sha 也要拦：这条是唯一绝不能跳的闸，"参数不全就绕过"等于没有闸。
-  if (phase === 'gate') {
+  // 非行为类改动（docs/config/refactor）不要求 sha 绑定：它们的风险面是
+  // "文档说错了"，不是"审查后代码又变了"。跳过必须显式记进 checks_not_run，
+  // 否则"没做"会消失——那正是 NOT RUN 规则要防的省略。
+  const skipSha = phase === 'gate' && changeClass !== 'behavior';
+  if (phase === 'gate' && !skipSha) {
     if (!reviewedSha || !headSha) {
       return {
         ...base,
@@ -255,7 +312,12 @@ export function checkGates(input, opts = {}) {
     }
   }
 
-  // 8. 回退测试：新增测试必须能在修复前的代码上真的挂掉
+  // 6. 回退测试：**行为类**改动的新增测试必须能在修复前的代码上真的挂掉。
+  //
+  // 硬约束的原文是"新增测试必须通过回退测试"，限定词是"新增测试"。此前对任何
+  // 改动都要求 red-check pass，于是改一个错别字只有两条路：escalate，或谎报
+  // pass（而闸门接受谎报）——一个逼人撒谎的闸门，训练出来的习惯会迁移到代码改动上。
+  // 非行为类放行 not-run，但必须在验证者报告里写下理由；没写理由仍然拦。
   // 默认值是 'not-run' 不是 'none'：忘了传参数与明确没跑，在退出码上必须不可区分。
   if (redCheck === 'fail') {
     return {
@@ -268,15 +330,15 @@ export function checkGates(input, opts = {}) {
       next: 'a test that passes on the broken code is decorative. Rewrite it so it fails on the pre-fix code and names the wrong behavior.',
     };
   }
-  if (redCheck === 'not-run' && phase === 'gate') {
+  if (redCheck === 'not-run' && phase === 'gate' && changeClass === 'behavior') {
     return {
       ...base,
       decision: 'escalate',
       gate: 'red-check',
       reason: 'red check was not run and this change alters behavior',
-      allowed_actions: ['run the red check', 'escalate to human if the change genuinely needs no test'],
+      allowed_actions: ['run the red check', 'declare --change-class docs|config|refactor with a written reason in the verifier report'],
       exit_code: 2,
-      next: 'run the red check, or escalate with a reason why this change needs no test',
+      next: 'run the red check, or re-declare the change class and justify it under "### Checks not run" in the verifier report',
     };
   }
 
@@ -387,6 +449,95 @@ export function checkGates(input, opts = {}) {
         next: 'the report exists but does not account for what was not run. See the verifier output format in /harness-loop step 4.',
       };
     }
+    // 非行为类改动跳过回退测试，但"为什么不需要"必须写进报告。
+    // 只放行不要求理由，等于把 change-class 变成一个新的谎报入口。
+    if (redCheck === 'not-run' && phase === 'gate' && changeClass !== 'behavior') {
+      const entry = (notRunSection || '').split('\n')
+        .find((l) => /Red check/i.test(l));
+      const why = entry ? entry.replace(/^.*?Red check[^—–-]*[—–-]?\s*/i, '').trim() : '';
+      if (why.length < 20) {
+        return {
+          ...base,
+          decision: 'escalate',
+          gate: 'red-check',
+          reason: `change class ${changeClass} skips the red check, so "### Checks not run" must state why in >= 20 chars (got ${why.length})`,
+          allowed_actions: ['write the reason under "### Checks not run"'],
+          exit_code: 2,
+          next: 'a skipped red check is allowed for docs/config/refactor, but only with a written reason',
+        };
+      }
+    }
+    // 8b-2. 输出片段与作者身份。
+    //
+    // 只校验"命令能重放"证明的是命令跑成功了，不是验证者看过结果：一份手写报告
+    // 配 `node -e "process.exit(0)"` 曾经直接 proceed。要区分"跑了"与"说跑了"，
+    // 报告必须贴出真实输出；要区分"独立验证"与"自己批自己"，报告必须署名，
+    // 且执行者不能同时是作者。
+    const AUTHOR_LINE = /^\s*Author:\s*(\S.*)$/m;
+    const REVIEWED_LINE = /^\s*Reviewed commit:\s*(\S+)\s*$/m;
+    const author = report.match(AUTHOR_LINE);
+    const reviewedCommit = report.match(REVIEWED_LINE);
+    if (!author) missing.push('an "Author: <verifier>" line (the implementer cannot author the report)');
+    if (!reviewedCommit) missing.push('a "Reviewed commit: <sha>" line');
+    else if (reviewedSha && reviewedCommit[1].toLowerCase() !== String(reviewedSha).toLowerCase()) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `report reviews ${reviewedCommit[1].slice(0, 12)} but --reviewed-sha is ${String(reviewedSha).slice(0, 12)}`,
+        allowed_actions: ['re-run verification on the reviewed commit'],
+        exit_code: 2,
+        next: 'the report must name the commit it actually reviewed; a mismatch means it reviewed something else',
+      };
+    }
+    // 独立性：作者不能是执行者本人。执行者身份由 --implementer 传入
+    // （没传就不判——无从比较时不能假装判过）。
+    if (author && implementer && author[1].trim().toLowerCase() === String(implementer).trim().toLowerCase()) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `report Author is the implementer (${author[1].trim()}) — the implementer cannot verify their own change`,
+        allowed_actions: ['have a different instance write the report'],
+        exit_code: 2,
+        next: 'independent verification means a different instance. Author must differ from --implementer.',
+      };
+    }
+    // 声明 PASS 的检查必须贴出输出片段：其后 8 行内有一个非空的围栏块或引用块。
+    const lines = report.split('\n');
+    const noSnippet = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*-\s*(Tests|Red check|Real-use validation|Lint|Scope check|Denylist check):\s*`[^`]+`\s*(?:→|->)\s*(PASS)\b/);
+      if (!m) continue;
+      const window = lines.slice(i + 1, i + 9).join('\n');
+      const fence = window.match(/^\s*(```|~~~)[^\n]*\n([\s\S]*?)^\s*\1\s*$/m);
+      const quote = window.match(/^\s*>\s*\S/m);
+      const hasSnippet = (fence && fence[2].trim().length > 0) || quote;
+      if (!hasSnippet) noSnippet.push(m[1]);
+    }
+    if (noSnippet.length) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `evidence claims PASS for ${noSnippet.join(', ')} but carries no output snippet — paste at least one line of real output under the check`,
+        allowed_actions: ['re-run the check and paste its output'],
+        exit_code: 2,
+        next: 'a claim without output is a claim. Put a fenced block or a `>` line with the real output under each PASS.',
+      };
+    }
+    if (missing.length) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `evidence file ${evidenceFile} is missing: ${missing.join('; ')}`,
+        allowed_actions: ['add the missing fields to the verifier report'],
+        exit_code: 2,
+        next: 'the report must name its author and the commit it reviewed. See templates/verifier-report.md.',
+      };
+    }
+
     // 报告自称 REJECT / ESCALATE_HUMAN 时，命令行说 approve 不成立。
     if (verdictLine[1] !== 'APPROVE') {
       return {
@@ -426,6 +577,11 @@ export function checkGates(input, opts = {}) {
       };
     }
     if (noReplay) {
+      evidenceNotRun = [...evidenceNotRun, 'Evidence replay'];
+      replaySkipped = true;
+    } else if (changeClass !== 'behavior') {
+      // docs/config/refactor 的证据命令常常不可重入（改文档没有"跑一遍"）。
+      // 片段与署名仍然校验——那是防伪造的部分，重放是防"命令没跑"的部分。
       evidenceNotRun = [...evidenceNotRun, 'Evidence replay'];
       replaySkipped = true;
     } else {
@@ -500,7 +656,11 @@ export function checkGates(input, opts = {}) {
   // checks_not_run 由证据里声明的 NOT RUN 与 --not-run 入参合并。
   // 只回显入参时，报告里写着的"没跑"会在输出里消失——而"未跑必须写明"
   // 是 loop-constraints.md 的三态约定，输出是它的下游。
-  const allNotRun = [...new Set([...evidenceNotRun, ...notRun])];
+  const allNotRun = [...new Set([
+    ...evidenceNotRun,
+    ...(skipSha ? ['Head commit binding'] : []),
+    ...notRun,
+  ])];
   return {
     ...base,
     decision: 'proceed',
@@ -511,7 +671,7 @@ export function checkGates(input, opts = {}) {
     ...(phase === 'fix' && verdict === 'approve'
       ? { warning: 'approve at fix phase is not a gate; merge requires --phase gate' }
       : {}),
-    ...(replaySkipped ? { warning: 'evidence commands were not replayed (--no-replay); recorded as NOT RUN' } : {}),
+    ...(replaySkipped ? { warning: `evidence commands were not replayed (${noReplay ? '--no-replay' : `change class ${changeClass}`}); recorded as NOT RUN` } : {}),
     checks_not_run: allNotRun,
     allowed_actions: ['propose PR', 'update state', 'request human merge'],
     forbidden_actions: ['auto-merge to main'],
@@ -547,7 +707,7 @@ function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
     'item', 'phase', 'attempts', 'diffFiles', 'verdict', 'pause', 'cleanup',
-    'reviewedSha', 'headSha', 'redCheck', 'constraintsRoot', 'notRun',
+    'reviewedSha', 'headSha', 'redCheck', 'changeClass', 'implementer', 'constraintsRoot', 'notRun',
     'evidenceFile', 'evidenceCwd', 'noReplay', 'state', 'json', 'help',
   ], 'gate-check');
   if (args.help) {
@@ -570,9 +730,15 @@ Options:
   --head-sha <sha>       Current head SHA. Omitted -> read from git rev-parse HEAD
                          (required at --phase gate; fails if neither is available)
   --red-check <state>    pass | fail | not-run — does the new test fail on pre-fix code? (default: not-run)
+  --change-class <c>     behavior | docs | config | refactor (default: behavior, fail-closed).
+                         Only behavior requires the red check at the gate phase; the others
+                         must justify the skipped red check in "### Checks not run".
+  --implementer <id>     Who wrote the change. If the report's Author matches this,
+                         the gate refuses: the implementer cannot verify their own work.
   --evidence-file <p>    Verifier report. Required with --verdict approve at --phase gate:
-                         the gate reads it, checks the verdict/evidence lines, and
-                         re-runs the command in each evidence line (the `<cmd>` after the check name).
+                         the gate reads it, checks the verdict/evidence lines, requires
+                         Author: / Reviewed commit: / an output snippet per PASS, and
+                         re-runs the command in each evidence line (the <cmd> after the check name).
   --evidence-cwd <dir>   Directory the evidence commands run in (default: cwd)
   --no-replay            Skip re-running evidence commands; the result is listed as NOT RUN
   --constraints-root <d> Directory holding loop-constraints.md (default: cwd). The denylist is
@@ -668,7 +834,7 @@ Exit codes:
   const state = stateFiles(statePath);
   // 读不到状态文件 ≠ 没有暂停。fail-closed：让调用方修正参数，而不是让闸门放行。
   if (!state.readable) {
-    fail(`--state ${statePath}: no STATE.md or loop-constraints.md found `
+    fail(`--state ${statePath}: no STATE.md, harness-constraints.md or loop-constraints.md found `
       + `(pass a directory that contains them, or the file itself)`, 1);
   }
   // gate 阶段拿不到 head 是调用环境的问题，不是"验证失败"：报参数错误，
@@ -679,11 +845,22 @@ Exit codes:
   }
 
   const activeFile = state.files.find((f) => f.name === 'STATE.md');
-  const activeCount = activeFile ? activeItems(activeFile.text) : null;
+  const active = activeFile ? activeItems(activeFile.text) : { count: null, malformed: null };
+
+  // 阈值来自约束文件；缺失的项回落到 DEFAULTS，并在输出里标出来源。
+  // 只读 denylist 不读阈值，等于把"可配置的策略"做成了"写死的常量"。
+  const constraintsRoot = typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd();
+  const limits = loadLimits(constraintsRoot);
+  const cfg = {
+    maxFilesPerFix: limits.maxFilesPerFix ?? DEFAULTS.maxFilesPerFix,
+    maxFilesPerCleanup: limits.maxFilesPerCleanup ?? DEFAULTS.maxFilesPerCleanup,
+    limitsSource: limits.maxFilesPerFix !== null ? 'constraints' : 'defaults',
+  };
 
   const input = {
     item: typeof args.item === 'string' ? args.item : null,
-    activeCount,
+    activeCount: active.count,
+    activeMalformed: active.malformed,
     phase: enumArg(args.phase, PHASES, '--phase') ?? null,
     attempts: numArg(args.attempts, '--attempts', 0),
     diffFiles,
@@ -696,10 +873,13 @@ Exit codes:
     isCleanup: boolArg(args.cleanup),
     // 拒绝列表的真相源是本仓库的 loop-constraints.md，不是脚本里的常量。
     // 维护者按文档在 ## Repo-Specific 加的路径必须真的被强制执行。
-    denylist: loadDenylist(typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd()),
+    denylist: loadDenylist(constraintsRoot),
+    stateText: activeFile ? activeFile.text : null,
     reviewedSha: typeof args.reviewedSha === 'string' ? args.reviewedSha : null,
     headSha: resolveHeadSha(args),
     redCheck: enumArg(args.redCheck, RED_CHECKS, '--red-check') ?? 'not-run',
+    changeClass: enumArg(args.changeClass, CHANGE_CLASSES, '--change-class') ?? 'behavior',
+    implementer: typeof args.implementer === 'string' ? args.implementer : null,
     evidenceFile: typeof args.evidenceFile === 'string' ? args.evidenceFile : null,
     evidenceCwd: typeof args.evidenceCwd === 'string' ? args.evidenceCwd : null,
     noReplay: boolArg(args.noReplay),
@@ -708,12 +888,12 @@ Exit codes:
       : [],
   };
 
-  const result = checkGates(input);
+  const result = checkGates(input, cfg);
 
   printJson(result);
   process.exit(result.exit_code);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isEntryPoint(import.meta.url)) {
   main();
 }

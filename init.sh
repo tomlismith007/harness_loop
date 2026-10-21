@@ -76,6 +76,10 @@ node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state "$
   || echo "  gate-check    OK (kill switch enforced)"
 rm -rf "$PAUSE_PROBE"
 node scripts/install-skills.mjs --target . --list > /dev/null && echo "  install-skills OK"
+# 不可信输入清洗器必须自证：它挡的是"第三方文本被当作指令"这条通道。
+node scripts/state-write.mjs --self-test > /dev/null && echo "  state-write   OK (sanitizer self-test)"
+# 清洁交接的仓库健康模式（跨天不该红）；--assert-fresh 是本轮跑完后的断言。
+node scripts/clean-state.mjs --check > /dev/null && echo "  clean-state   OK (repo health)"
 
 echo "=== Verification Complete ==="
 echo

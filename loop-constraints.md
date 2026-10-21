@@ -1,67 +1,7 @@
 # Loop Constraints
 
-> `/harness-loop` 在**每一轮开始时**读取本文件，并在任何动作之前加载全部规则。
-> 本文件中的约束是**绑定的**——agent 必须遵守。冲突时本文件优先于任何其他指令。
-
-## 加载确认
-
-每轮开始必须输出一行：
-
-```
-Constraints loaded from loop-constraints.md: N rules active.
-```
-
-若本文件不存在，回退到 `docs/04-safety.md` 的默认最小约束集，并明确说明正在使用回退集。
-
-## Push & Merge
-
-- 推送前必须先说明将要推送什么。
-- 未经人工批准，绝不自动合并到 main。
-- 始终先创建 draft PR；由人 review 后再标记 ready。
-- 合并由人工执行。循环只提议。
-- **合并必须绑定审查过的 commit**：`gh pr merge --match-head-commit <审过的 sha>`。
-  审查期间若有人又 push，head commit 变了，合并直接失败。这比"策略上要求重新审查"强——
-  策略靠自觉，`--match-head-commit` 靠 git 本身拒绝。
-
-## Paths（拒绝列表 — 触及即升级，绝不编辑）
-
-```
-.env
-.env.*
-**/secrets/**
-**/credentials/**
-**/*_key*
-**/*_secret*
-.terraform/**
-k8s/production/**
-**/migrations/**        # 除非有明确的迁移循环
-auth/**
-payments/**
-billing/**
-loop-constraints.md
-scripts/gate-check.mjs
-scripts/ledger-check.mjs
-scripts/lib/common.mjs
-.github/workflows/**
-package.json
-package-lock.json
-templates/**
-.githooks/**
-scripts/test.mjs
-audits/**
-```
-
-- 命中任一模式的路径：**停止编辑，写升级条目，交给人**。不做"顺便的小改动"。
-- 拒绝列表路径的改动由人工合并，即使 verifier 通过。
-
-## Code
-
-- 提议修复前必须跑测试（`npm test` 或项目等价命令）。
-- 绝不禁用测试、跳过断言或注释掉检查来让 CI 变绿。
-- 绝不重构无关代码 —— 一轮一个修复。
-- 单个修复触及超过 5 个文件，或需要设计变更 → 停止并升级。
-- 每个 work item 最多 3 次修复尝试；之后升级。
-- 机械执行尝试上限：每次尝试追加到 `loop-ledger.json`，重试前跑 `node scripts/ledger-check.mjs`。
+> 连续运行的规则：验证、预算、教训、清理。**阶段 2 才有这份文件。**
+> 拒绝列表与代码规则在 `harness-constraints.md`——两层分开，"只用 harness 不用 loop"才成立。
 
 ## Verification
 
@@ -82,6 +22,11 @@ audits/**
   测试必须变红；把 `ledger-check.mjs` 的 `stagnationThreshold` 改为 1 →
   `stagnation` 判定必须提前触发。
 
+## Cleanup
+
+- 清理类改动最多 10 个文件；超过需要人工审批。
+  <!-- 阈值来源：gate-check.mjs 的 loadLimits 解析本行（--cleanup） -->
+
 ## Budget
 
 - 日 token 上限：0        # 0 = 不启用；>0 时 ledger-check 读取
@@ -91,33 +36,6 @@ audits/**
 - 本轮发生**返工**（修了又改、验证被拒）→ 在 `LESSONS.md` 追加一行。
 - 同一条教训在 **3 个不同日期**出现 → 转正进本文件，从经验变成硬规则。
 - 转正后，验证者的检查项必须包含它。规则进了约束文件但验证者没读，等于没转正。
-
-## Communication
-
-- 做之前先说明将要做什么。
-- 未经批准不关闭 issue 或 PR。
-- 只在需要人工决策时通知，不做状态播报。
-
-## Kill Switch
-
-- `loop-pause-all` **独占一行**写在 `STATE.md` 或本文件里 → 立即退出，在 `STATE.md` 写一行说明。
-- 散文里提到不算；清除标记后人工重启。
-- `gate-check.mjs --state <dir>` 会真的读它并返回退出码 3。
-
-## Worktrees
-
-- 无人值守的代码改动必须在独立 git worktree 中进行。
-- 一个修复一个 worktree；验证者 REJECT 或升级后丢弃，不留残留分支。
-
-## Data
-
-- 绝不把 API key、token、凭据粘贴进调度提示词或状态文件。
-- CI 日志可能含机密；写入状态文件前必须脱敏。
-- `STATE.md` 会被提交，**不得包含任何凭据**。
-
----
-
-<!-- 仓库特定规则写在下方。上面的默认集可以收紧，不可以放宽。 -->
 
 ## Repo-Specific
 

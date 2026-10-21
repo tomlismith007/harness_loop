@@ -3,7 +3,7 @@
   "tool": "harness-loop drill-check",
   "guardrails": {
     "breaker": {
-      "recordedAt": "2026-10-19T04:10:13.929Z",
+      "recordedAt": "2026-10-21T13:22:22.505Z",
       "results": [
         {
           "id": "breaker.stagnation",
@@ -36,10 +36,10 @@
       ]
     },
     "gate": {
-      "recordedAt": "2026-10-19T04:10:13.925Z",
+      "recordedAt": "2026-10-21T13:22:22.492Z",
       "input": {
-        "file": "loop-constraints.md",
-        "sha256": "f862653963542ca6ecfed3cc2ebc7c7df099a6369a88728f7a7f36bf73c64fdc"
+        "file": "harness-constraints.md",
+        "sha256": "d6fd0fbeba60ee9f32fe9fddb0bf74e211805ad24f34700de9df6d2c5afc6073"
       },
       "results": [
         {
@@ -127,6 +127,13 @@
           "actual": "blocked by billing/**"
         },
         {
+          "id": "gate.denylist[harness-constraints.md]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching harness-constraints.md is blocked by harness-constraints.md",
+          "actual": "blocked by harness-constraints.md"
+        },
+        {
           "id": "gate.denylist[loop-constraints.md]",
           "direction": "sensitivity",
           "outcome": "passed",
@@ -197,6 +204,20 @@
           "actual": "blocked by scripts/test.mjs"
         },
         {
+          "id": "gate.denylist[scripts/state-write.mjs]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching scripts/state-write.mjs is blocked by scripts/state-write.mjs",
+          "actual": "blocked by scripts/state-write.mjs"
+        },
+        {
+          "id": "gate.denylist[scripts/state-commit.mjs]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching scripts/state-commit.mjs is blocked by scripts/state-commit.mjs",
+          "actual": "blocked by scripts/state-commit.mjs"
+        },
+        {
           "id": "gate.denylist[audits/**]",
           "direction": "sensitivity",
           "outcome": "passed",
@@ -209,6 +230,40 @@
           "outcome": "passed",
           "expected": "src/app.ts is allowed",
           "actual": "allowed"
+        }
+      ]
+    },
+    "verifier": {
+      "recordedAt": "2026-10-21T13:22:22.504Z",
+      "mode": "offline",
+      "results": [
+        {
+          "id": "verifier.control",
+          "direction": "specificity",
+          "outcome": "passed",
+          "expected": "proceed",
+          "actual": "proceed"
+        },
+        {
+          "id": "verifier.forged-no-snippet",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "escalate",
+          "actual": "escalate (verification-evidence)"
+        },
+        {
+          "id": "verifier.self-authored",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "escalate",
+          "actual": "escalate (verification-evidence)"
+        },
+        {
+          "id": "verifier.wrong-commit",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "escalate",
+          "actual": "escalate (verification-evidence)"
         }
       ]
     }
