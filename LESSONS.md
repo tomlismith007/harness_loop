@@ -32,6 +32,15 @@ Evidence: <commit / issue / PR 号>
 
 <!-- 尚未转正的经验。每条挂证据与出现次数。 -->
 
+**装了就能用，不能只看「文件复制成功」。**
+原因：`npx skills add` 只复制技能目录，不写装配器的安装清单；技能第一条命令读那份清单，
+装完必报 `Cannot find module`。同一类错误还有两处：`harness-loop-init` 的 bundle 只带 2 个
+模板（阶段 1 要 6 个），缺的模板被渲染成 `SKIPPED (exists)` 并退出 0；从技能目录装配时
+兄弟技能在上一层，旧实现静默跳过、清单写 `skills: []`。三处都是「退出码 0 + 看起来成功」。
+Seen 1× (2026-10-22)
+Evidence: `docs/audit/2026-10-22-skills-audit.md` P0-1/P0-2/P1-1；commit 5ed2c6f；
+8 条新断言回退旧实现后全红
+
 **改「路径 / 落盘位置」的脚本，测试必须断言实际写入的目录，不能只看退出码。**
 原因：`install-skills.mjs` 只写 `.zcode`，`--layout agents` 被静默忽略——退出码 0、
 输出像成功，技能全落到错的地方。只断言退出码的测试一直是绿的。

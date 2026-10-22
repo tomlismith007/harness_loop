@@ -1,11 +1,15 @@
 # Loop State
 
-Last run: 2026-10-21
+Last run: 2026-10-22
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表。
 **每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
+
+- [x] **技能装完即可用（P0/P1，2026-10-22）**：P0-1 首条命令读不存在的 packRoot 清单 → 改用技能目录内的装配器；P0-2 离线路径装 0 个技能 → 上一层找兄弟技能 + 找不到时报错；P1-1 harness-loop-init 模板只有 2 个导致静默半装 → 补全 + 渲染器三态 + error 计入退出码；P1-3 三处死路提示（install-skills、写死的 scripts/harness-stage.mjs ×2）→ 改用 process.argv[1]；顺带修源即目标 + --force 的 ENOENT。证据：`node scripts/test.mjs` **657/0**；`bash init.sh` 退出 0；临时目录 npx 实装后文档首条命令跑通，阶段 1 出 7 文件、阶段 2 出 3 文件；8 条新断言回退旧实现后全红。commit 5ed2c6f。审计与 spec 见 `docs/audit/2026-10-22-skills-audit.md`、`docs/audit/2026-10-22-cleanup-spec.md`。
+- [ ] **待人工**：本次改动触及拒绝列表路径 `scripts/sync-skills.mjs` 与 `skills/*/scripts/**`（生成副本），且文件数 8 > 5 的 scope 阈值。按 harness-constraints.md 需人工合并，循环不得自动合入 main。分支 `fix/skills-install-p0-p1`，commit 5ed2c6f。
+- [ ] **待决策（审计 spec §8）**：Q2 是否合并两个装配技能（B5，约省 197 KB）；Q3 两个未合并分支；Q4 `audits/` 与 `REPAIR-SPEC.md`；Q5 `docs/harness-loop-guide.html`。
 
 - [x] **按 `audits/harness-loop-remediation-spec-2026-10-21.md` 修复 P0/P1 批次（2026-10-21）**：
   R-01 change-class、R-02 隐藏目录 denylist、R-03 尝试次数读账本、R-04 验证者模板、R-05 `--self` 与 CI 真跑、
