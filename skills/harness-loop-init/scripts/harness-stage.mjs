@@ -575,6 +575,15 @@ function copySkillDir(name, target, force, results) {
         continue;
       }
       fs.rmSync(dest, { recursive: true, force: true });
+    } else if (exists(dest) && fs.readdirSync(dest).length > 0 && !force) {
+      // 目标非空但没有 SKILL.md：可能是用户的目录，恰好放了同名脚本。
+      // 直接 cpSync 会静默覆盖——旧实现就是这么把用户的 gate-check.mjs 换掉的。
+      results.push({
+        status: 'skipped',
+        path: dest,
+        reason: '非空目录且没有 SKILL.md——疑似用户自己的目录；确认后加 --force',
+      });
+      continue;
     }
     fs.cpSync(src, dest, { recursive: true });
     results.push({ status: 'written', path: dest });
@@ -587,10 +596,20 @@ function copySkillDir(name, target, force, results) {
  * 消费方仓库不复制 harness-stage.mjs（它是 pack 级工具），而技能要用它做
  * 前置检查与验证。技能从这份清单读 packRoot。清单是定位信息，不是技能副本，
  * 所以即使技能已存在（skipped）也要写。
+ *
+ * `skills` 记的是**该宿主上实际存在的**技能，不是"本包有哪四个"。写死全部
+ * 名字时，只装了一个技能的项目会被 install-skills --check 报成"清单记着
+ * 已安装，但副本缺失"——一份过度声称的清单比没有清单更难查。
  */
 function writeInstallManifest(target, results) {
   for (const destDir of SKILL_DEST_DIRS) {
-    const dest = path.join(target, destDir, INSTALL_MANIFEST);
+    const dir = path.join(target, destDir);
+    const dest = path.join(dir, INSTALL_MANIFEST);
+    const present = exists(dir)
+      ? fs.readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && exists(path.join(dir, e.name, 'SKILL.md')))
+        .map((e) => e.name).sort()
+      : [];
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.writeFileSync(dest, JSON.stringify({
       installedAt: new Date().toISOString(),
@@ -598,7 +617,7 @@ function writeInstallManifest(target, results) {
       packVersion: PACK_VERSION,
       scope: 'workspace',
       layout: 'both',
-      skills: ['harness-init', 'harness-loop-init', 'harness-loop', 'harness-loop-issue'],
+      skills: present,
     }, null, 2) + '\n', 'utf8');
     results.push({ status: 'written', path: dest });
   }

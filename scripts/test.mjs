@@ -1243,8 +1243,50 @@ section('14. 两阶段驱动器');
     runStage(emptyHost, ['--upgrade', '--stage', '1']);
     ok('空的技能目录也会被装上（不静默跳过）',
       fs.existsSync(path.join(emptyHost, '.claude', 'skills', 'harness-init', 'SKILL.md')));
+
     rmrf(emptyHost);
+
+    // 非空但无 SKILL.md 的目录：可能是用户的目录，恰好放了同名脚本。
+    // 直接 cpSync 会静默覆盖——旧实现就是这么把用户的 gate-check.mjs 换掉的。
+    // 必须是**全新**目录：复用已装过的目录会走"已安装"分支，测不到这条保护。
+    const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-userdir-'));
+    fs.writeFileSync(path.join(ud, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    const userDir = path.join(ud, '.claude', 'skills', 'harness-loop');
+    fs.mkdirSync(path.join(userDir, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(userDir, 'scripts', 'gate-check.mjs'), '// USER TOOL\n');
+    runStage(ud, ['--upgrade', '--stage', '1']);
+    ok('非空且无 SKILL.md 的目录不被静默覆盖',
+      readText(path.join(userDir, 'scripts', 'gate-check.mjs')).includes('USER TOOL'));
+    runStage(ud, ['--upgrade', '--stage', '1', '--force']);
+    ok('--force 时才覆盖用户的同名文件',
+      !readText(path.join(userDir, 'scripts', 'gate-check.mjs')).includes('USER TOOL'));
+    rmrf(ud);
     rmrf(ft);
+  }
+
+  // 清单的 skills 必须等于磁盘上实际存在的技能，不是写死的四个名字。
+  // 写死时，只装了一个技能的项目会被 install-skills --check 报成
+  // "清单记着已安装，但副本缺失"——一份过度声称的清单比没有清单更难查。
+  {
+    const one = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-one-skill-'));
+    fs.writeFileSync(path.join(one, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    runStage(one, ['--upgrade', '--stage', '1']);
+    const manifestSkills = (dot) => JSON.parse(
+      readText(path.join(one, dot, 'skills', '.harness-loop-install.json'))).skills;
+    const onDisk = (dot) => fs.readdirSync(path.join(one, dot, 'skills'), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && fs.existsSync(path.join(one, dot, 'skills', e.name, 'SKILL.md')))
+      .map((e) => e.name).sort();
+    for (const dot of ['.claude', '.agents']) {
+      eq(`${dot} 清单与磁盘一致`, manifestSkills(dot).join(','), onDisk(dot).join(','));
+    }
+    // 删掉一个已装技能后，下一次装配要把它补回来（清单也随之恢复）。
+    fs.rmSync(path.join(one, '.claude', 'skills', 'harness-loop-issue'), { recursive: true, force: true });
+    runStage(one, ['--upgrade', '--stage', '1']);
+    ok('缺失的技能在下次装配时被补回',
+      fs.existsSync(path.join(one, '.claude', 'skills', 'harness-loop-issue', 'SKILL.md')));
+    eq('补回后清单仍与磁盘一致',
+      manifestSkills('.claude').join(','), onDisk('.claude').join(','));
+    rmrf(one);
   }
   // 安装清单记录 packRoot：消费方没有 harness-stage.mjs，技能靠它定位 pack。
   for (const d of ['.claude/skills', '.agents/skills']) {

@@ -88,11 +88,12 @@ function syncSkill(skill, bundle, { check }) {
   const srcRoot = path.join(PACK_ROOT, 'scripts');
   const dstRoot = path.join(PACK_ROOT, 'skills', skill);
   const diffs = [];
+  const removed = [];
   let written = 0;
 
   if (!fs.existsSync(dstRoot)) {
     diffs.push(`${skill}: 技能目录不存在`);
-    return { diffs, written };
+    return { diffs, written, removed };
   }
 
   for (const [srcRel, dstRel] of bundleFiles(bundle)) {
@@ -117,6 +118,9 @@ function syncSkill(skill, bundle, { check }) {
 
   // 反向：技能目录里多出来的文件也是漂移（删掉的依赖会留下死文件）。
   // 只看 scripts/ 与 templates/——SKILL.md 是手写的，不属于产物。
+  //
+  // 这些目录是**产物目录**：里面的一切都由本脚本生成。手放进去的文件会被删，
+  // 所以删除必须逐条打印——静默删除一个别人的草稿比报错更糟。
   for (const [sub, expected] of [
     ['scripts', new Set(bundle.scripts.concat(['lib/common.mjs']))],
     ['templates', new Set(bundle.templates)],
@@ -129,11 +133,12 @@ function syncSkill(skill, bundle, { check }) {
         diffs.push(`${skill}: 多余的副本 ${sub}/${f}`);
       } else {
         fs.rmSync(path.join(dir, f), { force: true });
+        removed.push(`${skill}: ${sub}/${f}`);
         pruneEmpty(dir);
       }
     }
   }
-  return { diffs, written };
+  return { diffs, written, removed };
 }
 
 /** 删掉清空后的目录——一个空的 templates/ 会让"这个技能要模板吗"读不出来。 */
@@ -172,15 +177,17 @@ Exit codes: 0 in sync · 1 drift (--check) · 2 bad arguments
 
   const check = Boolean(args.check);
   const diffs = [];
+  const removed = [];
   let written = 0;
   for (const [skill, bundle] of Object.entries(SKILL_BUNDLES)) {
     const r = syncSkill(skill, bundle, { check });
     diffs.push(...r.diffs);
+    removed.push(...r.removed);
     written += r.written;
   }
 
   if (args.json) {
-    printJson({ check, written, diffs, in_sync: diffs.length === 0 });
+    printJson({ check, written, removed, diffs, in_sync: diffs.length === 0 });
   } else if (check) {
     for (const d of diffs) process.stdout.write(`DRIFT  ${d}\n`);
     process.stdout.write(diffs.length
@@ -188,6 +195,8 @@ Exit codes: 0 in sync · 1 drift (--check) · 2 bad arguments
       : 'All skill bundles match the source.\n');
   } else {
     for (const d of diffs) process.stdout.write(`WARN  ${d}\n`);
+    // 产物目录里的意外文件会被删——逐条打印，不静默。
+    for (const r of removed) process.stdout.write(`REMOVED  ${r}（不在闭包里，产物目录只放生成物）\n`);
     process.stdout.write(`Synced ${written} file(s) into ${Object.keys(SKILL_BUNDLES).length} skill(s).\n`);
   }
 
