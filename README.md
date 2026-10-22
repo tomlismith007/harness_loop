@@ -57,16 +57,22 @@ kill switch → 加载约束 → 选定唯一一项 → 执行者（独立 workt
 ## 快速开始
 
 ```bash
-# 1. 安装技能到两个宿主路径（.claude/skills + .agents/skills）
-node scripts/install-skills.mjs --scope user
+# 1. 安装技能（技能目录自带脚本与模板，装完即可运行）
+npx skills add tomlismith007/harness_loop
 
 # 2. 重启会话，然后在一个项目里：
-/harness-init            # 建 6 个地基文件
+/harness-init            # 建地基文件
 /harness-loop-init       # 装账本与运行日志
 /harness-loop 修复登录测试   # 跑一个 work item
 ```
 
 **装完重启会话**，否则 `/harness-init` 不会出现。
+
+没有 `npx`（离线环境）时，可以先把本仓库 clone 到本地，再从一个项目里跑：
+
+```bash
+node <clone>/scripts/install-from-git.mjs --target . --offline --cache <clone>
+```
 
 也可以直接用脚本（`harness-stage.mjs` 是 pack 级工具，从本仓库运行，不复制进消费方）：
 
@@ -96,22 +102,26 @@ user-scope 安装（`~/.claude/skills`）不计入。
 
 ---
 
-## 脚本（10 个）
+## 脚本（12 个）
 
 | 脚本 | 用途 | 退出码 |
 |---|---|---|
 | `harness-stage.mjs` | 两阶段检测 / 补齐 / 校验 | 0 报告或已达成；2 `--require` 未达成 |
 | `gate-check.mjs` | 闸门判定 + kill switch | 0 通过；1 参数错误；2 升级；3 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 继续；2 停止并升级 |
-| `install-skills.mjs` | 安装 / `--list` / `--check` / `--uninstall` | 0 成功；1 错误或漂移 |
+| `install-skills.mjs` | **维护者工具**：把技能推到本机宿主并比对本地源码（`--check`）。终端用户用 `npx skills add`，不需要它 | 0 成功；1 错误或漂移 |
 | `drill-check.mjs` | 护栏演练：拒绝列表逐条命中 + 熔断器具体触发（`--record` 写 `loop-drill.json`） | 0 全过；2 护栏没响 |
 | `clean-state.mjs` | 结束前检查：init.sh 无占位、无调试残留、Last run 是今天 | 0 干净；2 有未清理项 |
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`，manifest 记状态 | 0 成功；2 有未提交改动未清理 |
 | `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗并包成 code span | 0 写入；2 自检失败 |
 | `state-commit.mjs` | 一轮结束时原子更新 `STATE.md` + `loop-run-log.md`（备份 → tmp → rename，失败回滚） | 0 写入；2 写入失败已回滚 |
-| `test.mjs` | 自检（614 项断言） | 0 全通过 |
+| `install-from-git.mjs` | 从 git 远端取 pack 到 `~/.harness-loop/pack`，再转交 `harness-stage` 装配（消费方首次运行用） | 0 成功；1 参数错误；2 取包或装配失败 |
+| `sync-skills.mjs` | 把脚本与模板复制进每个技能目录（`--check` 校验一致性），让技能自包含 | 0 已同步；1 `--check` 发现漂移 |
+| `test.mjs` | 自检（630 项断言） | 0 全通过 |
 
-装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs`、`worktree.mjs` 与 `lib/common.mjs`。
+装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs`、`worktree.mjs`、`state-write.mjs`、`state-commit.mjs` 与 `lib/common.mjs`。
+
+**技能目录自带脚本与模板**（由 `sync-skills.mjs` 从 `scripts/`、`templates/` 生成）。这样 `npx skills add` 这类"只复制技能目录"的安装器也能得到可运行的技能；根目录仍是唯一真相源，`--check` 让副本漂移可机械判定。
 
 ---
 
@@ -178,9 +188,10 @@ user-scope 安装（`~/.claude/skills`）不计入。
 ├── loop-constraints.md        # 阶段 2：验证 / 预算 / 教训 / 清理
 ├── loop-run-log.md            # 只追加运行日志
 ├── docs/                      # 方法论（7 篇）+ archive/（v1 结构，仅参考）
-├── skills/                    # 4 个技能：两个建设阶段 + 顶层编排 + GitHub 发现
-├── templates/                 # 可直接复制进项目的 8 个模板（init.sh 由装配器生成）
-├── scripts/                   # 10 个零依赖 Node 脚本 + lib/（装配时复制 6 个运行时脚本）
+├── skills/                    # 4 个技能：各自自包含（SKILL.md + scripts/ + templates/）
+│                              # 副本由 sync-skills.mjs 生成并入库，改源后重跑
+├── templates/                 # 8 个模板的源（init.sh 由装配器生成）
+├── scripts/                   # 12 个零依赖 Node 脚本 + lib/（装配时复制 7 个运行时脚本）
 └── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```
 
@@ -189,7 +200,7 @@ user-scope 安装（`~/.claude/skills`）不计入。
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 614 项断言
+node scripts/test.mjs           # 630 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
@@ -202,7 +213,7 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 
 | 验证 | 方式 | 结果 | 可重跑？ |
 |---|---|---|---|
-| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 614 项断言全绿 | **是** |
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 630 项断言全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
 | 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |

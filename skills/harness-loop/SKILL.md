@@ -88,8 +88,7 @@ node scripts/worktree.mjs create --run-id <item>-attempt<N>
 - **有子智能体**：派一个新实例。提示词只含 diff、验证命令、报告格式，**不含执行者的推理过程**。
 - **没有子智能体**：要求人另开会话运行 `/harness-loop <item>`，并在指令中写明"只执行第 4 步独立验证，不得修改代码"。未经验证的改动不得标记完成。
 
-验证者的立场是**找出拒绝的理由**，不是确认它是对的。报告必须按
-`templates/verifier-report.md` 的格式写，并署名（`Author:`）——闸门会校验它与执行者不同。检查项：
+验证者的立场是**找出拒绝的理由**，不是确认它是对的。报告必须按下面的格式写，并署名（`Author:`）——闸门会校验它与执行者不同。检查项：
 
 | 检查 | 要求 |
 |---|---|
@@ -184,7 +183,7 @@ node scripts/gate-check.mjs \
 
 `--diff-files` 的 `@` 前缀**不可省**：裸路径会被当成"单个改动文件"，拒绝列表与范围两个闸门同时失效。
 
-`--verdict approve` 必须带 `--evidence-file`，报告（模板见 `templates/verifier-report.md`）须含：
+`--verdict approve` 必须带 `--evidence-file`，报告（格式见第 4 步）须含：
 
 - `## Verdict:` 行与 `Author:` / `Reviewed commit:` 字段；`Author` 等于 `--implementer` 会被拒
 - 至少一条 `- <check>: <cmd> → PASS|FAIL|NOT RUN` 证据行

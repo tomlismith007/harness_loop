@@ -871,6 +871,36 @@ section('10. 技能完整性');
   eq('技能恰好 4 个', onDisk.length, 4);
   eq('技能名单一致', onDisk.join(','), expectedSkills.join(','));
 
+  // 技能自包含：`npx skills add` 只复制技能目录，目录里没有脚本 = 装完必断。
+  // 副本一致性由 sync-skills --check 判定，这里断言"它真的有跑通"。
+  {
+    const sync = (() => {
+      try {
+        const out = execFileSync(process.execPath,
+          [path.join(PACK_ROOT, 'scripts', 'sync-skills.mjs'), '--check'], { encoding: 'utf8' });
+        return { code: 0, out };
+      } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    })();
+    eq('技能副本与源一致（sync-skills --check）', sync.code, 0);
+    if (sync.code !== 0) process.stdout.write(sync.out);
+
+    // 每个技能都必须带 SKILL.md + scripts/lib/common.mjs + VERSION。
+    for (const s of expectedSkills) {
+      ok(`技能 ${s} 自带 lib/common.mjs`,
+        fs.existsSync(path.join(SKILLS_DIR, s, 'scripts', 'lib', 'common.mjs')));
+      ok(`技能 ${s} 自带 VERSION`, fs.existsSync(path.join(SKILLS_DIR, s, 'VERSION')));
+    }
+    // 技能里提到的每个 `node scripts/x.mjs` 都必须真的在它自己的目录里。
+    for (const s of expectedSkills) {
+      const body = readText(path.join(SKILLS_DIR, s, 'SKILL.md'));
+      const named = [...new Set([...body.matchAll(/node scripts\/([a-z-]+\.mjs)/g)].map((m) => m[1]))];
+      for (const f of named) {
+        ok(`技能 ${s} 引用的 scripts/${f} 存在于其目录内`,
+          fs.existsSync(path.join(SKILLS_DIR, s, 'scripts', f)));
+      }
+    }
+  }
+
   for (const s of expectedSkills) {
     const content = fs.readFileSync(path.join(SKILLS_DIR, s, 'SKILL.md'), 'utf8');
     ok(`技能 ${s} 有 frontmatter name`, /^---[\s\S]*?name:\s*\S+/m.test(content));

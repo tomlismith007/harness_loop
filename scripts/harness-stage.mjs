@@ -549,17 +549,23 @@ const STAGE2_FILES = [
 /** 技能安装目录：两个宿主路径都装（Claude Code 与跨 agent 约定）。 */
 const SKILL_DEST_DIRS = [path.join('.claude', 'skills'), path.join('.agents', 'skills')];
 
+/**
+ * 复制**整个技能目录**，不只是 SKILL.md。
+ *
+ * 技能目录现在自带 scripts/ 与 templates/（由 sync-skills.mjs 生成），
+ * 这样 `npx skills add` 只复制目录也能得到可运行的技能。只复制 SKILL.md
+ * 时，装好的技能每条 `node scripts/x.mjs` 都指向不存在的路径。
+ */
 function copySkillDir(name, target, results) {
-  const src = path.join(SKILLS_DIR, name, 'SKILL.md');
-  if (!exists(src)) return;
+  const src = path.join(SKILLS_DIR, name);
+  if (!exists(path.join(src, 'SKILL.md'))) return;
   for (const destDir of SKILL_DEST_DIRS) {
-    const dest = path.join(target, destDir, name, 'SKILL.md');
-    if (exists(dest)) {
+    const dest = path.join(target, destDir, name);
+    if (exists(path.join(dest, 'SKILL.md'))) {
       results.push({ status: 'skipped', path: dest });
       continue;
     }
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(src, dest);
+    fs.cpSync(src, dest, { recursive: true });
     results.push({ status: 'written', path: dest });
   }
 }
