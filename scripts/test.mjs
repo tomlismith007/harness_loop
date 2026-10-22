@@ -1234,6 +1234,16 @@ section('14. 两阶段驱动器');
       !readText(path.join(skillDir, 'SKILL.md')).includes('USER EDIT'));
     ok('--force 替换后技能仍完整',
       fs.existsSync(path.join(skillDir, 'scripts', 'gate-check.mjs')));
+
+    // 空目录不算"已安装"：只判目录存在会让安装静默跳过并报成功，
+    // 而那个宿主上其实什么都没有。
+    const emptyHost = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-emptyhost-'));
+    fs.writeFileSync(path.join(emptyHost, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    fs.mkdirSync(path.join(emptyHost, '.claude', 'skills', 'harness-init'), { recursive: true });
+    runStage(emptyHost, ['--upgrade', '--stage', '1']);
+    ok('空的技能目录也会被装上（不静默跳过）',
+      fs.existsSync(path.join(emptyHost, '.claude', 'skills', 'harness-init', 'SKILL.md')));
+    rmrf(emptyHost);
     rmrf(ft);
   }
   // 安装清单记录 packRoot：消费方没有 harness-stage.mjs，技能靠它定位 pack。

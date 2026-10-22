@@ -557,20 +557,19 @@ const SKILL_DEST_DIRS = [path.join('.claude', 'skills'), path.join('.agents', 's
  * 时，装好的技能每条 `node scripts/x.mjs` 都指向不存在的路径。
  *
  * 覆盖规则只有两条，且都由 `--force` 决定：
- *   目标不存在            → 写入
- *   目标已存在 + --force  → 整体替换（先删再复制，避免旧版本残留的死文件）
- *   目标已存在 + 无 force → 跳过
+ *   目标不存在或没有 SKILL.md → 写入（空目录 / 半装目录不算"已安装"）
+ *   目标已装 + --force        → 整体替换（先删再复制，避免旧版本残留的死文件）
+ *   目标已装 + 无 force        → 跳过
  *
- * 旧实现只看 `SKILL.md` 是否存在：`--force` 对它完全无效（用户改了已装技能
- * 想刷新刷不动），而目录部分存在时 `cpSync` 又会把文件混进用户的目录里
- * （没带 --force 却覆盖了用户的 scripts/）。两个方向都反了。
+ * 判据是 `SKILL.md` 而不是目录存在：只判目录时，一个空的 `.claude/skills/<name>/`
+ * 会让安装静默跳过并报成功，而那个宿主上其实什么都没有。
  */
 function copySkillDir(name, target, force, results) {
   const src = path.join(SKILLS_DIR, name);
   if (!exists(path.join(src, 'SKILL.md'))) return;
   for (const destDir of SKILL_DEST_DIRS) {
     const dest = path.join(target, destDir, name);
-    if (exists(dest)) {
+    if (exists(path.join(dest, 'SKILL.md'))) {
       if (!force) {
         results.push({ status: 'skipped', path: dest });
         continue;

@@ -77,7 +77,13 @@ export function packLooksValid(dir) {
  */
 export function cacheState(dir) {
   let entries;
-  try { entries = fs.readdirSync(dir); } catch { return 'absent'; }
+  try {
+    entries = fs.readdirSync(dir);
+  } catch (e) {
+    // 路径是文件（ENOTDIR）不是"不存在"：读成 absent 会让随后的 rename 覆盖用户文件。
+    if (e.code === 'ENOTDIR') return 'foreign';
+    return 'absent';
+  }
   if (!entries.length) return 'absent';
   if (packLooksValid(dir)) return 'pack';
   return 'foreign';
@@ -109,12 +115,9 @@ export function fetchPack({ remote, ref, cacheDir, offline = false, force = fals
   }
 
   // 有内容但不是 pack：可能是用户自己的目录或 clone。绝不静默删。
-  if (state === 'foreign') {
-    if (!force) {
-      throw new Error(`${cache} 里有内容但不是 harness-loop 的 pack（缺 scripts/harness-stage.mjs）。`
-        + `拒绝覆盖：那可能是你自己的目录。换一个 --cache 路径，或确认后加 --force。`);
-    }
-    fs.rmSync(cache, { recursive: true, force: true });
+  if (state === 'foreign' && !force) {
+    throw new Error(`${cache} 里有内容但不是 harness-loop 的 pack（缺 scripts/harness-stage.mjs）。`
+      + `拒绝覆盖：那可能是你自己的目录。换一个 --cache 路径，或确认后加 --force。`);
   }
 
   if (state === 'absent' || state === 'foreign') {
@@ -124,6 +127,9 @@ export function fetchPack({ remote, ref, cacheDir, offline = false, force = fals
     try {
       git(['clone', '--depth', '1', ...(ref ? ['--branch', ref] : []), remote, tmp], path.dirname(cache));
       if (!packLooksValid(tmp)) throw new Error(`clone 成功但 ${tmp} 里没有 scripts/harness-stage.mjs`);
+      // 删除放在 clone 成功之后：先删再 clone 时，clone 失败就把用户的数据
+      // 弄丢而替代品没来。临时目录已经就绪，这一步只剩 rename。
+      if (state === 'foreign') fs.rmSync(cache, { recursive: true, force: true });
       fs.renameSync(tmp, cache);
     } catch (e) {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -205,6 +211,11 @@ Exit codes: 0 ok · 1 bad arguments · 2 fetch or scaffold failed
     eq('空目录 → absent', cacheState(foreign), 'absent');
     fs.writeFileSync(path.join(foreign, 'precious.txt'), 'do not delete\n');
     eq('有内容但不是 pack → foreign', cacheState(foreign), 'foreign');
+    // 路径是文件而不是目录：读成 absent 会让 rename 覆盖用户文件。
+    const fileProbe = path.join(os.tmpdir(), `lh-ifg-file-${process.pid}`);
+    fs.writeFileSync(fileProbe, 'user file\n');
+    eq('路径是文件 → foreign（不是 absent）', cacheState(fileProbe), 'foreign');
+    fs.rmSync(fileProbe, { force: true });
     // foreign 且没有 --force 时必须拒绝，且原文件还在。
     let refused = false;
     try {
