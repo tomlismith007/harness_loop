@@ -41,9 +41,6 @@ jobs:
       - name: Untrusted-input sanitizer self-test
         run: node scripts/state-write.mjs --self-test
 
-      - name: Pack fetcher self-test
-        run: node scripts/install-from-git.mjs --self-test
-
       - name: Verify scripts are executable entry points
         # Windows 上 run: | 默认走 PowerShell，`{ echo ... }`、`if ...; then` 都是 bash 语法。
         # 显式指定 bash：三个平台行为一致，探针脚本只有一份。

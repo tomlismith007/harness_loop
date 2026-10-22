@@ -3,7 +3,7 @@
   "tool": "harness-loop drill-check",
   "guardrails": {
     "breaker": {
-      "recordedAt": "2026-10-22T13:08:12.342Z",
+      "recordedAt": "2026-10-22T13:43:22.453Z",
       "results": [
         {
           "id": "breaker.stagnation",
@@ -36,10 +36,10 @@
       ]
     },
     "gate": {
-      "recordedAt": "2026-10-22T13:08:12.329Z",
+      "recordedAt": "2026-10-22T13:43:22.442Z",
       "input": {
         "file": "harness-constraints.md",
-        "sha256": "ca8d460b874c21d4c7acbddc053fe5a8d9ee1c4c87b36d95313dc22f1e9217df"
+        "sha256": "6161467d8f6a971dc5ae842b17e5cca63af4d99189e07621a77113e551a92f64"
       },
       "results": [
         {
@@ -218,13 +218,6 @@
           "actual": "blocked by scripts/state-commit.mjs"
         },
         {
-          "id": "gate.denylist[scripts/install-from-git.mjs]",
-          "direction": "sensitivity",
-          "outcome": "passed",
-          "expected": "commit touching scripts/install-from-git.mjs is blocked by scripts/install-from-git.mjs",
-          "actual": "blocked by scripts/install-from-git.mjs"
-        },
-        {
           "id": "gate.denylist[scripts/sync-skills.mjs]",
           "direction": "sensitivity",
           "outcome": "passed",
@@ -262,7 +255,7 @@
       ]
     },
     "verifier": {
-      "recordedAt": "2026-10-22T13:08:12.340Z",
+      "recordedAt": "2026-10-22T13:43:22.452Z",
       "mode": "offline",
       "results": [
         {

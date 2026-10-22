@@ -68,11 +68,13 @@ npx skills add tomlismith007/harness_loop
 
 **装完重启会话**，否则 `/harness-init` 不会出现。
 
-没有 `npx`（离线环境）时，可以先把本仓库 clone 到本地，再从一个项目里跑：
+没有 `npx`（离线环境）时，把本仓库 clone 到本地，直接跑技能目录里自带的那份装配器：
 
 ```bash
-node <clone>/scripts/install-from-git.mjs --target . --offline --cache <clone>
+node <clone>/skills/harness-init/scripts/harness-stage.mjs . --upgrade --stage 1
 ```
+
+技能目录自带 `scripts/` 与 `templates/`，所以装配器不需要再从别处找 pack。
 
 也可以直接用脚本（`harness-stage.mjs` 是 pack 级工具，从本仓库运行，不复制进消费方）：
 
@@ -82,9 +84,12 @@ node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
 node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门，未达成退出 2
 ```
 
-技能在消费方仓库里靠 `.claude/skills/.harness-loop-install.json` 的 `packRoot` 定位 pack。
-阶段 2 的“技能已装到可发现路径”判据只查项目内的 `.claude/skills` / `.agents/skills`；
-user-scope 安装（`~/.claude/skills`）不计入。
+消费方仓库里的技能**自带** `scripts/harness-stage.mjs`，所以技能本身就能跑装配，
+不依赖外部 pack 的位置。`.claude/skills/.harness-loop-install.json` 的 `packRoot`
+只是定位信息，不是运行前提。
+
+阶段 2 的“技能已装到可发现路径”判据查项目内 `.claude/skills` / `.agents/skills`
+与用户级 `~/.claude/skills` / `~/.agents/skills`；项目内优先。
 
 ---
 
@@ -102,7 +107,7 @@ user-scope 安装（`~/.claude/skills`）不计入。
 
 ---
 
-## 脚本（12 个）
+## 脚本（11 个）
 
 | 脚本 | 用途 | 退出码 |
 |---|---|---|
@@ -115,7 +120,6 @@ user-scope 安装（`~/.claude/skills`）不计入。
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`，manifest 记状态 | 0 成功；2 有未提交改动未清理 |
 | `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗并包成 code span | 0 写入；2 自检失败 |
 | `state-commit.mjs` | 一轮结束时原子更新 `STATE.md` + `loop-run-log.md`（备份 → tmp → rename，失败回滚） | 0 写入；2 写入失败已回滚 |
-| `install-from-git.mjs` | 从 git 远端取 pack 到 `~/.harness-loop/pack`，再转交 `harness-stage` 装配（消费方首次运行用） | 0 成功；1 参数错误；2 取包或装配失败 |
 | `sync-skills.mjs` | 把脚本与模板复制进每个技能目录（`--check` 校验一致性），让技能自包含 | 0 已同步；1 `--check` 发现漂移 |
 | `test.mjs` | 自检（638 项断言） | 0 全通过 |
 
@@ -191,7 +195,7 @@ user-scope 安装（`~/.claude/skills`）不计入。
 ├── skills/                    # 4 个技能：各自自包含（SKILL.md + scripts/ + templates/）
 │                              # 副本由 sync-skills.mjs 生成并入库，改源后重跑
 ├── templates/                 # 8 个模板的源（init.sh 由装配器生成）
-├── scripts/                   # 12 个零依赖 Node 脚本 + lib/（装配时复制 7 个运行时脚本）
+├── scripts/                   # 11 个零依赖 Node 脚本 + lib/（装配时复制 7 个运行时脚本）
 └── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```
 
