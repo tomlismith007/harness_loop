@@ -1205,9 +1205,36 @@ section('14. 两阶段驱动器');
   for (const f of ['test.mjs', 'harness-stage.mjs', 'install-skills.mjs']) {
     ok(`消费者项目不含 scripts/${f}`, !fs.existsSync(path.join(empty, 'scripts', f)));
   }
-  // 技能装到两个宿主路径
+  // 技能装到两个宿主路径，且是**整目录**——只复制 SKILL.md 时，装好的技能
+  // 每条 `node scripts/x.mjs` 都指向不存在的路径。
   for (const d of ['.claude/skills', '.agents/skills']) {
     ok(`消费者有 ${d}/harness-loop`, fs.existsSync(path.join(empty, d, 'harness-loop', 'SKILL.md')));
+    ok(`消费者有 ${d}/harness-loop 的脚本副本`,
+      fs.existsSync(path.join(empty, d, 'harness-loop', 'scripts', 'gate-check.mjs')));
+    ok(`消费者有 ${d}/harness-loop 的共享库`,
+      fs.existsSync(path.join(empty, d, 'harness-loop', 'scripts', 'lib', 'common.mjs')));
+  }
+
+  // --force 语义：不带 force 时跳过已装技能（不碰用户的改动），带 force 时整体替换。
+  // 旧实现只看 SKILL.md 存不存在，两个方向都反了。
+  // 用独立目录：--force 会整体替换，不能拿后续阶段测试共用的 empty 做实验。
+  {
+    const ft = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-force-'));
+    fs.writeFileSync(path.join(ft, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    runStage(ft, ['--upgrade', '--stage', '1']);
+    const skillDir = path.join(ft, '.claude', 'skills', 'harness-loop');
+    fs.appendFileSync(path.join(skillDir, 'SKILL.md'), '\n// USER EDIT\n');
+
+    runStage(ft, ['--upgrade', '--stage', '1']);
+    ok('无 --force 时保留用户对已装技能的改动',
+      readText(path.join(skillDir, 'SKILL.md')).includes('USER EDIT'));
+
+    runStage(ft, ['--upgrade', '--stage', '1', '--force']);
+    ok('--force 时替换已装技能（用户改动被覆盖）',
+      !readText(path.join(skillDir, 'SKILL.md')).includes('USER EDIT'));
+    ok('--force 替换后技能仍完整',
+      fs.existsSync(path.join(skillDir, 'scripts', 'gate-check.mjs')));
+    rmrf(ft);
   }
   // 安装清单记录 packRoot：消费方没有 harness-stage.mjs，技能靠它定位 pack。
   for (const d of ['.claude/skills', '.agents/skills']) {

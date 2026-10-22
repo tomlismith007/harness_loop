@@ -3,7 +3,7 @@
   "tool": "harness-loop drill-check",
   "guardrails": {
     "breaker": {
-      "recordedAt": "2026-10-22T11:50:22.832Z",
+      "recordedAt": "2026-10-22T12:44:21.847Z",
       "results": [
         {
           "id": "breaker.stagnation",
@@ -36,10 +36,10 @@
       ]
     },
     "gate": {
-      "recordedAt": "2026-10-22T11:50:22.820Z",
+      "recordedAt": "2026-10-22T12:44:21.833Z",
       "input": {
         "file": "harness-constraints.md",
-        "sha256": "a13228ea2f6d7d7aae2784cf09d4f8629b41addbf3cb7ab8710e0718496c3a5e"
+        "sha256": "ca8d460b874c21d4c7acbddc053fe5a8d9ee1c4c87b36d95313dc22f1e9217df"
       },
       "results": [
         {
@@ -232,6 +232,20 @@
           "actual": "blocked by scripts/sync-skills.mjs"
         },
         {
+          "id": "gate.denylist[skills/*/scripts/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching skills/sample/scripts/src/drill-file.txt is blocked by skills/*/scripts/**",
+          "actual": "blocked by skills/*/scripts/**"
+        },
+        {
+          "id": "gate.denylist[skills/*/templates/**]",
+          "direction": "sensitivity",
+          "outcome": "passed",
+          "expected": "commit touching skills/sample/templates/src/drill-file.txt is blocked by skills/*/templates/**",
+          "actual": "blocked by skills/*/templates/**"
+        },
+        {
           "id": "gate.denylist[audits/**]",
           "direction": "sensitivity",
           "outcome": "passed",
@@ -248,7 +262,7 @@
       ]
     },
     "verifier": {
-      "recordedAt": "2026-10-22T11:50:22.830Z",
+      "recordedAt": "2026-10-22T12:44:21.844Z",
       "mode": "offline",
       "results": [
         {

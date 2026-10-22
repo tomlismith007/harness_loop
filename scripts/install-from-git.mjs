@@ -69,28 +69,61 @@ export function packLooksValid(dir) {
 }
 
 /**
+ * 缓存目录的状态。决定"能不能覆盖"的依据，不是"目录存不存在"。
+ *
+ * 三种：absent（不存在）、pack（是本脚本 clone 的 pack）、foreign（有内容但不是 pack）。
+ * 旧实现只看 packLooksValid，于是 `--cache <用户自己的目录>` 走到 clone 分支时
+ * 被 `rmSync(recursive, force)` 整个删掉——README 推荐的离线用法正是 `--cache <clone>`。
+ */
+export function cacheState(dir) {
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch { return 'absent'; }
+  if (!entries.length) return 'absent';
+  if (packLooksValid(dir)) return 'pack';
+  return 'foreign';
+}
+
+/** 工作区是否干净。脏的 clone 不能 reset --hard——那会丢掉未提交的改动。 */
+export function isCleanTree(dir) {
+  try { return git(['status', '--porcelain'], dir).trim() === ''; } catch { return false; }
+}
+
+/**
  * 取 pack，返回 { packRoot, commit, source }。
  *
  * 先 clone 到临时目录再 rename：clone 中途失败不会留下一个"看起来存在但缺文件"
  * 的缓存——那会让下一次运行在更晚、更难查的地方失败。
+ *
+ * 破坏性操作（删目录、reset --hard）只在**确认那是本脚本的缓存**且**工作区干净**时执行。
+ * 其余情况一律拒绝，让人自己决定——`--force` 是唯一的覆盖开关。
  */
 export function fetchPack({ remote, ref, cacheDir, offline = false, force = false }) {
   const cache = path.resolve(cacheDir);
-  const hasCache = packLooksValid(cache);
+  const state = cacheState(cache);
 
   if (offline) {
-    if (!hasCache) throw new Error(`--offline 但缓存里没有可用的 pack：${cache}`);
+    if (state !== 'pack') {
+      throw new Error(`--offline 但 ${cache} 里没有可用的 pack（当前：${state}）`);
+    }
     return { packRoot: cache, commit: tryCommit(cache), source: 'cache' };
   }
 
-  if (!hasCache) {
+  // 有内容但不是 pack：可能是用户自己的目录或 clone。绝不静默删。
+  if (state === 'foreign') {
+    if (!force) {
+      throw new Error(`${cache} 里有内容但不是 harness-loop 的 pack（缺 scripts/harness-stage.mjs）。`
+        + `拒绝覆盖：那可能是你自己的目录。换一个 --cache 路径，或确认后加 --force。`);
+    }
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+
+  if (state === 'absent' || state === 'foreign') {
     const tmp = `${cache}.tmp-${process.pid}`;
     fs.rmSync(tmp, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(cache), { recursive: true });
     try {
       git(['clone', '--depth', '1', ...(ref ? ['--branch', ref] : []), remote, tmp], path.dirname(cache));
       if (!packLooksValid(tmp)) throw new Error(`clone 成功但 ${tmp} 里没有 scripts/harness-stage.mjs`);
-      fs.rmSync(cache, { recursive: true, force: true });
       fs.renameSync(tmp, cache);
     } catch (e) {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -99,7 +132,11 @@ export function fetchPack({ remote, ref, cacheDir, offline = false, force = fals
     return { packRoot: cache, commit: tryCommit(cache), source: 'cloned' };
   }
 
-  // 已有缓存：fetch + reset。失败就停下——静默用旧 pack 等于"以为装的是新版"。
+  // 是 pack：先确认工作区干净，再 fetch + reset。脏工作区里 reset --hard 会丢改动。
+  if (!isCleanTree(cache) && !force) {
+    throw new Error(`${cache} 有未提交的改动（可能是你在 pack 缓存里改过东西）。`
+      + `拒绝 git reset --hard：那会丢掉这些改动。先提交或还原，或确认后加 --force。`);
+  }
   try {
     git(['fetch', '--depth', '1', 'origin', ref || 'HEAD'], cache);
     git(['reset', '--hard', 'FETCH_HEAD'], cache);
@@ -160,6 +197,22 @@ Exit codes: 0 ok · 1 bad arguments · 2 fetch or scaffold failed
     eq('有目录无脚本仍无效', packLooksValid(tmp), false);
     fs.writeFileSync(path.join(tmp, 'scripts', 'harness-stage.mjs'), '//x\n');
     eq('有装配器才算有效', packLooksValid(tmp), true);
+
+    // 缓存状态决定能不能覆盖。旧实现只看 packLooksValid，于是"有内容但不是 pack"
+    // 被当成"可以删掉重建"——README 推荐的 --cache <clone> 就是这么被清空的。
+    eq('有效 pack → pack', cacheState(tmp), 'pack');
+    const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-ifg-foreign-'));
+    eq('空目录 → absent', cacheState(foreign), 'absent');
+    fs.writeFileSync(path.join(foreign, 'precious.txt'), 'do not delete\n');
+    eq('有内容但不是 pack → foreign', cacheState(foreign), 'foreign');
+    // foreign 且没有 --force 时必须拒绝，且原文件还在。
+    let refused = false;
+    try {
+      fetchPack({ remote: 'file:///nonexistent', cacheDir: foreign });
+    } catch { refused = true; }
+    eq('foreign 无 --force → 拒绝', refused, true);
+    eq('拒绝后原文件仍在', fs.existsSync(path.join(foreign, 'precious.txt')), true);
+    fs.rmSync(foreign, { recursive: true, force: true });
     fs.rmSync(tmp, { recursive: true, force: true });
 
     for (const b of bad) process.stdout.write(`FAIL ${b}\n`);
@@ -178,7 +231,10 @@ Exit codes: 0 ok · 1 bad arguments · 2 fetch or scaffold failed
   const cacheDir = typeof args.cache === 'string' ? args.cache : packCacheDir();
   let pack;
   try {
-    pack = fetchPack({ remote, ref: args.ref, cacheDir, offline: Boolean(args.offline) });
+    pack = fetchPack({
+      remote, ref: args.ref, cacheDir,
+      offline: Boolean(args.offline), force: Boolean(args.force),
+    });
   } catch (e) {
     fail(e.message, 2);
   }

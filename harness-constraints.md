@@ -54,6 +54,10 @@ scripts/state-write.mjs
 scripts/state-commit.mjs
 scripts/install-from-git.mjs
 scripts/sync-skills.mjs
+# 技能目录里的副本：与源同权。改副本再跑 sync-skills 会覆盖受保护的源，
+# 所以副本必须和源一样拦。`scripts/*.mjs` 这些逐条模式对副本不生效。
+skills/*/scripts/**
+skills/*/templates/**
 audits/**
 ```
 

@@ -555,15 +555,27 @@ const SKILL_DEST_DIRS = [path.join('.claude', 'skills'), path.join('.agents', 's
  * 技能目录现在自带 scripts/ 与 templates/（由 sync-skills.mjs 生成），
  * 这样 `npx skills add` 只复制目录也能得到可运行的技能。只复制 SKILL.md
  * 时，装好的技能每条 `node scripts/x.mjs` 都指向不存在的路径。
+ *
+ * 覆盖规则只有两条，且都由 `--force` 决定：
+ *   目标不存在            → 写入
+ *   目标已存在 + --force  → 整体替换（先删再复制，避免旧版本残留的死文件）
+ *   目标已存在 + 无 force → 跳过
+ *
+ * 旧实现只看 `SKILL.md` 是否存在：`--force` 对它完全无效（用户改了已装技能
+ * 想刷新刷不动），而目录部分存在时 `cpSync` 又会把文件混进用户的目录里
+ * （没带 --force 却覆盖了用户的 scripts/）。两个方向都反了。
  */
-function copySkillDir(name, target, results) {
+function copySkillDir(name, target, force, results) {
   const src = path.join(SKILLS_DIR, name);
   if (!exists(path.join(src, 'SKILL.md'))) return;
   for (const destDir of SKILL_DEST_DIRS) {
     const dest = path.join(target, destDir, name);
-    if (exists(path.join(dest, 'SKILL.md'))) {
-      results.push({ status: 'skipped', path: dest });
-      continue;
+    if (exists(dest)) {
+      if (!force) {
+        results.push({ status: 'skipped', path: dest });
+        continue;
+      }
+      fs.rmSync(dest, { recursive: true, force: true });
     }
     fs.cpSync(src, dest, { recursive: true });
     results.push({ status: 'written', path: dest });
@@ -662,7 +674,7 @@ function upgrade(root, targetStage, force, results, opts = {}) {
     }
 
     for (const s of ['harness-init', 'harness-loop-init', 'harness-loop', 'harness-loop-issue']) {
-      copySkillDir(s, root, results);
+      copySkillDir(s, root, force, results);
     }
     writeInstallManifest(root, results);
     copyRuntimeScripts(root, force, results);

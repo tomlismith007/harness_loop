@@ -49,6 +49,8 @@ scripts/state-write.mjs
 scripts/state-commit.mjs
 scripts/install-from-git.mjs
 scripts/sync-skills.mjs
+skills/*/scripts/**
+skills/*/templates/**
 audits/**
 ```
 
