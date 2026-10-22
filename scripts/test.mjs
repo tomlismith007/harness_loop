@@ -935,9 +935,14 @@ section('10. 技能完整性');
   ok('harness-loop gate 命令绑定 sha', /--reviewed-sha/.test(loop) && /--head-sha/.test(loop));
   ok('harness-loop 不承诺不存在的 --verify 模式', !/--verify/.test(loop));
 
-  // harness-stage 是 pack 级工具：消费方没有它，技能必须从安装清单定位 pack。
-  ok('harness-init 从安装清单定位 pack', /harness-loop-install\.json/.test(init));
-  ok('harness-loop-init 从安装清单定位 pack', /harness-loop-install\.json/.test(loopInit));
+  // 装配器随技能安装。`npx skills add` 不写安装清单，所以「从清单读 packRoot」
+  // 在纯 npx 安装下必失败（实测 Cannot find module）。技能必须调用自己目录里的那一份。
+  for (const [name, body] of [['harness-init', init], ['harness-loop-init', loopInit]]) {
+    ok(`${name} 用技能目录内的装配器`,
+      new RegExp(`node \\.claude/skills/${name}/scripts/harness-stage\\.mjs`).test(body));
+    // 清单是装配器自己写的产物，不是前置条件——写成前置条件就是 P0 那个 bug。
+    ok(`${name} 不把安装清单当运行前提`, !/require\(.*harness-loop-install\.json/.test(body));
+  }
 
   const issue = readText(path.join(SKILLS_DIR, 'harness-loop-issue', 'SKILL.md'));
   ok('harness-loop-issue 标明仅 GitHub', /仅支持 GitHub/.test(issue));
@@ -1287,6 +1292,95 @@ section('14. 两阶段驱动器');
     eq('补回后清单仍与磁盘一致',
       manifestSkills('.claude').join(','), onDisk('.claude').join(','));
     rmrf(one);
+  }
+
+  // 回退测试：缺模板 / 缺技能目录时，旧实现退出 0 并打印 "SKIPPED (exists)"，
+  // 用户得到的是一个残缺项目。两条都必须非零退出。
+  {
+    // (a) 从**已安装的技能目录**跑装配器：PACK_ROOT 落在技能里，兄弟技能在上一层。
+    //     这是 SKILL.md 的首选路径（npx skills add 装全部 4 个）。
+    //     旧实现在这里对每个技能静默 return，清单写 skills: []，退出 0。
+    const lone = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-lone-skill-'));
+    fs.writeFileSync(path.join(lone, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    fs.mkdirSync(path.join(lone, '.claude', 'skills'), { recursive: true });
+    for (const s of ['harness-init', 'harness-loop', 'harness-loop-init', 'harness-loop-issue']) {
+      fs.cpSync(path.join(SKILLS_DIR, s), path.join(lone, '.claude', 'skills', s), { recursive: true });
+    }
+    const r = (() => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(lone, '.claude', 'skills', 'harness-init', 'scripts', 'harness-stage.mjs'),
+            lone, '--upgrade', '--stage', '1'], { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    })();
+    eq('从已安装技能目录装配：退出 0', r.code, 0);
+    ok('从已安装技能目录装配：阶段 1 模板齐全',
+      fs.existsSync(path.join(lone, 'AGENTS.md')) && fs.existsSync(path.join(lone, 'verifier-report.md')));
+    ok('从已安装技能目录装配：清单记的是磁盘上真实存在的技能',
+      JSON.parse(readText(path.join(lone, '.claude', 'skills', '.harness-loop-install.json')))
+        .skills.join(',') === 'harness-init,harness-loop,harness-loop-init,harness-loop-issue');
+    rmrf(lone);
+
+    // (a2) 只装了部分技能：必须**报错**，不能报成功。
+    //      旧实现在这里退出 0 并写 skills: []——一个假的成功。
+    const partial = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-partial-skill-'));
+    fs.writeFileSync(path.join(partial, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    fs.mkdirSync(path.join(partial, '.claude', 'skills'), { recursive: true });
+    fs.cpSync(path.join(SKILLS_DIR, 'harness-init'), path.join(partial, '.claude', 'skills', 'harness-init'),
+      { recursive: true });
+    const rp = (() => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(partial, '.claude', 'skills', 'harness-init', 'scripts', 'harness-stage.mjs'),
+            partial, '--upgrade', '--stage', '1'], { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    })();
+    ok('只装了部分技能时装配器非零退出', rp.code !== 0);
+    ok('只装了部分技能时错误信息指出怎么修', /--skill '\*'/.test(rp.out));
+    rmrf(partial);
+
+    // (a3) 源即目标 + --force：从已安装的技能目录装配、target 就是该宿主时，
+    //      旧实现先 rmSync(dest) 再 cpSync(src) —— 源被自己删掉，ENOENT。
+    const self = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-self-force-'));
+    fs.writeFileSync(path.join(self, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    fs.mkdirSync(path.join(self, '.claude', 'skills'), { recursive: true });
+    for (const s of ['harness-init', 'harness-loop', 'harness-loop-init', 'harness-loop-issue']) {
+      fs.cpSync(path.join(SKILLS_DIR, s), path.join(self, '.claude', 'skills', s), { recursive: true });
+    }
+    const rs = (() => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(self, '.claude', 'skills', 'harness-init', 'scripts', 'harness-stage.mjs'),
+            self, '--upgrade', '--stage', '1', '--force'], { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    })();
+    eq('源即目标 + --force：不崩且退出 0', rs.code, 0);
+    ok('源即目标 + --force：源目录还在',
+      fs.existsSync(path.join(self, '.claude', 'skills', 'harness-init', 'SKILL.md')));
+    rmrf(self);
+
+    // (b) harness-loop-init 也带装配器：它必须能独立跑阶段 1。
+    //     旧 bundle 只带 2 个模板，缺的 6 个被打印成 SKIPPED (exists)，退出 0，
+    //     而 AGENTS.md 根本没生成。
+    const viaLoopInit = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-loopinit-stage1-'));
+    fs.writeFileSync(path.join(viaLoopInit, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    fs.mkdirSync(path.join(viaLoopInit, '.claude', 'skills'), { recursive: true });
+    for (const s of ['harness-init', 'harness-loop', 'harness-loop-init', 'harness-loop-issue']) {
+      fs.cpSync(path.join(SKILLS_DIR, s), path.join(viaLoopInit, '.claude', 'skills', s), { recursive: true });
+    }
+    const r2 = (() => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(viaLoopInit, '.claude', 'skills', 'harness-loop-init', 'scripts', 'harness-stage.mjs'),
+            viaLoopInit, '--upgrade', '--stage', '1'], { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    })();
+    eq('harness-loop-init 能跑阶段 1：退出 0', r2.code, 0);
+    ok('harness-loop-init 的阶段 1 产出真的落盘（不是 SKIPPED）',
+      fs.existsSync(path.join(viaLoopInit, 'AGENTS.md')));
+    ok('失败不会被渲染成 SKIPPED (exists)',
+      !/SKIPPED \(exists\)\s+AGENTS\.md/.test(r2.out) || fs.existsSync(path.join(viaLoopInit, 'AGENTS.md')));
+    rmrf(viaLoopInit);
   }
   // 安装清单记录 packRoot：消费方没有 harness-stage.mjs，技能靠它定位 pack。
   for (const d of ['.claude/skills', '.agents/skills']) {

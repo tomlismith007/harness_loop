@@ -52,7 +52,10 @@ export const SKILL_BUNDLES = {
   },
   'harness-loop-init': {
     scripts: SCAFFOLDER_SCRIPTS,
-    templates: ['loop-constraints.md', 'loop-run-log.md'],
+    // 带装配器 = 必须能跑阶段 1：`--upgrade --stage 2` 会在阶段 1 未达成时
+    // 让人先跑 `--stage 1`，而阶段 1 要 6 个模板。只带阶段 2 的两个模板时，
+    // 缺的那 6 个复制失败、AGENTS.md 根本不会生成。
+    templates: ALL_TEMPLATES,
   },
   'harness-loop': {
     scripts: ['gate-check.mjs', 'ledger-check.mjs', 'state-commit.mjs', 'clean-state.mjs', 'worktree.mjs'],

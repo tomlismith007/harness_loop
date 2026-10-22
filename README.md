@@ -121,7 +121,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 | `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗并包成 code span | 0 写入；2 自检失败 |
 | `state-commit.mjs` | 一轮结束时原子更新 `STATE.md` + `loop-run-log.md`（备份 → tmp → rename，失败回滚） | 0 写入；2 写入失败已回滚 |
 | `sync-skills.mjs` | 把脚本与模板复制进每个技能目录（`--check` 校验一致性），让技能自包含 | 0 已同步；1 `--check` 发现漂移 |
-| `test.mjs` | 自检（644 项断言） | 0 全通过 |
+| `test.mjs` | 自检（657 项断言） | 0 全通过 |
 
 装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs`、`worktree.mjs`、`state-write.mjs`、`state-commit.mjs` 与 `lib/common.mjs`。
 
@@ -206,7 +206,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 644 项断言
+node scripts/test.mjs           # 657 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
@@ -219,7 +219,7 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 
 | 验证 | 方式 | 结果 | 可重跑？ |
 |---|---|---|---|
-| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 644 项断言全绿 | **是** |
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 657 项断言全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
 | 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |

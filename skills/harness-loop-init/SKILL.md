@@ -20,17 +20,16 @@ requires_stage: 1
 
 ## 前置检查
 
-`harness-stage.mjs` 是 **pack 级工具**，不在消费方仓库的 `scripts/` 里。从项目内
-`.claude/skills/.harness-loop-install.json`（或 `.agents/skills/`、用户级清单）读 `packRoot`：
+装配器随技能一起安装。直接用**本技能目录**里的那一份——它在任何安装布局下都在：
 
 ```bash
-node -e "console.log(require('./.claude/skills/.harness-loop-install.json').packRoot)"
-node <packRoot>/scripts/harness-stage.mjs <target>
+node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target>
 ```
 
-清单不存在 → 问用户 pack 在哪，不要猜。
+技能装在 `.agents/skills/` 或用户级 `~/.claude/skills/` 时，把前缀换成对应目录。
 
 阶段 1 必须 COMPLETE。没到就别进阶段 2——没有状态文件，验证者无法判断改动范围。
+阶段 1 未达成时装配器会拒绝跳级；按它给的提示先跑 `--stage 1`（本技能自带阶段 1 的模板）。
 
 ## 判据（7 项机械 + 2 项人工）
 
@@ -51,7 +50,7 @@ node <packRoot>/scripts/harness-stage.mjs <target>
 ## 执行
 
 ```bash
-node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 2
+node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
 产出 **2 个文件**：
@@ -119,7 +118,7 @@ node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ## 退出条件
 
 ```bash
-node <packRoot>/scripts/harness-stage.mjs <target> --stage 2 --require
+node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --stage 2 --require
 # 退出码 0 = 7 项机械判据全过
 ```
 
