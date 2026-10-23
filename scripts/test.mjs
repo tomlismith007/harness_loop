@@ -1217,6 +1217,31 @@ section('12. 文档完整性');
     ok('文档里的反引号路径都指向真实文件', missing.length === 0, missing.slice(0, 5).join('; '));
   }
 
+  // 文档里写的每条 `node <path>.mjs` 都必须指向真实文件（硬约束 6）。
+  // 反引号路径那条只覆盖 `docs/…` 这类完整引用；AGENTS.md 曾给出
+  // `node scripts/harness-stage.mjs`，而根目录的 scripts/ 只有两个维护者工具。
+  {
+    const files = ['README.md', 'AGENTS.md', ...docs.map((d) => path.join('docs', d)),
+      ...fs.readdirSync(SKILLS_DIR).filter((s) => fs.existsSync(path.join(SKILLS_DIR, s, 'SKILL.md')))
+        .map((s) => path.join('skills', s, 'SKILL.md'))];
+    const bad = [];
+    for (const rel of files) {
+      // 逐行扫：同一个文件名会出现在多处，按全文找"包含它的第一行"会把反例当成正例。
+      for (const line of readText(path.join(PACK_ROOT, rel)).split(String.fromCharCode(10))) {
+        for (const m of line.matchAll(/node ((?:\.claude\/skills\/[a-z-]+\/)?[A-Za-z0-9_.<>/*-]+\.mjs)/g)) {
+          const ref = m[1];
+          // 占位符与示例路径不判：`<clone>/…`、`<target>`、`skills/*/…`。
+          if (/[<>*]/.test(ref) || ref.includes('/path/to')) continue;
+          // 反例：文档明说这种写法不成立，不是可执行命令。
+          if (/不要照抄|不成立/.test(line)) continue;
+          const rel2 = ref.replace(/^\.claude\/skills\//, 'skills/');
+          if (!fs.existsSync(path.join(PACK_ROOT, rel2))) bad.push(`${rel} → ${ref}`);
+        }
+      }
+    }
+    ok('文档里的 node 命令都指向真实文件', bad.length === 0, bad.slice(0, 5).join('; '));
+  }
+
   // 悬空引用：文档指向不存在的文件，读者按它找会落空。
   const docsText = docs.map((d) => readText(path.join(PACK_ROOT, 'docs', d))).join('\n')
     + readme + readText(path.join(PACK_ROOT, 'AGENTS.md'));
@@ -2855,24 +2880,19 @@ section('20. worktree manifest（U-13）');
 
 // ---------------------------------------------------------------- 汇总
 
-// 文档里声称的断言数必须与实测一致，否则"验证已完成"这句话本身就是不可信的。
-const docChecks = [
-  // 全局匹配：README 里有多处断言数声明，只读第一处会让第二处静默过期。
-  ['README.md', /\b(\d{3,4})\s*项断言/g],
-];
-// 本节自身的断言尚未计入 passed，偏移量等于待检查的文档数。
-const DOC_OFFSET = docChecks.length;
-const expectedTotal = passed + failed + DOC_OFFSET;
-for (const [file, re] of docChecks) {
-  const text = fs.readFileSync(path.join(PACK_ROOT, file), 'utf8');
-  const claimed = [...text.matchAll(re)].map((m) => Number(m[1]));
-  if (!claimed.length) {
-    ok(`${file} 声称了断言数`, false, '未找到断言数声明');
-    continue;
+// 断言数不进文档。
+//
+// 此前文档里硬编码断言数，每加一条断言就要改三处；数字漂移过一次（707/708）。
+// 有断言时它只会过期，没有断言时它什么也不保证——所以直接禁止写。
+{
+  const files = ['README.md', 'AGENTS.md', ...fs.readdirSync(path.join(PACK_ROOT, 'docs'))
+    .filter((f) => f.endsWith('.md')).map((f) => path.join('docs', f))];
+  const hits = [];
+  for (const rel of files) {
+    const text = readText(path.join(PACK_ROOT, rel));
+    for (const m of text.matchAll(/\b\d{3,4}\s*项断言/g)) hits.push(`${rel}: ${m[0]}`);
   }
-  const stale = claimed.filter((n) => n !== expectedTotal);
-  ok(`${file} 声称的断言数与实测一致（全部 ${claimed.length} 处）`, stale.length === 0,
-    `文档写 ${stale.join('/')}，实测 ${expectedTotal}`);
+  ok('文档不硬编码断言数', hits.length === 0, hits.slice(0, 5).join('; '));
 }
 
 process.stdout.write(`\n${'='.repeat(60)}\n`);

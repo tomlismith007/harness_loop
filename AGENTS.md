@@ -61,9 +61,8 @@ harness-loop 技能仓库的入口文件。这是一个**路由器，不是手�
 
 ## 结束会话前
 
-1. 跑 `bash init.sh`，确认 708 条断言全绿、副本无漂移。
-2. 改了源 → 跑 `node skills/*/SKILL.md` → 再跑一遍。
-3. 工作处于安全状态后用描述性 message 提交。
+1. 跑 `bash init.sh`，确认断言全绿。
+2. 工作处于安全状态后用描述性 message 提交。
 
 ## 去向索引
 
@@ -80,8 +79,7 @@ harness-loop 技能仓库的入口文件。这是一个**路由器，不是手�
 | v1 结构（已归档，仅参考） | `docs/archive/` |
 | 具体动作怎么做 | `skills/<技能名>/SKILL.md` |
 | 验证者报告格式 | `templates/verifier-report.md` |
-| 技能闭包怎么声明 | `skills/*/SKILL.md` 的 `SKILL_BUNDLES` |
-| 装配新项目 | `node scripts/harness-stage.mjs <repo> --upgrade --stage 1` |
+| 装配新项目 | `node skills/harness-init/scripts/harness-stage.mjs <repo> --upgrade --stage 1` |
 
 ## 两个建设阶段
 
@@ -93,11 +91,11 @@ harness-loop 技能仓库的入口文件。这是一个**路由器，不是手�
 **不要跳级。** 补齐某一阶段缺失的产物：
 
 ```bash
-node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 2
+node skills/harness-loop-init/scripts/harness-stage.mjs /path/to/repo --upgrade --stage 2
 ```
 
 ## 升级路径
 
 - 技能该不该拆/合并 → 查 `docs/` 与 `README.md`，查不到就问用户，不要猜。
 - 反复测试失败 → 停止重试，说明卡在哪。
-- 触及 `skills/*/scripts/**`、`skills/*/templates/**` → 那是产物，改根目录的源。
+- 触及 `skills/*/scripts/**`、`skills/*/templates/**` → 直接改那里，没有别的源。
