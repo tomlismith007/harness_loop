@@ -9,7 +9,7 @@
 每轮开始必须输出一行：
 
 ```
-Constraints loaded from loop-constraints.md: N rules active.
+Constraints loaded from harness-constraints.md (+ loop-constraints.md): N rules active.
 ```
 
 ## Push & Merge

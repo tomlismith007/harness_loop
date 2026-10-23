@@ -154,7 +154,7 @@
    → 否：待办来源不唯一
 
 3. 约束加载了吗？
-   → 看运行日志开头有没有 "Constraints loaded from loop-constraints.md: N rules active."
+   → 看运行日志开头有没有 "Constraints loaded from harness-constraints.md (+ loop-constraints.md): N rules active."
    → 否：技能没读约束文件
 
 4. 预算内吗？

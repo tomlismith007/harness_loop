@@ -1162,6 +1162,14 @@ section('11. 仓库根：skills 开发仓库，不是 harness 消费方');
   ok('约束模板含回退测试', /回退测试/.test(constraints));
   ok('约束模板含 NOT RUN 规则', /NOT RUN/.test(constraints));
   ok('约束模板有 kill switch 标记', /loop-pause-all/.test(constraints));
+  // 加载确认语是下游诊断的锚点（docs/05 让读者按这句话判断约束有没有被读）。
+  // 三处写三种样子时，按文档 grep 的读者会得出"技能没读约束"的错误结论。
+  const CONFIRM = 'Constraints loaded from harness-constraints.md (+ loop-constraints.md): N rules active.';
+  ok('约束模板的加载确认语与技能一致', constraints.includes(CONFIRM));
+  ok('docs/05 的诊断锚点与技能一致',
+    readText(path.join(PACK_ROOT, 'docs', '05-failure-modes.md')).includes(CONFIRM));
+  ok('harness-loop 技能使用同一句确认语',
+    readText(path.join(SKILLS_DIR, 'harness-loop', 'SKILL.md')).includes(CONFIRM));
 }
 
 // ---------------------------------------------------------------- 12. 文档

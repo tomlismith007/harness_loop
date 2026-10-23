@@ -35,7 +35,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ### 1. 拒绝列表闸门（Denylist Gate）
 
-**判定**：diff 中是否有文件命中 `loop-constraints.md` 的拒绝列表。
+**判定**：diff 中是否有文件命中 `harness-constraints.md` 的 `## Paths`（缺省回落 `loop-constraints.md`）。
 
 ```
 .env, .env.*, **/secrets/**, **/credentials/**, **/*_key*, **/*_secret*,
@@ -141,7 +141,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 | 判定 | 类型 | 说明 |
 |---|---|---|
-| 拒绝列表命中 | **机械** | `gate-check.mjs` 读 `loop-constraints.md` 的 `## Paths` |
+| 拒绝列表命中 | **机械** | `gate-check.mjs` 先读 `harness-constraints.md` 的 `## Paths`，缺省回落 `loop-constraints.md` |
 | 文件数超限 | **机械** | `gate-check.mjs` 数 diff 清单 |
 | head-commit 一致 | **机械** | 字符串比对两个 sha |
 | 回退测试结论 | **机械** | 读 `--red-check` 的值；`behavior` 类强制，其余三类要求报告里写理由 |
