@@ -21,7 +21,7 @@ import {
   structuredText, textHas, structuredHas, detectProject, verificationCommands,
   initScriptFromCommands, loadLimits, untrusted, sanitizeUntrusted, MAX_UNTRUSTED_LENGTH,
   PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, readText,
-  runWithTreeKill, hasGnuTimeout,
+  runWithTreeKill, hasGnuTimeout, samePath,
 } from './lib/common.mjs';
 // 运行时脚本只有一份，住在技能目录里。测试直接测**要交付的那份**，
 // 不测某个根目录副本——副本与产物分叉过一次，代价是技能装到旧代码。
@@ -1090,6 +1090,18 @@ section('12. 文档完整性');
       ? execFileSync(process.execPath, [link], { encoding: 'utf8' }).trim()
       : 'ENTRY';
     eq('入口判定：经符号链接执行仍 → ENTRY（无权限时跳过实际执行）', viaLink, 'ENTRY');
+
+    // samePath 也必须走 realpath。macOS 的 tmpdir 是 /var → /private/var 的
+    // 符号链接：只做字符串归一化时，同一个目录的两种写法被判成不同路径，
+    // 于是"源即目标"保护失效，--force 先删目标（= 源）再复制 → ENOENT。
+    const viaLinkDir = linked ? path.join(t, 'linkdir') : null;
+    if (linked) {
+      try { fs.symlinkSync(t, viaLinkDir, 'dir'); } catch { /* 同上 */ }
+    }
+    eq('samePath：符号链接与真实路径视为同一个',
+      samePath(viaLinkDir || t, t), true);
+    eq('samePath：不同目录仍不等',
+      samePath(t, path.join(t, 'other')), false);
     rmrf(t);
   }
 

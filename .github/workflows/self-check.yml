@@ -36,7 +36,7 @@ jobs:
         run: node scripts/test.mjs
 
       - name: Untrusted-input sanitizer self-test
-        run: node scripts/state-write.mjs --self-test
+        run: node skills/harness-loop-issue/scripts/state-write.mjs --self-test
 
       - name: CLI entry points respond
         shell: bash
@@ -45,7 +45,7 @@ jobs:
           # 装配器在一个空目录上实跑阶段 1：这是它唯一的真实入口。
           T="$(mktemp -d)"
           printf '{"name":"x","scripts":{"test":"echo ok"}}\n' > "$T/package.json"
-          node scripts/harness-stage.mjs "$T" --upgrade --stage 1 > /dev/null
+          node skills/harness-init/scripts/harness-stage.mjs "$T" --upgrade --stage 1 > /dev/null
           test -f "$T/AGENTS.md"
           test -f "$T/init.sh"
           node scripts/install-skills.mjs --target . --list > /dev/null
