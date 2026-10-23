@@ -172,6 +172,7 @@ export function runVerifierDrills(opts = {}) {
     '## Verdict: APPROVE', '',
     `Author: ${extra.author || 'verifier-2'}`,
     `Reviewed commit: ${extra.commit || sha}`,
+    'Change class confirmed: behavior',
     '', '### Evidence',
     '- Tests: `node scripts/test.mjs` → PASS',
     ...(extra.snippet === false ? [] : ['  ```', '  Passed: 10  Failed: 0', '  ```']),

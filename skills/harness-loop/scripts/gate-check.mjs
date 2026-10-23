@@ -505,11 +505,30 @@ export function checkGates(input, opts = {}) {
     // 且执行者不能同时是作者。
     const AUTHOR_LINE = /^\s*Author:\s*(\S.*)$/m;
     const REVIEWED_LINE = /^\s*Reviewed commit:\s*(\S+)\s*$/m;
+    // 验证者必须**复述**执行者声明的改动类型。只让执行者自己填 --change-class，
+    // 等于让被检查的人决定要不要跑回退测试。
+    const CLASS_LINE = /^\s*Change class confirmed:\s*(\S+)/m;
     const author = report.match(AUTHOR_LINE);
     const reviewedCommit = report.match(REVIEWED_LINE);
+    const confirmedClass = report.match(CLASS_LINE);
     if (!author) missing.push('an "Author: <verifier>" line (the implementer cannot author the report)');
     if (!reviewedCommit) missing.push('a "Reviewed commit: <sha>" line');
-    else if (reviewedSha && reviewedCommit[1].toLowerCase() !== String(reviewedSha).toLowerCase()) {
+    if (!confirmedClass) {
+      missing.push('a "Change class confirmed: <behavior|docs|config|refactor>" line');
+    } else if (confirmedClass[1].toLowerCase() !== String(changeClass).toLowerCase()) {
+      return {
+        ...base,
+        decision: 'escalate',
+        gate: 'verification-evidence',
+        reason: `report confirms change class '${confirmedClass[1]}' but --change-class is '${changeClass}'`,
+        allowed_actions: ['re-declare the change class and have the verifier confirm it'],
+        exit_code: 2,
+        next: 'the verifier must confirm the same change class the implementer declared. '
+          + 'A mismatch means the red-check requirement was decided by the wrong party.',
+      };
+    }
+    // 独立的一条 if：缺 Reviewed commit 已经在 missing 里记过，这里只比对其值。
+    if (reviewedCommit && reviewedSha && reviewedCommit[1].toLowerCase() !== String(reviewedSha).toLowerCase()) {
       return {
         ...base,
         decision: 'escalate',
@@ -790,12 +809,15 @@ Options:
   --change-class <c>     behavior | docs | config | refactor (default: behavior, fail-closed).
                          Only behavior requires the red check at the gate phase; the others
                          must justify the skipped red check in "### Checks not run".
-  --implementer <id>     Who wrote the change. If the report's Author matches this,
-                         the gate refuses: the implementer cannot verify their own work.
+  --implementer <id>     Who wrote the change. Required with --verdict approve at
+                         --phase gate (exit 1 without it: independence cannot be
+                         judged without knowing the implementer). If the report's
+                         Author matches this, the gate refuses.
   --evidence-file <p>    Verifier report. Required with --verdict approve at --phase gate:
                          the gate reads it, checks the verdict/evidence lines, requires
-                         Author: / Reviewed commit: / an output snippet per PASS, and
-                         re-runs the command in each evidence line (the <cmd> after the check name).
+                         Author: / Reviewed commit: / Change class confirmed: (must match
+                         --change-class) / an output snippet per PASS, and re-runs the
+                         command in each evidence line (the <cmd> after the check name).
   --evidence-cwd <dir>   Directory the evidence commands run in (default: cwd)
   --no-replay            Skip re-running evidence commands; the result is listed as NOT RUN
   --constraints-root <d> Directory holding loop-constraints.md (default: cwd). The denylist is
@@ -891,6 +913,15 @@ Exit codes:
   };
   checkSha(args.reviewedSha, '--reviewed-sha');
   checkSha(args.headSha, '--head-sha');
+
+  // 独立性是唯一无法自证的承诺：缺 --implementer 时闸门根本无从比较，
+  // "没传就不判"让省略参数变成绕过方式。gate 阶段的 approve 必须给。
+  if (args.phase === 'gate'
+    && normalizeVerdict(args.verdict ?? 'none') === 'approve'
+    && (typeof args.implementer !== 'string' || !args.implementer.trim())) {
+    fail('--phase gate --verdict approve requires --implementer <id> '
+      + '(the gate cannot check independence without knowing who implemented)', 1);
+  }
 
   const statePath = typeof args.state === 'string' ? args.state : process.cwd();
   const state = stateFiles(statePath);

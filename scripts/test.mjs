@@ -436,8 +436,9 @@ section('5. 闸门判定');
   const REP = (lines) => lines.join(String.fromCharCode(10));
   fs.writeFileSync(EV, REP([
     '## Verdict: APPROVE', '',
-    'Author: verifier-2', 'Executed by: runner-2',
-    'Reviewed commit: ' + 'a'.repeat(40), '',
+    'Author: verifier-2',
+    'Reviewed commit: ' + 'a'.repeat(40),
+    'Change class confirmed: behavior', '',
     '### Evidence',
     '- Tests: `npm test` → PASS',
     '  ```',
@@ -501,10 +502,11 @@ section('5. 闸门判定');
   // change-class：硬约束的原文限定词是"新增测试"。对任何改动都要求 red-check
   // 的后果不是"更安全"，而是"改一个错别字必须谎报"——谎报会迁移到代码改动上。
   {
-    const docsReport = (reason) => {
-      const p = path.join(evTmp, `cc-${reason === null ? 'none' : reason.length}.md`);
+    const docsReport = (reason, cls = 'docs') => {
+      const p = path.join(evTmp, `cc-${cls}-${reason === null ? 'none' : reason.length}.md`);
       fs.writeFileSync(p, [
-        '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40), '',
+        '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40),
+        `Change class confirmed: ${cls}`, '',
         '### Evidence',
         '- Tests: `node -e "process.exit(0)"` → PASS', '  ```', '  ok', '  ```',
         '', '### Checks not run',
@@ -520,7 +522,8 @@ section('5. 闸门判定');
     // 退出码证明命令跑成功了，不证明验证者看过结果。
     const noSnippetFile = path.join(evTmp, 'no-snippet.md');
     fs.writeFileSync(noSnippetFile, [
-      '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40), '',
+      '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40),
+      'Change class confirmed: behavior', '',
       '### Evidence', '- Tests: `node -e "process.exit(0)"` → PASS',
       '', '### Checks not run', '- —',
     ].join('\n'));
@@ -530,7 +533,8 @@ section('5. 闸门判定');
 
     const emptySnippetFile = path.join(evTmp, 'empty-snippet.md');
     fs.writeFileSync(emptySnippetFile, [
-      '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40), '',
+      '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40),
+      'Change class confirmed: behavior', '',
       '### Evidence', '- Tests: `node -e "process.exit(0)"` → PASS',
       '  ```', '  ```', '', '### Checks not run', '- —',
     ].join('\n'));
@@ -539,7 +543,8 @@ section('5. 闸门判定');
 
     const noAuthorFile = path.join(evTmp, 'no-author.md');
     fs.writeFileSync(noAuthorFile, [
-      '## Verdict: APPROVE', '', 'Reviewed commit: ' + 'a'.repeat(40), '',
+      '## Verdict: APPROVE', '', 'Reviewed commit: ' + 'a'.repeat(40),
+      'Change class confirmed: behavior', '',
       '### Evidence', '- Tests: `node -e "process.exit(0)"` → PASS', '  ```', '  ok', '  ```',
       '', '### Checks not run', '- —',
     ].join('\n'));
@@ -549,7 +554,8 @@ section('5. 闸门判定');
     // 审查的 commit 与 --reviewed-sha 不一致 = 它审的是别的东西。
     const wrongCommitFile = path.join(evTmp, 'wrong-commit.md');
     fs.writeFileSync(wrongCommitFile, [
-      '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'b'.repeat(40), '',
+      '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'b'.repeat(40),
+      'Change class confirmed: behavior', '',
       '### Evidence', '- Tests: `node -e "process.exit(0)"` → PASS', '  ```', '  ok', '  ```',
       '', '### Checks not run', '- —',
     ].join('\n'));
@@ -572,6 +578,23 @@ section('5. 闸门判定');
       checkGates({ ...ccBase, evidenceFile: docsReport('本次只修改了文档与注释，没有新增任何测试，因此无需回退验证') }).decision, 'escalate');
     eq('red-check fail 在任何 change-class 下都拦',
       checkGates({ ...GATE, changeClass: 'docs', redCheck: 'fail' }).gate, 'red-check');
+
+    // 验证者必须复述执行者声明的改动类型：否则"要不要跑回退测试"
+    // 由被检查的一方决定。用 redCheck=pass 绕开更早的 red-check 闸，
+    // 才能确认拦截原因真的是 class 不一致。
+    eq('报告确认的 change class 与 --change-class 不一致 → escalate',
+      checkGates({ ...GATE, changeClass: 'config', evidenceFile: docsReport('本次只修改了配置，没有改动运行行为', 'docs') }).gate,
+      'verification-evidence');
+    eq('报告缺 Change class confirmed → escalate',
+      checkGates({ ...ccBase, changeClass: 'docs', evidenceFile: (() => {
+        const p = path.join(evTmp, 'no-class.md');
+        fs.writeFileSync(p, [
+          '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40), '',
+          '### Evidence', '- Tests: `node -e "process.exit(0)"` → PASS', '  ```', '  ok', '  ```',
+          '', '### Checks not run', '- Red check — 本次只修改了文档与注释，没有新增任何测试',
+        ].join(String.fromCharCode(10)));
+        return p;
+      })() }).decision, 'escalate');
 
     // 轻量档：docs/config/refactor 不要求 sha 绑定、不重放证据命令，
     // 但跳过的项必须出现在 checks_not_run 里——省略比跳过更糟。
@@ -680,7 +703,8 @@ section('5. 闸门判定');
       checkGates({
         item: 'p', ...GATE,
         evidenceFile: write('ascii.md', [
-          '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40), '',
+          '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40),
+          'Change class confirmed: behavior', '',
           '### Evidence',
           '- Tests: `npm test` -> PASS', '  ```', '  ok', '  ```', '', '### Checks not run', '- —',
         ]),
@@ -688,7 +712,8 @@ section('5. 闸门判定');
     const derived = checkGates({
       item: 'p', ...GATE,
       evidenceFile: write('derived.md', [
-        '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40), '',
+        '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40),
+        'Change class confirmed: behavior', '',
         '### Evidence',
         '- Tests: `npm test` → PASS', '  ```', '  ok', '  ```',
         '- Real-use validation: `staging` → NOT RUN',
@@ -706,7 +731,8 @@ section('5. 闸门判定');
     const docFormat = checkGates({
       item: 'p', ...GATE,
       evidenceFile: write('doc-format.md', [
-        '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40), '',
+        '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40),
+        'Change class confirmed: behavior', '',
         '### Evidence',
         '- Tests: `npm test` → PASS — 2 tests, 2 pass, 0 fail, exit 0',
         '  ```',
@@ -1905,8 +1931,16 @@ section('15c. 状态事务（R-25）');
     ok('U-02 fix+approve 带 warning', /"warning":\s*"approve at fix phase is not a gate/.test(fixRun.out), fixRun.out);
     const gateRun = runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve',
       '--red-check', 'pass', '--reviewed-sha', 'a'.repeat(40), '--head-sha', 'a'.repeat(40),
-      '--diff-files', 'a.ts', '--state', t], t);
+      '--diff-files', 'a.ts', '--implementer', 'impl-1', '--state', t], t);
     eq('U-02 gate+approve 无证据 → 2', gateRun.code, 2);
+
+    // 独立性是唯一无法自证的承诺：缺 --implementer 时闸门无从比较，
+    // 省略参数就成了绕过方式。gate 阶段的 approve 必须给。
+    const noImpl = runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve',
+      '--red-check', 'pass', '--reviewed-sha', 'a'.repeat(40), '--head-sha', 'a'.repeat(40),
+      '--diff-files', 'a.ts', '--state', t], t);
+    eq('U-02 gate+approve 缺 --implementer → 参数错误 1', noImpl.code, 1);
+    ok('U-02 缺 --implementer 的报错点名该参数', /--implementer/.test(noImpl.out), noImpl.out.slice(0, 200));
     rmrf(t);
   }
 
@@ -2083,12 +2117,12 @@ section('17. 升级回归（批次 2）');
     fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
     fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
     const base = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
-      '--reviewed-sha', SHA, '--head-sha', SHA, '--diff-files', 'a.ts', '--state', t];
+      '--reviewed-sha', SHA, '--head-sha', SHA, '--diff-files', 'a.ts', '--implementer', 'impl-1', '--state', t];
     // 命令夹具必须跨平台：`true`/`false` 在 cmd.exe 下都不存在，两者都 exit 1——
     // 一个必失败的命令被读成 PASS，自检在 Windows 上假绿。
     const OK = 'node -e "process.exit(0)"';
     const NO = 'node -e "process.exit(1)"';
-    const report = (cmd, status) => `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\n\n### Evidence\n- Tests: \`${cmd}\` → ${status}\n  \`\`\`\n  sample output\n  \`\`\`\n\n### Checks not run\n- —\n`;
+    const report = (cmd, status) => `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`${cmd}\` → ${status}\n  \`\`\`\n  sample output\n  \`\`\`\n\n### Checks not run\n- —\n`;
 
     fs.writeFileSync(path.join(t, 'ok.md'), report(OK, 'PASS'));
     eq('U-03 命令重放一致 → 0',
@@ -2111,7 +2145,7 @@ section('17. 升级回归（批次 2）');
 
     // 没有命令的检查行无法重放
     fs.writeFileSync(path.join(t, 'no-cmd.md'),
-      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\n\n### Evidence\n- Red check: PASS — 说明\n\n### Checks not run\n- —\n`);
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\nChange class confirmed: behavior\n\n### Evidence\n- Red check: PASS — 说明\n\n### Checks not run\n- —\n`);
     eq('U-03 无命令可重放 → 2',
       runGateIn([...base, '--evidence-file', 'no-cmd.md'], t).code, 2);
 
@@ -2140,9 +2174,9 @@ section('17. 升级回归（批次 2）');
     fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
     fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
     fs.writeFileSync(path.join(t, 'ev.md'),
-      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
     const base = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
-      '--diff-files', 'a.ts', '--state', t, '--evidence-file', 'ev.md'];
+      '--diff-files', 'a.ts', '--implementer', 'impl-1', '--state', t, '--evidence-file', 'ev.md'];
     eq('U-04 非法 reviewed-sha → 参数错误 1',
       runGateIn([...base, '--reviewed-sha', 'deadbeef', '--head-sha', SHA], t).code, 1);
     eq('U-04 非 git 目录缺 head-sha → 1',
@@ -2166,16 +2200,16 @@ section('17. 升级回归（批次 2）');
     // 报告必须指名它审过的 commit，且必须等于 --reviewed-sha——先有 head 再写报告。
     // 文件名用文档约定的 verifier-report.md：dirty-tree 只豁免这两个本轮临时产物。
     fs.writeFileSync(path.join(repo, 'verifier-report.md'),
-      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head}\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
     eq('U-04 head-sha 缺省时自取 git HEAD',
       runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
-        '--reviewed-sha', head, '--diff-files', 'a.ts', '--state', repo,
+        '--reviewed-sha', head, '--diff-files', 'a.ts', '--implementer', 'impl-1', '--state', repo,
         '--evidence-file', 'verifier-report.md'], repo).code, 0);
 
     // U-04b：工作区脏时 gate 阶段必须停下。改动清单来自已提交的 diff，
     // 一个未提交的 templates/evil.txt 曾经在 denylist 与 scope 都"通过"的情况下穿过闸门。
     const gateArgs = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
-      '--reviewed-sha', head, '--head-sha', head, '--diff-files', 'a.ts', '--state', repo,
+      '--reviewed-sha', head, '--head-sha', head, '--diff-files', 'a.ts', '--implementer', 'impl-1', '--state', repo,
       '--evidence-file', 'verifier-report.md'];
     fs.mkdirSync(path.join(repo, 'templates'), { recursive: true });
     fs.writeFileSync(path.join(repo, 'templates', 'evil.txt'), 'x\n');
@@ -2190,7 +2224,7 @@ section('17. 升级回归（批次 2）');
     execFileSync('git', ['commit', '-qm', 'evil'], { cwd: repo, env: gitEnv });
     const head2 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8', env: gitEnv }).trim();
     fs.writeFileSync(path.join(repo, 'verifier-report.md'),
-      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head2}\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head2}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
     fs.writeFileSync(path.join(repo, 'changed-files.txt'), 'a.ts\n');
     eq('U-04b 临时产物不触发 dirty-tree',
       runGateIn(gateArgs.map((a) => (a === head ? head2 : a)), repo).code, 0);

@@ -148,9 +148,9 @@ node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-att
 ```markdown
 ## Verdict: APPROVE | REJECT | ESCALATE_HUMAN
 
-Author: <验证者标识>
-Reviewed commit: <审过的 sha>
-Change class confirmed: <yes|no>
+Author: <验证者标识——必须 ≠ --implementer>
+Reviewed commit: <审过的 sha——必须 = --reviewed-sha>
+Change class confirmed: <behavior|docs|config|refactor——必须 = --change-class>
 
 ### Evidence
 - Tests: `<命令>` → PASS | FAIL | NOT RUN
@@ -207,7 +207,7 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --reviewed-sha <审查时的 commit> \
   --head-sha "$(git rev-parse HEAD)" \
   --evidence-file <verifier-report.md> \
-  --implementer <执行者标识> \
+  --implementer <执行者标识> \   # 必填：缺了闸门无法判独立性，直接退出 1
   --state <主检出绝对路径>
 ```
 
