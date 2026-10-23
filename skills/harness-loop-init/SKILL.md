@@ -7,9 +7,6 @@ description: >-
   Produces loop-ledger.json and loop-run-log.md, and checks that the verifier role is
   installed where the agent can find it.
 license: MIT
-user_invocable: true
-stage: 2
-requires_stage: 1
 ---
 
 # Stage 2 · 装配 loop 机制（Loop Init）

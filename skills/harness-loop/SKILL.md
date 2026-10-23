@@ -8,8 +8,6 @@ description: >-
   for GitHub issue/PR discovery use harness-loop-issue. Step 2 takes an item argument, or
   reads STATE.md when none is given.
 license: MIT
-user_invocable: true
-stage: runtime
 ---
 
 # Harness Loop — 顶层编排

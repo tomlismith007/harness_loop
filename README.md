@@ -13,7 +13,7 @@ GitHub issue/PR 是**可选模块**（`/harness-loop-issue`），不属于核心
 
 | 命令 | 做什么 | 产出 |
 |---|---|---|
-| `/harness-init` | 阶段 1：建地基 | 6 个文件：`AGENTS.md`、`feature_list.json`、`STATE.md`、`init.sh`、`loop-constraints.md`、`LESSONS.md` |
+| `/harness-init` | 阶段 1：建地基 | 6 个地基文件（`AGENTS.md`、`feature_list.json`、`STATE.md`、`LESSONS.md`、`harness-constraints.md`、`verifier-report.md`）+ 生成的 `init.sh` |
 | `/harness-loop-init` | 阶段 2：装 loop 机制 | `loop-ledger.json`、`loop-run-log.md`，并确认验证入口就位 |
 | `/harness-loop` | 顶层编排：跑完一个 work item | 约束 → 选一项 → 执行 → 独立验证 → 闸门 → 熔断 → 写状态 |
 | `/harness-loop-issue` | GitHub 发现（只读） | 用 `gh` 读 issue/PR/CI，把 Top 5 写进 `STATE.md`，然后停 |
@@ -97,7 +97,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 
 | 阶段 | 目标 | 判据 | 等级 |
 |---|---|---|---|
-| **1 初始化** | 6 个地基文件（含 `harness-constraints.md`），下一会话可重启 | 7 项，全机械 | L1 |
+| **1 初始化** | 6 个地基文件 + 生成的 `init.sh`，下一会话可重启 | 7 项，全机械 | L1 |
 | **2 装配 loop 机制** | 账本、运行日志、熔断、独立验证入口、护栏演练、`loop-constraints.md` | 7 机械 + 2 人工 | L2 |
 
 **不要跳级。** 阶段 1 让文件存在，阶段 2 让机制**起作用**。`--upgrade` 有跳级保护，前一阶段未达成时拒绝写入。

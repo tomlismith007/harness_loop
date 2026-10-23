@@ -7,8 +7,6 @@ description: >-
   project lives on GitHub and you want the loop to find work; then run harness-loop on one
   of the items it wrote. Not for local-only repositories.
 license: MIT
-user_invocable: true
-stage: runtime
 ---
 
 # Harness Loop Issue — GitHub 发现（只读）

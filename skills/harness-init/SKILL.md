@@ -1,15 +1,13 @@
 ---
 name: harness-init
 description: >-
-  Stage 1 of harness building: create the 6 foundation files so a project has a complete,
-  restartable harness structure — AGENTS.md, feature_list.json, STATE.md, init.sh,
-  harness-constraints.md, loop-constraints.md and LESSONS.md. Use when starting harness work on a new or
-  un-harnessed project. Deliberately does NOT install the loop mechanism (ledger, run log);
-  that is stage 2, harness-loop-init. Do not use this skill to add a verifier or a circuit
-  breaker.
+  Stage 1 of harness building: create the foundation files so a project has a complete,
+  restartable harness structure — AGENTS.md, feature_list.json, STATE.md, LESSONS.md,
+  harness-constraints.md, verifier-report.md, plus a generated init.sh. Use when starting
+  harness work on a new or un-harnessed project. Deliberately does NOT install the loop
+  mechanism (ledger, run log, loop-constraints.md); that is stage 2, harness-loop-init.
+  Do not use this skill to add a verifier or a circuit breaker.
 license: MIT
-user_invocable: true
-stage: 1
 ---
 
 # Stage 1 · 初始化（Init）
