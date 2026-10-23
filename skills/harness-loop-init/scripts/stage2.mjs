@@ -250,4 +250,44 @@ export function upgradeStage2(root, force, results) {
   } else {
     results.push({ status: 'skipped', path: ledgerPath });
   }
+
+  // 判据 6 要 `docs/04-safety.md` 与机器策略逐条一致，但没有任何东西生成它——
+  // 于是阶段 2 在默认项目里永远无法完成（实测 --require 卡在 NOT RUN）。
+  // 生成骨架时直接抄当前拒绝列表，让出厂状态就是一致的；已存在则不动。
+  const docsPath = path.join(root, 'docs', '04-safety.md');
+  if (force || !exists(docsPath)) {
+    const constraints = ['harness-constraints.md', 'loop-constraints.md']
+      .map((n) => path.join(root, n)).find((p) => exists(p));
+    const deny = constraints ? parseDenylistFrom(readText(constraints)) : [];
+    if (deny.length) {
+      fs.mkdirSync(path.dirname(docsPath), { recursive: true });
+      fs.writeFileSync(docsPath, [
+        '# 04 · 安全护栏',
+        '',
+        '> 由 `harness-loop-init` 生成。**改了 `harness-constraints.md` 的 `## Paths` 就要同步这里**，',
+        '> 阶段 2 判据 6 会逐条比对两份列表。',
+        '',
+        '## 拒绝列表',
+        '',
+        '未经人工批准，**绝不自动编辑**以下路径：',
+        '',
+        '```',
+        ...deny,
+        '```',
+        '',
+      ].join('\n'), 'utf8');
+      results.push({ status: 'written', path: docsPath });
+    } else {
+      results.push({ status: 'skipped', path: docsPath, reason: '拒绝列表为空，无法生成' });
+    }
+  } else {
+    // 已存在就绝不动它（那是人写过的文档），但漂移必须在升级输出里说出来：
+    // 否则 "SKIPPED (exists)" 看起来和"已对齐"一样，而判据 6 会在下一次运行变红。
+    const drift = denylistDrift(root);
+    results.push({
+      status: 'skipped',
+      path: docsPath,
+      reason: drift.ok === false ? `exists — out of sync with ## Paths: ${drift.reason}` : 'exists',
+    });
+  }
 }

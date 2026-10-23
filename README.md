@@ -243,7 +243,7 @@ CI 在每次 push 时运行测试套件、副本一致性、CLI 冒烟与一条�
 |---|---|---|---|
 | 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node skills/harness-loop-init/scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
-| 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
+| 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 4 文件 + 1 份演练记录，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |
 | `/harness-loop-issue` 发现 | 沙箱仓库 `harness-loop-sandbox` | 写入带完成标准的待办；确认只读 | 否（手工一次性） |
 | `/harness-loop-issue` CI 分类 | 沙箱里造的真实红 PR | `TypeError` 由该 PR 引入 → 判 **regression**，未误判为 env/flake | 否（手工一次性） |

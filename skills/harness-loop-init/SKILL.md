@@ -50,12 +50,16 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target>
 node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
-产出 **2 个文件**：
+产出 **3 个文件**（`docs/04-safety.md` 已存在时跳过）：
 
 | 文件 | 作用 |
 |---|---|
 | `loop-ledger.json` | 熔断器的运行时状态：每次尝试一行 |
 | `loop-run-log.md` | 只追加的运行历史：每轮一条 JSON |
+| `loop-constraints.md` | loop 规则（验证 / 预算 / 教训 / 清理） |
+| `docs/04-safety.md` | 拒绝列表的文档副本；判据 6 与 `harness-constraints.md` 逐条比对。已存在则**不覆盖**，只在输出里报告漂移 |
+
+另外判据 7 要 `loop-drill.json`（下一节手工生成），所以完整产物是 4 个文件 + 1 份演练记录。
 
 同时确认 `harness-loop` 技能已装到 agent 能扫描的路径。
 
@@ -63,6 +67,7 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 
 1. `harness-constraints.md` 的拒绝列表按本仓库实际路径增删（判据 5）。
    `gate-check.mjs` 会真的读它——它必须是真的。
+   **改完同步 `docs/04-safety.md` 的代码块**，否则判据 6 会红（两处必须逐条一致）。
 2. 生成护栏演练记录（判据 7）：
 
    ```bash

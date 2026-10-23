@@ -2267,6 +2267,54 @@ section('17. 升级回归（批次 2）');
     const j = JSON.parse(out);
     const check = j.stages[1].checks.find((c) => /拒绝列表.*一致|漂移/.test(c.label));
     ok('U-06 两份拒绝列表漂移 → 阶段 2 判据失败', check && check.ok === false, JSON.stringify(check));
+
+    // 判据 6 依赖 docs/04-safety.md，而此前没有任何东西生成它——
+    // 阶段 2 在默认项目里永远无法完成（实测 --require 卡在 NOT RUN）。
+    const gen = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-doc04-'));
+    const runStage = (target, extra = []) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(SKILLS_DIR, 'harness-loop-init', 'scripts', 'harness-stage.mjs'), target, ...extra],
+          { encoding: 'utf8' }) };
+      } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+    };
+    fs.writeFileSync(path.join(gen, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
+    runStage(gen, ['--upgrade', '--stage', '1']);
+    // 阶段 2 有跳级保护：阶段 1 的占位 feature 必须先换掉。
+    const fl = JSON.parse(readText(path.join(gen, 'feature_list.json')));
+    for (const f of fl.features) {
+      f.notes = 'real';
+      f.title = `Real ${f.id}`;
+      f.user_visible_behavior = 'observable';
+      f.verification = ['run npm test'];
+    }
+    fs.writeFileSync(path.join(gen, 'feature_list.json'), JSON.stringify(fl, null, 2));
+    fs.writeFileSync(path.join(gen, 'harness-constraints.md'),
+      '## Paths\n\n```\n.env\nloop-constraints.md\nsrc/own-gateway/**\ninfra/prod/**\n```\n');
+    runStage(gen, ['--upgrade', '--stage', '2']);
+    ok('U-06 阶段 2 生成 docs/04-safety.md 骨架', fs.existsSync(path.join(gen, 'docs', '04-safety.md')));
+    const skel = readText(path.join(gen, 'docs', '04-safety.md'));
+    ok('U-06 骨架抄的是当前拒绝列表', /src\/own-gateway\/\*\*/.test(skel) && /infra\/prod\/\*\*/.test(skel), skel);
+    const stage2Out = (() => {
+      try {
+        return execFileSync(process.execPath,
+          [path.join(SKILLS_DIR, 'harness-loop-init', 'scripts', 'harness-stage.mjs'), gen, '--json'],
+          { encoding: 'utf8' });
+      } catch (e) { return e.stdout || ''; }
+    })();
+    const driftCheck = JSON.parse(stage2Out).stages[1].checks.find((c) => /拒绝列表.*一致|漂移/.test(c.label));
+    ok('U-06 生成的骨架让判据 6 直接 PASS', driftCheck && driftCheck.ok === true, JSON.stringify(driftCheck));
+
+    // 已存在时不覆盖（那是人写过的文档），但漂移必须出现在升级输出里。
+    // mkdir 是给回退测试用的：没有生成器时 docs/ 不存在，写文件会崩而不是报红。
+    fs.mkdirSync(path.join(gen, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(gen, 'docs', '04-safety.md'),
+      '## 拒绝列表\n\n```\n.env\n```\n');
+    const rerun = runStage(gen, ['--upgrade', '--stage', '2']);
+    ok('U-06 已存在的 docs/04 不被覆盖', /^## 拒绝列表\n\n```\n\.env\n```/m.test(readText(path.join(gen, 'docs', '04-safety.md'))));
+    ok('U-06 跳过时报告漂移而不是静默 exists',
+      /out of sync/.test(rerun.out) && /src\/own-gateway/.test(rerun.out), rerun.out.slice(-400));
+    rmrf(gen);
     rmrf(drift);
   }
 
