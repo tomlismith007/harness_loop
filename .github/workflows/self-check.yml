@@ -35,110 +35,19 @@ jobs:
       - name: Run test suite
         run: node scripts/test.mjs
 
-      - name: Stage gate (pack self-mode)
-        run: node scripts/harness-stage.mjs . --stage 1 --require --self
-
       - name: Untrusted-input sanitizer self-test
-        run: node scripts/state-write.mjs --self-test
+        run: node skills/harness-loop-issue/scripts/state-write.mjs --self-test
 
-      - name: Verify scripts are executable entry points
-        # Windows 上 run: | 默认走 PowerShell，`{ echo ... }`、`if ...; then` 都是 bash 语法。
-        # 显式指定 bash：三个平台行为一致，探针脚本只有一份。
+      - name: CLI entry points respond
         shell: bash
         run: |
           set -e
-          node scripts/harness-stage.mjs . > /dev/null
-          # 账本用临时的一份：出厂的 loop-ledger.json 带示例 goal，熔断器会（正确地）
-          # 判 placeholder-ledger 并退出 2。
-          printf '{"goal":"probe","attempts":[]}\n' > /tmp/ledger-probe.json
-          node scripts/ledger-check.mjs --ledger /tmp/ledger-probe.json > /dev/null
-          # 占位账本必须被拦下——熔断器要能区分示例数据与真实历史
-          if node scripts/ledger-check.mjs --ledger loop-ledger.json > /dev/null 2>&1; then
-            echo "::error::placeholder ledger must be rejected"
-            exit 1
-          fi
-          # gate-check 的冒烟测试必须覆盖 gate 路径，且同时断言 escalate 分支。
-          # 证据必须带 Author / Reviewed commit / 每个 PASS 的输出片段 / Checks not run——
-          # 闸门现在真的读它们，旧格式的报告会被拒。
-          SHA="$(git rev-parse HEAD)"
-          {
-            echo '## Verdict: APPROVE'
-            echo
-            echo 'Author: ci-probe'
-            echo "Reviewed commit: $SHA"
-            echo
-            echo '### Evidence'
-            echo '- Tests: `node -e "process.exit(0)"` → PASS'
-            echo '  ```'
-            echo '  ok'
-            echo '  ```'
-            echo '- Red check: `node -e "process.exit(0)"` → PASS'
-            echo '  ```'
-            echo '  before fix: 1 failing'
-            echo '  ```'
-            echo
-            echo '### Checks not run'
-            echo '- —'
-          } > /tmp/evidence-probe.md
-          node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha "$SHA" --diff-files a.ts \
-            --evidence-file /tmp/evidence-probe.md > /dev/null
-          # 自相矛盾的报告必须被拦下：一份写着 Tests → FAIL 的 APPROVE 报告
-          # 曾经拿到 proceed exit 0——比没有报告更容易过。
-          {
-            echo '## Verdict: APPROVE'
-            echo
-            echo 'Author: ci-probe'
-            echo "Reviewed commit: $SHA"
-            echo
-            echo '### Evidence'
-            echo '- Tests: `node -e "process.exit(1)"` → FAIL'
-            echo '  ```'
-            echo '  failing'
-            echo '  ```'
-            echo
-            echo '### Checks not run'
-            echo '- —'
-          } > /tmp/evidence-contra.md
-          if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha "$(git rev-parse HEAD)" --diff-files a.ts \
-            --evidence-file /tmp/evidence-contra.md > /dev/null 2>&1; then
-            echo "::error::APPROVE with a failing check must escalate"
-            exit 1
-          fi
-          # 指向路径清单但忘记 @ 必须报错，不能静默塌缩成 1 个文件——
-          # 那会让拒绝列表与范围两个闸门同时失效。单行清单同样必须被拦。
-          printf 'auth/x.ts\n' > /tmp/multiline.txt
-          if node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files /tmp/multiline.txt > /dev/null 2>&1; then
-            echo "::error::--diff-files pointing at a path list must be rejected"
-            exit 1
-          fi
-          # approve 不带证据必须升级（verdict 是断言，不是证据）
-          if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict approve --red-check pass \
-            --reviewed-sha "$SHA" --diff-files a.ts > /dev/null 2>&1; then
-            echo "::error::approve without evidence must escalate"
-            exit 1
-          fi
-          if node scripts/gate-check.mjs --item pr-1 --phase gate --verdict none --diff-files a.ts > /dev/null 2>&1; then
-            echo "::error::gate+no-verdict must escalate"
-            exit 1
-          fi
-          if node scripts/gate-check.mjs --item pr-1 --phase gtae --verdict approve > /dev/null 2>&1; then
-            echo "::error::unknown --phase must be rejected"
-            exit 1
-          fi
-          # 拼错的标志曾经等价于"该闸门没启用"
-          if node scripts/gate-check.mjs --item pr-1 --phase fix --diff-filesx a.ts > /dev/null 2>&1; then
-            echo "::error::unknown flag must be rejected"
-            exit 1
-          fi
-          # kill switch 必须由脚本自己读文件
-          mkdir -p /tmp/pause-probe
-          printf 'loop-pause-all\n' > /tmp/pause-probe/STATE.md
-          if node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state /tmp/pause-probe > /dev/null 2>&1; then
-            echo "::error::loop-pause-all must exit 3"
-            exit 1
-          fi
+          # 装配器在一个空目录上实跑阶段 1：这是它唯一的真实入口。
+          T="$(mktemp -d)"
+          printf '{"name":"x","scripts":{"test":"echo ok"}}\n' > "$T/package.json"
+          node skills/harness-init/scripts/harness-stage.mjs "$T" --upgrade --stage 1 > /dev/null
+          test -f "$T/AGENTS.md"
+          test -f "$T/init.sh"
           node scripts/install-skills.mjs --target . --list > /dev/null
           echo "All CLI entry points respond."
 

@@ -55,11 +55,18 @@ export function isEntryPoint(importMetaUrl, argvPath = process.argv[1]) {
  * 用于"自引用"判定：init.sh 里 `pwd -W` 给出 `D:/repo/init.sh`（正斜杠），
  * Node 的 path.resolve 给出 `D:\repo\init.sh`（反斜杠），字符串比较必然不等。
  * Windows 下路径大小写不敏感，统一小写再比；其他平台保持大小写敏感。
+ *
+ * 必须过 realpath：macOS 的 tmpdir 是 `/var/folders/...`，而它是
+ * `/private/var/folders/...` 的符号链接。只做字符串归一化时，同一个目录的两种
+ * 写法会被判成不同路径——`--force` 分支于是先删掉"目标"，也就是删掉了源，
+ * 再复制时 ENOENT。Linux/Windows 上 tmpdir 没有这层链接，所以只在 macOS 红。
  */
 export function samePath(a, b) {
   if (!a || !b) return false;
   const norm = (p) => {
-    let s = path.resolve(String(p)).replace(/[\\/]+$/, '').replace(/\\/g, '/');
+    let abs = path.resolve(String(p));
+    try { abs = fs.realpathSync.native(abs); } catch { /* 不存在时用原路径比 */ }
+    let s = abs.replace(/[\\/]+$/, '').replace(/\\/g, '/');
     if (process.platform === 'win32') s = s.toLowerCase();
     return s;
   };

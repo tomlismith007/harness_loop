@@ -269,4 +269,4 @@
 
 - 闸门规则 → [03-gates-and-levels.md](03-gates-and-levels.md)
 - 模板 → `templates/`
-- 脚本实现 → `.claude/skills/harness-loop/scripts/ledger-check.mjs`（源文件 `scripts/ledger-check.mjs`）
+- 脚本实现 → `.claude/skills/harness-loop/scripts/ledger-check.mjs`

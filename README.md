@@ -76,17 +76,16 @@ node <clone>/skills/harness-init/scripts/harness-stage.mjs . --upgrade --stage 1
 
 装配技能（`harness-init` / `harness-loop-init`）自带 `scripts/` 与 `templates/`，所以装配器不需要再从别处找 pack。
 
-也可以直接用脚本（`harness-stage.mjs` 是 pack 级工具，从本仓库运行，不复制进消费方）：
+也可以从本仓库直接跑装配器（不复制进消费方）：
 
 ```bash
-node scripts/harness-stage.mjs /path/to/repo            # 看当前阶段与差距
-node scripts/harness-stage.mjs /path/to/repo --upgrade --stage 1
-node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门，未达成退出 2
+node skills/harness-init/scripts/harness-stage.mjs /path/to/repo            # 阶段 1：看差距 / 补齐
+node skills/harness-loop-init/scripts/harness-stage.mjs /path/to/repo --upgrade --stage 2
+node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --require   # CI 闸门，未达成退出 2
 ```
 
-消费方仓库里的技能**自带** `scripts/harness-stage.mjs`，所以技能本身就能跑装配，
-不依赖外部 pack 的位置。`.claude/skills/.harness-loop-install.json` 的 `packRoot`
-只是定位信息，不是运行前提。
+阶段 2 要用 `harness-loop-init` 目录里的那份：它带 `stage2.mjs` 与 loop 模板，
+`harness-init` 的那份不带（缺阶段 2 模块时报告会如实写 NOT RUN）。
 
 阶段 2 的“技能已装到可发现路径”判据查项目内 `.claude/skills` / `.agents/skills`
 与用户级 `~/.claude/skills` / `~/.agents/skills`；项目内优先。
@@ -107,27 +106,48 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 
 ---
 
-## 脚本（11 个）
+## 脚本
+
+运行时脚本住在**技能目录里**，每个技能只带自己任务用得到的那些。根目录的 `scripts/`
+只剩三个维护者工具。
+
+### 技能里的运行时脚本
+
+| 技能 | 脚本 |
+|---|---|
+| `harness-init` | `harness-stage`（CLI 与分派）/ `stage-core`（共享原语）/ `stage1`（阶段 1 判据与补齐） |
+| `harness-loop-init` | 上面三个 + `stage2`（阶段 2）/ `drill-record` / `drill-check` / `ledger-check` / `gate-check` |
+| `harness-loop` | `gate-check` / `ledger-check` / `state-commit` / `clean-state` / `worktree` |
+| `harness-loop-issue` | `state-write` |
+
+每个技能另带一份 `lib/common.mjs`（共享库）。
 
 | 脚本 | 用途 | 退出码 |
 |---|---|---|
-| `harness-stage.mjs` | 两阶段检测 / 补齐 / 校验 | 0 报告或已达成；2 `--require` 未达成 |
+| `harness-stage.mjs` | 两阶段检测 / 补齐 / 校验 | 0 报告或已达成；1 参数错误或写不出文件；2 `--require` 未达成 |
+| `stage1.mjs` / `stage2.mjs` | 各阶段的判据与补齐 | 无 CLI，由 `harness-stage` 调用 |
+| `stage-core.mjs` | 阶段元数据、三态判定、报告渲染、技能目录复制 | 无 CLI |
 | `gate-check.mjs` | 闸门判定 + kill switch | 0 通过；1 参数错误；2 升级；3 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 继续；2 停止并升级 |
-| `install-skills.mjs` | **维护者工具**：把技能推到本机宿主并比对本地源码（`--check`）。终端用户用 `npx skills add`，不需要它 | 0 成功；1 错误或漂移 |
-| `drill-check.mjs` | 护栏演练：拒绝列表逐条命中 + 熔断器具体触发（`--record` 写 `loop-drill.json`） | 0 全过；2 护栏没响 |
+| `drill-check.mjs` | 护栏演练（`--record` 写 `loop-drill.json`） | 0 全过；2 护栏没响 |
+| `drill-record.mjs` | `loop-drill.json` 的读写与有效性判定 | 无 CLI |
 | `clean-state.mjs` | 结束前检查：init.sh 无占位、无调试残留、Last run 是今天 | 0 干净；2 有未清理项 |
-| `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`，manifest 记状态 | 0 成功；2 有未提交改动未清理 |
-| `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗并包成 code span | 0 写入；2 自检失败 |
-| `state-commit.mjs` | 一轮结束时原子更新 `STATE.md` + `loop-run-log.md`（备份 → tmp → rename，失败回滚） | 0 写入；2 写入失败已回滚 |
-| `sync-skills.mjs` | 按闭包把脚本与模板复制进各技能目录（`--check` 校验漂移） | 0 已同步；1 `--check` 发现漂移 |
-| `test.mjs` | 自检（702 项断言） | 0 全通过 |
+| `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list` | 0 成功；2 有未提交改动未清理 |
+| `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗 | 0 写入；2 自检失败 |
+| `state-commit.mjs` | 原子更新 `STATE.md` + `loop-run-log.md`（tmp → rename，失败回滚） | 0 写入；2 已回滚 |
 
-装配阶段**不再向目标仓库复制运行时脚本**：所有技能命令读已安装技能目录里的副本（`.claude/skills/<name>/scripts/...`）。
+### 根目录的维护者工具
 
-**技能目录自带脚本**（由 `sync-skills.mjs` 从 `scripts/`、`templates/` 生成）：`harness-init` 与 `harness-loop-init` 要在任意安装布局下跑 `harness-stage`，所以自带装配器闭包（`harness-stage` / `drill-check` / `ledger-check` / `gate-check` + `lib/common.mjs`）+ 8 个模板；`harness-loop` 与 `harness-loop-issue` 的命令走 `.claude/skills/<name>/scripts/...`，所以各自带自己用到的脚本（无模板）。根目录仍是唯一真相源，`--check` 让副本漂移可机械判定。
+| 脚本 | 用途 |
+|---|---|
+| `test.mjs` | 自检（707 项断言）。直接测技能目录里要交付的那份脚本 |
+| `install-skills.mjs` | 把技能推到本机宿主并比对已装副本（`--check`）。终端用户用 `npx skills add` |
+| `lib/common.mjs` | 上面两个工具共用的库 |
 
-`skills/*/scripts/`（按闭包）与 `skills/*/templates/`（仅装配技能）是**产物目录**：里面的一切都由 `sync-skills` 生成。手放进去的文件会被删除，且删除会逐条打印（`REMOVED …`）。要加东西请改 `scripts/`、`templates/` 里的源。
+`harness-stage` 按需 import `stage2.mjs`：只装 `harness-init` 的项目里它不存在，报告会把它写成一条 **NOT RUN**（"阶段 2 属于 /harness-loop-init"），而不是崩溃或假装通过。
+
+`skills/<name>/scripts/` 与 `templates/` 里的文件**就是唯一的那一份**，没有根目录副本。
+`test.mjs` 断言每个技能的相对 import 都能在自己目录里解析——跨技能引用在用户机器上必然断。
 
 ---
 
@@ -154,21 +174,21 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 
 ## 硬约束
 
-**唯一真相源是 [`AGENTS.md`](AGENTS.md#硬约束不可协商) 的 11 条。** 这里只列摘要，不复制正文——
+**唯一真相源是 [`AGENTS.md`](AGENTS.md#硬约束不可协商) 的 7 条。** 这里只列摘要，不复制正文——
 两份清单各自演进过一次，结果 README 写 8 条、AGENTS.md 写 11 条且内容不同，
 而实际被注入生效的是 AGENTS.md。测试断言两边的条数一致。
 
-1. 执行者与验证者必须是不同实例
-2. 同一事项最多 3 次自动尝试
-3. 拒绝列表路径未经批准绝不自动编辑
-4. 没有显式允许列表时绝不自动合并
+**注意区分两类约束**：这里列的是**开发这个技能仓库**的规则。技能发给用户后，
+用户项目里生效的是 `templates/harness-constraints.md` 与 `templates/loop-constraints.md`
+里的那套（独立验证、3 次上限、拒绝列表、回退测试、NOT RUN、真机验证、机械判定）。
+
+1. 技能目录是产物，源在根目录
+2. 技能必须自包含
+3. 技能只带自己任务用得到的文件
+4. 改了脚本行为必须有断言（含回退测试）
 5. 绝不为让 CI 变绿而禁用测试
-6. `loop-pause-all` 生效时立即退出
-7. 合并必须绑定审查过的 commit
-8. 新增测试必须通过回退测试
-9. 未跑的检查必须显式列为 NOT RUN
-10. 改了厂商接入必须真机验证
-11. "机械判定"的机制必须有真正读它的代码入口
+6. 未跑的检查必须显式列为 NOT RUN
+7. 文档里写的命令必须能跑
 
 ---
 
@@ -187,32 +207,32 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 
 ```
 .
-├── AGENTS.md                  # harness 入口（路由器，不是百科）
-├── STATE.md                   # 活状态：人类收件箱 + 当前活动
-├── LESSONS.md                 # 错题本：返工记录（人读，转正靠人工判断）
-├── harness-constraints.md     # 阶段 1：拒绝列表 / 代码规则 / kill switch，每轮必读
-├── loop-constraints.md        # 阶段 2：验证 / 预算 / 教训 / 清理
-├── loop-run-log.md            # 只追加运行日志
+├── AGENTS.md                  # 本仓库的入口（怎么开发这些技能）
+├── README.md                  # 给用户看的：四个命令与两阶段
+├── init.sh                    # 验证路径：test.mjs
 ├── docs/                      # 方法论（7 篇）+ archive/（v1 结构，仅参考）
-├── skills/                    # 4 个技能：各自自带 SKILL.md + scripts/ + VERSION；
+├── skills/                    # 4 个技能，各自自包含：SKILL.md + scripts/ + VERSION；
 │                              # 装配技能另有 templates/
-│                              # 副本由 sync-skills.mjs 生成并入库，改源后重跑
-├── templates/                 # 8 个模板的源（init.sh 由装配器生成）
-├── scripts/                   # 11 个零依赖 Node 脚本 + lib/（pack 自身的运行时与技能副本的源）
+├── templates/                 # 8 个模板的源（技能里的副本由手工同步）
+├── scripts/                   # 2 个零依赖 Node 脚本 + lib/（维护者工具）
 └── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```
+
+**本仓库不是 harness 消费方。** 根目录没有 `STATE.md` / `LESSONS.md` / `harness-constraints.md`
+/ 账本 / 运行日志——那些是 `/harness-init` 与 `/harness-loop-init` 写进**用户项目**的文件。
+`test.mjs` 断言根目录不出现它们：出现了说明身份混了。
 
 ---
 
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 702 项断言
+node scripts/test.mjs           # 707 项断言
 node scripts/test.mjs --verbose # 显示每一项
-bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
+bash init.sh                    # 测试 + 技能副本一致性
 ```
 
-CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检查。见 `.github/workflows/self-check.yml`。
+CI 在每次 push 时运行测试套件、副本一致性、CLI 冒烟与一条凭据字面量检查。见 `.github/workflows/self-check.yml`。
 
 ---
 
@@ -220,7 +240,7 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 
 | 验证 | 方式 | 结果 | 可重跑？ |
 |---|---|---|---|
-| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 702 项断言全绿 | **是** |
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 707 项断言全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
 | 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |

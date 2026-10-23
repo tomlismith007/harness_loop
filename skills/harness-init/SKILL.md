@@ -29,7 +29,7 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target>
 `<target>` 是**要装配的仓库根**，不是技能目录。从技能目录运行没问题：
 装配器只从自己的位置读 `scripts/` 与 `templates/`，写入的是 `<target>`。
 
-`node scripts/harness-stage.mjs`（无前缀）只在**本包仓库内**成立，不要照抄到消费方。
+无前缀的 `node harness-stage.mjs` 在任何布局下都不成立，不要照抄。
 
 看报告里阶段 1 的判据，确认缺什么。**不要凭印象判断缺什么。**
 
@@ -92,8 +92,5 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --stage 1 --
 
 ## 下一步
 
-```bash
-node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --stage 2
-```
-
-或直接对话：`/harness-loop-init`。
+阶段 2 属于 `/harness-loop-init`：本技能只带阶段 1 的模板与脚本，**不要**在这里跑
+`--upgrade --stage 2`（缺阶段 2 的模板，装配器会报错退出）。直接调用 `/harness-loop-init`。
