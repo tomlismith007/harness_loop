@@ -153,7 +153,7 @@ function skillInDiscoverablePath(root, skillName, requiredText) {
 
 /**
  * 模板里预置的拒绝列表路径（用于判断用户是否本地化过）。
- * 必须与 templates/loop-constraints.md 逐条一致——否则模板自己会被判成"已本地化"。
+ * 必须与 templates/harness-constraints.md 逐条一致——否则模板自己会被判成"已本地化"。
  * 测试断言模板是仓库列表的子集，且仓库至少多 2 条。
  */
 const TEMPLATE_DENYLIST = [
@@ -161,8 +161,8 @@ const TEMPLATE_DENYLIST = [
   '**/*_key*', '**/*_secret*', '.terraform/**', 'k8s/production/**',
   '**/migrations/**', 'auth/**', 'payments/**', 'billing/**',
   'harness-constraints.md', 'loop-constraints.md',
-  'scripts/gate-check.mjs', 'scripts/ledger-check.mjs',
-  'scripts/lib/common.mjs', '.github/workflows/**', 'package.json',
+  'skills/*/scripts/**', 'skills/*/templates/**',
+  '.github/workflows/**', 'package.json',
   'package-lock.json', 'templates/**',
 ];
 
@@ -438,8 +438,8 @@ function checkStage2(root, opts = {}) {
       : exists(path.join(root, 'skills', 'harness-loop', 'SKILL.md'))
         ? '技能在 <repo>/skills/ —— 没有任何 agent 会扫描这个路径'
         : '未找到 harness-loop 技能，或其正文没有 kill switch / 独立验证的实操描述',
-    // install-skills.mjs 不随技能分发，也不在 RUNTIME_SCRIPTS 里——按旧提示执行必得
-    // MODULE_NOT_FOUND。装技能只有一条对外路径。
+    // install-skills.mjs 不随技能分发——按旧提示执行必得 MODULE_NOT_FOUND。
+    // 装技能只有一条对外路径。
     '运行 npx skills add <repo> --skill harness-loop，或把技能目录复制到 .claude/skills/');
 
   const ph = initScriptHasPlaceholder(root);
@@ -466,7 +466,7 @@ function checkStage2(root, opts = {}) {
     drillOk ? null
       : drill.reason
         || `演练有 ${drill.failed.length} 项失败：${drill.failed.join(', ')}`,
-    '运行 node scripts/drill-check.mjs --record，然后提交 loop-drill.json');
+    `运行 node ${path.join(path.dirname(process.argv[1]), 'drill-check.mjs')} --record，然后提交 loop-drill.json`);
 
   add('回退测试被实际执行过（需人工确认）', null,
     '至少有一次：新测试在修复前的代码上真的挂掉，且失败信息指出了错误的行为。'
@@ -660,43 +660,12 @@ function writeInstallManifest(target, results) {
 }
 
 /**
- * 把运行层脚本复制进目标仓库。
+ * 不再把运行层脚本复制进目标仓库。
  *
- * 技能命令都写 `node scripts/xxx.mjs` 并隐含 cwd = 项目根，少了这一步，
- * 新项目里每条命令都是 ERR_MODULE_NOT_FOUND。
- *
- * 不复制：`test.mjs`（源仓库自检套件）、`install-skills.mjs` 与
- * `harness-stage.mjs`（装配工具，依赖 pack 内的 templates/ 与 skills/）。
+ * 技能命令走 `.claude/skills/<name>/scripts/...`，脚本随技能目录安装。
+ * 复制一份到项目根会让同一个脚本有两个版本，且消费方误以为项目自带闸门。
+ * 目标仓库只需要地基文件与技能目录。
  */
-const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'clean-state.mjs', 'worktree.mjs', 'state-write.mjs', 'state-commit.mjs'];
-
-function copyRuntimeScripts(root, force, results) {
-  const packScripts = path.join(PACK_ROOT, 'scripts');
-  const destDir = path.join(root, 'scripts');
-  const libDest = path.join(destDir, 'lib');
-  fs.mkdirSync(libDest, { recursive: true });
-  for (const f of RUNTIME_SCRIPTS) {
-    const src = path.join(packScripts, f);
-    if (!exists(src)) continue;
-    const dest = path.join(destDir, f);
-    if (!force && exists(dest)) {
-      results.push({ status: 'skipped', path: dest });
-      continue;
-    }
-    fs.copyFileSync(src, dest);
-    results.push({ status: 'written', path: dest });
-  }
-  const libSrc = path.join(packScripts, 'lib', 'common.mjs');
-  if (exists(libSrc)) {
-    const dest = path.join(libDest, 'common.mjs');
-    if (force || !exists(dest)) {
-      fs.copyFileSync(libSrc, dest);
-      results.push({ status: 'written', path: dest });
-    } else {
-      results.push({ status: 'skipped', path: dest });
-    }
-  }
-}
 
 function upgrade(root, targetStage, force, results, opts = {}) {
   const commands = Array.isArray(opts.commands) && opts.commands.length
@@ -731,7 +700,6 @@ function upgrade(root, targetStage, force, results, opts = {}) {
       copySkillDir(s, root, force, results);
     }
     writeInstallManifest(root, results);
-    copyRuntimeScripts(root, force, results);
   }
 
   if (targetStage >= 2) {

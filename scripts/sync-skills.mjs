@@ -29,21 +29,22 @@ const ALL_TEMPLATES = [
 ];
 
 /**
- * `harness-stage` 装配时会把 RUNTIME_SCRIPTS 全部复制进目标仓库，
- * 所以任何**带装配器**的技能都必须自带全套运行时脚本——否则从技能目录
- * 跑 `--upgrade` 时，`copyRuntimeScripts` 只能复制到它自己有的那几个。
- * 这条依赖不是 import 图能推出来的，是 harness-stage 的复制清单决定的。
+ * 装配器的 import 闭包：harness-stage → drill-check → ledger-check/gate-check。
+ * 阶段 1 不再把运行时脚本复制进目标仓库，所以这里只需要装配器真正 import 的文件。
  */
 const SCAFFOLDER_SCRIPTS = [
-  'harness-stage.mjs', 'gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs',
-  'clean-state.mjs', 'worktree.mjs', 'state-write.mjs', 'state-commit.mjs',
+  'harness-stage.mjs', 'drill-check.mjs', 'ledger-check.mjs', 'gate-check.mjs',
 ];
 
 /**
  * 每个技能的闭包。脚本依赖来自 import 图，模板依赖来自该技能实际会跑到的阶段。
  *
- * 两个建设技能都带装配器，所以都拿全套：`/harness-loop-init` 可能被直接
- * 用在阶段 1 的项目上，那一刻它也要能把运行时脚本铺好。
+ * 两个建设技能都带装配器，所以都拿同一个 import 闭包；`/harness-loop-init`
+ * 可能被直接用在阶段 1 的项目上，那一刻它也要能生成阶段 1 的 6 个模板。
+ *
+ * `harness-loop` 与 `harness-loop-issue` 的命令走**技能目录内**的脚本
+ * （`.claude/skills/<name>/scripts/...`），所以各自带自己用到的闭包。
+ * 阶段 1 不再复制运行时脚本到目标仓库；所有技能命令都只读技能目录。
  */
 export const SKILL_BUNDLES = {
   'harness-init': {
@@ -59,8 +60,7 @@ export const SKILL_BUNDLES = {
   },
   'harness-loop': {
     scripts: ['gate-check.mjs', 'ledger-check.mjs', 'state-commit.mjs', 'clean-state.mjs', 'worktree.mjs'],
-    // 验证者报告的格式写在 SKILL.md 里：这个技能不跑装配器，没有任何代码读模板，
-    // 带一份副本只会让"改源忘了同步"多一个可能。
+    // 验证者报告的格式写在 SKILL.md 里：这个技能不跑装配器，没有任何代码读模板。
     templates: [],
   },
   'harness-loop-issue': {
@@ -69,20 +69,21 @@ export const SKILL_BUNDLES = {
   },
 };
 
-/** 每个技能都带一份共享库——没有它，任何脚本都 import 不到。 */
+/** 带脚本的技能需要共享库——没有它，任何脚本都 import 不到。 */
 const SHARED = [['lib/common.mjs', 'scripts/lib/common.mjs']];
 
 /**
  * 源 → 目标。
  *
- * 目标固定在 `scripts/` 下，与仓库根同名：技能里的 `node scripts/x.mjs` 不用改，
- * 且 `common.mjs` 的 `../..` 在两种布局里都落在"包根"（仓库根 / 技能根）。
+ * 目标固定在 `scripts/` 下；技能命令用 `.claude/skills/<name>/scripts/x.mjs`
+ * 指向自己目录里的这份。`common.mjs` 的 `../..` 在两种布局里都落在
+ * "包根"（仓库根 / 技能根）。
  */
 function bundleFiles(bundle) {
   return [
     ...bundle.scripts.map((f) => [f, `scripts/${f}`]),
     ...bundle.templates.map((f) => [`../templates/${f}`, `templates/${f}`]),
-    ...SHARED,
+    ...(bundle.scripts.length ? SHARED : []),
     ['../VERSION', 'VERSION'],
   ];
 }
@@ -125,7 +126,7 @@ function syncSkill(skill, bundle, { check }) {
   // 这些目录是**产物目录**：里面的一切都由本脚本生成。手放进去的文件会被删，
   // 所以删除必须逐条打印——静默删除一个别人的草稿比报错更糟。
   for (const [sub, expected] of [
-    ['scripts', new Set(bundle.scripts.concat(['lib/common.mjs']))],
+    ['scripts', new Set(bundle.scripts.concat(bundle.scripts.length ? ['lib/common.mjs'] : []))],
     ['templates', new Set(bundle.templates)],
   ]) {
     const dir = path.join(dstRoot, sub);
@@ -140,13 +141,18 @@ function syncSkill(skill, bundle, { check }) {
         pruneEmpty(dir);
       }
     }
+    // 上一轮可能只留下空目录（listRel 只列文件）：产物目录空了也要收掉。
+    if (!check) pruneEmpty(dir);
   }
   return { diffs, written, removed };
 }
 
-/** 删掉清空后的目录——一个空的 templates/ 会让"这个技能要模板吗"读不出来。 */
+/** 删掉清空后的目录以及空掉的嵌套目录——一个空的 scripts/lib/ 会让"要脚本吗"读不出来。 */
 function pruneEmpty(dir) {
   try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory()) pruneEmpty(path.join(dir, e.name));
+    }
     if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
   } catch { /* 已经不在 */ }
 }

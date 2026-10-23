@@ -37,9 +37,8 @@ payments/**
 billing/**
 harness-constraints.md
 loop-constraints.md
-scripts/gate-check.mjs
-scripts/ledger-check.mjs
-scripts/lib/common.mjs
+skills/*/scripts/**
+skills/*/templates/**
 .github/workflows/**
 package.json
 package-lock.json
@@ -47,7 +46,7 @@ templates/**
 ```
 
 - 命中任一模式的路径：**停止编辑，写升级条目，交给人**。不做"顺便的小改动"。
-- 拒绝列表由 `scripts/gate-check.mjs` 强制执行；改这里就会真的改变行为。
+- 拒绝列表由技能目录内的 `gate-check.mjs` 强制执行（`.claude/skills/harness-loop/scripts/gate-check.mjs`）；改这里就会真的改变行为。
 
 ## Code
 
@@ -58,7 +57,7 @@ templates/**
   <!-- 阈值来源：本行由 gate-check.mjs 的 loadLimits 解析；改数字即改变 scope 闸门的行为 -->
 - 每个 work item 最多 3 次修复尝试；之后升级。
   <!-- 阈值来源：ledger-check.mjs 的 attempt-limit 从本行读取；计数来自 loop-ledger.json，不是命令行参数 -->
-- 每次尝试追加到 `loop-ledger.json`，重试前跑 `node scripts/ledger-check.mjs`。
+- 每次尝试追加到 `loop-ledger.json`，重试前跑 `node .claude/skills/harness-loop/scripts/ledger-check.mjs`。
 
 ## Kill Switch
 

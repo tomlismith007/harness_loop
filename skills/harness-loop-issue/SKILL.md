@@ -19,6 +19,12 @@ license: MIT
 
 ## 前置
 
+目标仓库已跑过 `/harness-init`（需要 `STATE.md`）。本技能自带 `state-write.mjs`，
+命令走技能目录内的 `.claude/skills/harness-loop-issue/scripts/`；若技能装在
+`.agents/skills/` 或用户级 `~/.claude/skills/`，把前缀换成对应目录。
+
+> 阶段 1 不再把运行时脚本复制到项目根；本技能执行时用的是技能目录里的这一份。
+
 ```bash
 gh auth status          # 未登录则停止，不要尝试匿名读取
 ```
@@ -67,11 +73,11 @@ gh pr checks <number>   # 仅对 CI 红的 PR 逐个取失败 job
 所以清洗与来源标记必须有机械入口：
 
 ```bash
-node scripts/state-write.mjs --state . --section "High Priority" \
+node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --section "High Priority" \
   --item "#456 修复登录接口 500（完成标准：npm test -- auth 通过，且新增测试在修复前失败）" \
   --source untrusted --origin "issue#456"
 
-node scripts/state-write.mjs --state . --section "High Priority" \
+node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --section "High Priority" \
   --item "PR #123 CI 红：test:unit 超时（完成标准：CI 绿，且失败分类为 regression）" \
   --source untrusted --origin "pr#123"
 ```

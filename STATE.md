@@ -1,19 +1,21 @@
 # Loop State
 
-Last run: 2026-10-22
+Last run: 2026-10-23
 
 本文件是循环的活状态：人类收件箱、当前活动、观察列表。
 **每轮开始读，每轮结束写。** 已关闭/已合并的条目在每轮清理时移除。
 
 ## High Priority (loop is acting or waiting on human)
 
-- [x] **重构后的目录清理与技能声明修正（2026-10-22 第二批）**：删掉两个残留工作树（`.claude/worktrees/*`，随之清空 `.claude/`）与 `skills/.mimosa/` 陈旧 hook 状态；`REPAIR-SPEC.md` 归档为 `docs/archive/REPAIR-SPEC-2026-10-19.md`；4 个 `SKILL.md` 删掉无人读取的 frontmatter 字段（`user_invocable` / `stage` / `requires_stage`，全仓 grep 无读取者），并修正 harness-init 的 description（漏 `verifier-report.md`、多 `loop-constraints.md`）；README/AGENTS 的阶段 1 产物写法与代码 `STAGE1_FILES` 统一。证据：`node scripts/test.mjs` **657/0**；`node scripts/sync-skills.mjs --check` 通过；`bash init.sh` 退出 0；临时目录 `npx skills add` 实装后 `harness-init/scripts/harness-stage.mjs . --upgrade --stage 1` 退出 0，产出 6 个地基文件 + `init.sh` + 7 个运行时脚本，`--stage 2` 按设计拒绝（阶段 1 尚未本地化）。
+- [ ] **技能命令改用技能目录内的脚本（2026-10-23，待独立验证）**：`harness-loop` 与 `harness-loop-issue` 的 SKILL.md 全部改走 `.claude/skills/<name>/scripts/...`，两个技能重新带上各自闭包（`harness-loop` 5 个脚本 + `lib/common.mjs`，`harness-loop-issue` `state-write.mjs` + `lib/common.mjs`）。阶段 1/2 **不再向消费方项目根复制任何运行时脚本**（`copyRuntimeScripts` 已删除）；装配技能只带装配器闭包（`harness-stage` / `drill-check` / `ledger-check` / `gate-check` + `lib/common.mjs`），技能运行只读技能目录。`sync-skills.mjs` 的 `pruneEmpty` 改为递归并收空目录。`test.mjs` 断言消费者根没有 `scripts/`、技能内路径真实存在，并修掉第 0 步命令提取逻辑。证据：`node scripts/test.mjs` **702/0**；`node scripts/sync-skills.mjs --check` 退出 0；`bash init.sh` 退出 0；`node scripts/harness-stage.mjs . --stage 1 --require --self` 退出 0；临时目录 `npx skills add D:/harness_loop --skill '*' --copy` 后跑阶段 1 与阶段 2，消费方根始终无 `scripts/`，技能内 `gate-check.mjs` kill switch 退出 3、`state-write.mjs --self-test` 通过；红检：HEAD 的旧装配器实跑阶段 1 仍在消费者根写 7 个脚本。未跑：独立验证；Linux/macOS 符号链接安装路径。
+- [x] **清理过期审计产物与无关文件（2026-10-23）**：删除 `audits/`（2026-10-18/10-21 的审计、整改 spec、瘦身方案共 9 份）、`docs/audit/`（2026-10-22 审计与 cleanup spec）、`docs/archive/REPAIR-SPEC-2026-10-19.md`、未引用的 `docs/harness-loop-guide.html`、`.impeccable/` 本机缓存；同步清掉 `STATE.md` / `LESSONS.md` 里指向这些文件的引用。保留 `docs/archive/` 的 v1 文档（AGENTS.md 索引）与拒绝列表里的 `audits/**` 模式（防止未来再出现）。证据：`node scripts/test.mjs` **697/0**（含死链检查）。
+- [x] **重构后的目录清理与技能声明修正（2026-10-22 第二批）**：删掉两个残留工作树（`.claude/worktrees/*`，随之清空 `.claude/`）与 `skills/.mimosa/` 陈旧 hook 状态；`REPAIR-SPEC.md` 已随过期审计产物清理；4 个 `SKILL.md` 删掉无人读取的 frontmatter 字段（`user_invocable` / `stage` / `requires_stage`，全仓 grep 无读取者），并修正 harness-init 的 description（漏 `verifier-report.md`、多 `loop-constraints.md`）；README/AGENTS 的阶段 1 产物写法与代码 `STAGE1_FILES` 统一。证据：`node scripts/test.mjs` **657/0**；`node scripts/sync-skills.mjs --check` 通过；`bash init.sh` 退出 0；临时目录 `npx skills add` 实装后 `harness-init/scripts/harness-stage.mjs . --upgrade --stage 1` 退出 0，产出 6 个地基文件 + `init.sh` + 7 个运行时脚本，`--stage 2` 按设计拒绝（阶段 1 尚未本地化）。
 - [ ] **待人工（本轮结论）**：根 `scripts/` 与 `templates/` **不能删**——`scripts/sync-skills.mjs` 以它们为唯一源生成 `skills/*/` 内副本（`npx skills add` 只拷贝技能目录），`init.sh` / `.githooks/pre-commit` / CI / `scripts/test.mjs` 也直接调用根脚本。要消掉重复只能合并技能（B5），不是删根目录。
-- [x] **技能装完即可用（P0/P1，2026-10-22）**：P0-1 首条命令读不存在的 packRoot 清单 → 改用技能目录内的装配器；P0-2 离线路径装 0 个技能 → 上一层找兄弟技能 + 找不到时报错；P1-1 harness-loop-init 模板只有 2 个导致静默半装 → 补全 + 渲染器三态 + error 计入退出码；P1-3 三处死路提示（install-skills、写死的 scripts/harness-stage.mjs ×2）→ 改用 process.argv[1]；顺带修源即目标 + --force 的 ENOENT。证据：`node scripts/test.mjs` **657/0**；`bash init.sh` 退出 0；临时目录 npx 实装后文档首条命令跑通，阶段 1 出 7 文件、阶段 2 出 3 文件；8 条新断言回退旧实现后全红。commit 5ed2c6f。审计与 spec 见 `docs/audit/2026-10-22-skills-audit.md`、`docs/audit/2026-10-22-cleanup-spec.md`。
+- [x] **技能装完即可用（P0/P1，2026-10-22）**：P0-1 首条命令读不存在的 packRoot 清单 → 改用技能目录内的装配器；P0-2 离线路径装 0 个技能 → 上一层找兄弟技能 + 找不到时报错；P1-1 harness-loop-init 模板只有 2 个导致静默半装 → 补全 + 渲染器三态 + error 计入退出码；P1-3 三处死路提示（install-skills、写死的 scripts/harness-stage.mjs ×2）→ 改用 process.argv[1]；顺带修源即目标 + --force 的 ENOENT。证据：`node scripts/test.mjs` **657/0**；`bash init.sh` 退出 0；临时目录 npx 实装后文档首条命令跑通，阶段 1 出 7 文件、阶段 2 出 3 文件；8 条新断言回退旧实现后全红。commit 5ed2c6f。审计与 spec 已清理（2026-10-23）。
 - [ ] **待人工**：本次改动触及拒绝列表路径 `scripts/sync-skills.mjs` 与 `skills/*/scripts/**`（生成副本），且文件数 8 > 5 的 scope 阈值。按 harness-constraints.md 需人工合并，循环不得自动合入 main。分支 `fix/skills-install-p0-p1`，commit 5ed2c6f。
-- [ ] **待决策（审计 spec §8）**：Q2 是否合并两个装配技能（B5，约省 197 KB）；Q3 两个未合并分支；Q4 `audits/` 与 `REPAIR-SPEC.md`；Q5 `docs/harness-loop-guide.html`。
+- [ ] **待决策（审计 spec §8）**：Q2 是否合并两个装配技能（B5，约省 197 KB）；Q3 两个未合并分支。Q4/Q5 已清理（2026-10-23）。
 
-- [x] **按 `audits/harness-loop-remediation-spec-2026-10-21.md` 修复 P0/P1 批次（2026-10-21）**：
+- [x] **按 2026-10-21 整改方案（已清理）修复 P0/P1 批次（2026-10-21）**：
   R-01 change-class、R-02 隐藏目录 denylist、R-03 尝试次数读账本、R-04 验证者模板、R-05 `--self` 与 CI 真跑、
   R-06 用户级技能路径、R-08 manifest 累积、R-09 worktree 回收、R-10 证据片段与署名、R-11 untrusted 清洗、
   R-12 阈值读约束、R-13 文档同步断言、R-15 跨平台测试、R-17/R-20/R-22/R-23 文档诚实化、R-24 kill switch、
@@ -35,15 +37,15 @@ Last run: 2026-10-22
 - [x] **在靶场 `/d/loop-harness-test` 跑过一轮 `/harness-loop`**：`sum([])` bug，回退测试失败→修复→独立子智能体验证 APPROVE→闸门 proceed→账本与 run-log 落盘。真机验证抓出一个闸门 bug（证据正则不接受技能文档里的格式），已修并加断言。
 - [x] **`/harness-loop-issue` 真机验证（两轮）**：沙箱上第一轮验 issue 发现，第二轮造了一个真实的红 PR（#4）验 CI 分类——`TypeError` 在 `src/math.mjs:2`、由该 PR 引入 → 判 regression，未误判为 env。两轮均确认只读。
 - [x] 技能已装到 `~/.claude/skills` 与 `~/.agents/skills`（各 4 个）；`~/.zcode/skills` 的 v1 陈旧副本已删除。
-- [x] **按 `REPAIR-SPEC.md` 修复审计缺陷（2026-10-19）**：P1-1 kill switch 路径、P1-2 第 5 步切 gate 阶段、P1-3 安装清单定位 pack、P1-4 占位 feature 通过阶段 1、P2-2 run-log 章节、P2-3 账本退出码、P2-4 模板约束、P2-6 文档漂移、P3-1 STATE 矛盾。验证：`node scripts/test.mjs` 357/0；`bash init.sh` 退出 0；五条 gate 阶段路径与四项阶段判据逐条实跑。
+- [x] **按当时的 REPAIR-SPEC（已清理）修复审计缺陷（2026-10-19）**：P1-1 kill switch 路径、P1-2 第 5 步切 gate 阶段、P1-3 安装清单定位 pack、P1-4 占位 feature 通过阶段 1、P2-2 run-log 章节、P2-3 账本退出码、P2-4 模板约束、P2-6 文档漂移、P3-1 STATE 矛盾。验证：`node scripts/test.mjs` 357/0；`bash init.sh` 退出 0；五条 gate 阶段路径与四项阶段判据逐条实跑。
 - [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整。
 - [x] **批次 0：docs 事实修正**（完成标准：4 个死链清零；`docs/03` 闸门表与代码 9 个 gate 名一致；`init.sh` 绿）— commit `a181285`，独立验证 4 轮后 APPROVE
-- [x] **批次 1：修坏掉的机制**（U-01/02/09/11 + U-07；完成标准见 `audits/upgrade-plan-2026-10-18.md` §3）— commit `0d88b94`，独立验证 3 轮后 APPROVE
+- [x] **批次 1：修坏掉的机制**（U-01/02/09/11 + U-07；完成标准见当时的升级方案（已清理） §3）— commit `0d88b94`，独立验证 3 轮后 APPROVE
 - [x] **批次 2：收紧闸门与状态**（U-03/04/06/07检查/08/10；完成标准见同上 §3）— commit `9232620`，独立验证 4 轮后 APPROVE
-- [x] **U-05 护栏演练**（drill-check + 阶段 2 判据；完成标准见 `audits/upgrade-plan-2026-10-18.md` §2 U-05）— commit `9b0b4aa`，独立验证 3 轮后 APPROVE
+- [x] **U-05 护栏演练**（drill-check + 阶段 2 判据；完成标准见当时的升级方案（已清理） §2 U-05）— commit `9b0b4aa`，独立验证 3 轮后 APPROVE
 - [ ] **已知未达成**：本仓库 `harness-stage . --stage 2 --require --self` 仍退出 2（占位账本按设计保留）。CI 现在跑 `--stage 1 --require --self`（阶段 1 已绿），阶段 2 不跑，因为占位账本是有意保留的。
-- [x] **U-12 清洁交接**（clean-state；完成标准见 `audits/upgrade-spec-2026-10-18.md` U-12）— commit `fb1ff93`，独立验证 3 轮后 APPROVE
-- [x] **U-13 worktree manifest**（create/mark/cleanup/list；完成标准见 `audits/upgrade-spec-2026-10-18.md` U-13）— commit `527bfdd`，独立验证 3 轮后 APPROVE
+- [x] **U-12 清洁交接**（clean-state；完成标准见当时的升级方案（已清理） U-12）— commit `fb1ff93`，独立验证 3 轮后 APPROVE
+- [x] **U-13 worktree manifest**（create/mark/cleanup/list；完成标准见当时的升级方案（已清理） U-13）— commit `527bfdd`，独立验证 3 轮后 APPROVE
 - [ ] **已知限制**：`worktree.mjs` 的 run-id 只接受 ASCII（中文 item 名无法直接用作 run-id）。`.loop-worktrees/` 现在由 `create` 自动写进 `.gitignore`。
 - [x] `templates/init.sh` 已删除（FIX-12）：装配器用 `initScriptFromCommands` 生成，模板是分叉源。
 - [x] FIX-14 / R-03：`--attempts` 与 ledger 交叉校验——改为 `ledger-check --item` 的 `attempt-limit` 直接读账本，`gate-check` 不再有 max-attempts 闸门。

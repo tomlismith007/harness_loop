@@ -16,6 +16,13 @@ license: MIT
 
 **不是**用来发现工作的。发现由人（或 `/harness-loop-issue`）完成，本技能只负责把选定的一项做对。
 
+**前置**：目标仓库已跑过 `/harness-init`（需要 `STATE.md` / `harness-constraints.md` / `init.sh`）。
+本技能自带脚本，下面命令都走技能目录内的 `.claude/skills/harness-loop/scripts/`；
+若技能装在 `.agents/skills/` 或用户级 `~/.claude/skills/`，把前缀换成对应目录。
+在 worktree 内运行时，用主检出的绝对路径。
+
+> 阶段 1 不再把运行时脚本复制到项目根；本技能执行时用的是技能目录里的这一份。
+
 ## 一次运行的完整流程
 
 ### 第 0 步：退出检查（先做，成本最低）
@@ -23,7 +30,7 @@ license: MIT
 kill switch：`STATE.md`、`harness-constraints.md` 或 `loop-constraints.md` 里**独占一行**的 `loop-pause-all`。
 
 ```bash
-node scripts/gate-check.mjs --item probe --phase fix --diff-files "" --state . --json
+node .claude/skills/harness-loop/scripts/gate-check.mjs --item probe --phase fix --diff-files "" --state . --json
 ```
 
 第 0 步从主检出目录运行；若在 worktree 内运行，传主检出的绝对路径。
@@ -65,7 +72,7 @@ Constraints loaded from harness-constraints.md (+ loop-constraints.md): N rules 
 在**独立 worktree** 里做最小改动：
 
 ```bash
-node scripts/worktree.mjs create --run-id <item>-attempt<N>
+node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <item>-attempt<N>
 # 等价于 git worktree add -b loop/<id> .loop-worktrees/<id> <base>，但记进 manifest
 ```
 
@@ -125,7 +132,7 @@ Change class confirmed: <yes|no>
 每次尝试追加到 `loop-ledger.json`（`tokensUsed` 可估算，但不得省略），**再动手之前**：
 
 ```bash
-node scripts/ledger-check.mjs --ledger loop-ledger.json --item <item-id>
+node .claude/skills/harness-loop/scripts/ledger-check.mjs --ledger loop-ledger.json --item <item-id>
 ```
 
 尝试次数读的是**账本**，不是命令行参数——传一个更小的数字不会重置上限。
@@ -156,7 +163,7 @@ git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实�
 错报 change-class 等同伪造证据——验证者必须在报告里写 `Change class confirmed:`。
 
 ```bash
-node scripts/gate-check.mjs \
+node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --item <item-id> \
   --phase gate \
   --change-class <behavior|docs|config|refactor> \
@@ -198,7 +205,7 @@ node scripts/gate-check.mjs \
 **先跑事务写入**，不要手工分别编辑 `STATE.md` 与 `loop-run-log.md`：
 
 ```bash
-node scripts/state-commit.mjs --state . --item <item-id> --outcome <outcome> \
+node .claude/skills/harness-loop/scripts/state-commit.mjs --state . --item <item-id> --outcome <outcome> \
   --attempts <n> --files <n> --last-run "$(date +%F)" --next "<下一个 item>"
 ```
 
@@ -211,13 +218,13 @@ node scripts/state-commit.mjs --state . --item <item-id> --outcome <outcome> \
 1. 手工更新 `STATE.md` 的 High Priority（勾选/移除）——脚本只动 `Active` 与 `Last run`
 2. 有代码改动时更新 `feature_list.json`（状态 + 证据）
 3. 本轮若发生**返工**（修了又改、验证被拒），在 `LESSONS.md` 追加一行
-4. 处置 worktree：验证通过 → `node scripts/worktree.mjs mark --run-id <id> --status merged`；
-   被拒或升级 → `--status rejected|escalated`，然后 `node scripts/worktree.mjs cleanup`。
+4. 处置 worktree：验证通过 → `node .claude/skills/harness-loop/scripts/worktree.mjs mark --run-id <id> --status merged`；
+   被拒或升级 → `--status rejected|escalated`，然后 `node .claude/skills/harness-loop/scripts/worktree.mjs cleanup`。
    cleanup 不带 `--force`：有未提交改动时它会报告而不是销毁（exit 2）。
 5. 跑清洁交接检查：
 
    ```bash
-   node scripts/clean-state.mjs --state . --assert-fresh
+   node .claude/skills/harness-loop/scripts/clean-state.mjs --state . --assert-fresh
    ```
 
    exit 2 → 本轮不得宣称完成。它查三件事：`init.sh` 无占位符、

@@ -158,7 +158,7 @@
    → 否：技能没读约束文件
 
 4. 预算内吗？
-   → node scripts/ledger-check.mjs
+   → node .claude/skills/harness-loop/scripts/ledger-check.mjs
    → 否：应该降级或退出，检查闸门实现
 
 5. 尝试了几次？
@@ -180,7 +180,7 @@
 
 ---
 
-## 六、熔断器规格（`scripts/ledger-check.mjs`）
+## 六、熔断器规格（`.claude/skills/harness-loop/scripts/ledger-check.mjs`）
 
 ### 检测顺序
 

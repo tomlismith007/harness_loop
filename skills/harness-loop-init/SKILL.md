@@ -66,7 +66,7 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 2. 生成护栏演练记录（判据 7）：
 
    ```bash
-   node scripts/drill-check.mjs --record
+   node .claude/skills/harness-loop-init/scripts/drill-check.mjs --record
    git add loop-drill.json
    ```
 

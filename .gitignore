@@ -1,5 +1,6 @@
-# mimosa hook runtime state (session-keyed, machine-local)
+# mimosa / impeccable hook runtime state (session-keyed, machine-local)
 .mimosa/
+.impeccable/
 
 # secrets / env
 .env

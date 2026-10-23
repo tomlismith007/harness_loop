@@ -62,8 +62,9 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --
 | `harness-constraints.md` | 拒绝列表、合并规则、kill switch | 按本仓库实际情况增删路径 |
 | `LESSONS.md` | 错题本 | 一般不用改 |
 
-同时把 `harness-loop`、`harness-init`、`harness-loop-init` 装到 `.claude/skills/` 与
-`.agents/skills/`，并复制运行层脚本（`gate-check.mjs`、`ledger-check.mjs`、`lib/common.mjs`）。
+同时把 4 个技能（`harness-init`、`harness-loop-init`、`harness-loop`、`harness-loop-issue`）
+装到 `.claude/skills/` 与 `.agents/skills/`。运行时脚本随技能目录安装，**不再复制到项目根**；
+所有技能命令走 `.claude/skills/<name>/scripts/...`。
 
 **手工改两处**（脚本改不了）：
 
