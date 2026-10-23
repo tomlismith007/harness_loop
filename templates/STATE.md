@@ -8,7 +8,7 @@ Last run: never
 ## High Priority (loop is acting or waiting on human)
 
 - [ ] 首次装配：替换 `feature_list.json` 的占位 feature，写明每条怎么算完成。
-- [ ] 确认 `loop-constraints.md` 的拒绝列表已按本仓库实际情况调整。
+- [ ] 确认 `harness-constraints.md` 的拒绝列表已按本仓库实际情况调整。
 
 ## Active
 
@@ -32,4 +32,4 @@ Last run: never
 
 ---
 
-Run log: `loop-run-log.md` · 约束：`loop-constraints.md` · 教训：`LESSONS.md`
+Run log: `loop-run-log.md` · 约束：`harness-constraints.md`（+ `loop-constraints.md`） · 教训：`LESSONS.md`

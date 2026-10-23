@@ -961,6 +961,19 @@ section('9. 模板完整性');
 
   const agentsTpl = fs.readFileSync(path.join(TEMPLATE_DIR, 'AGENTS.md'), 'utf8');
   ok('AGENTS 模板含占位符', /\{\{[A-Z_]+\}\}/.test(agentsTpl));
+  // 工作队列只能有一个真相源。模板此前让 agent 从 feature_list.json 选工作，
+  // 而 /harness-loop 第 2 步让 agent 从 STATE.md 的 High Priority 选——
+  // 两条规则同时注入，agent 必选其一，选错就绕过整个 loop。
+  ok('AGENTS 模板把 STATE.md 声明为工作队列',
+    /读 `STATE\.md` 的 `## High Priority`/.test(agentsTpl) && /唯一\*\*的工作队列/.test(agentsTpl));
+  ok('AGENTS 模板不再让 agent 从 feature_list 选工作',
+    !/读 `feature_list\.json`，选/.test(agentsTpl));
+  // 阶段 1 不生成 loop-constraints.md，模板不能把它列为阶段 1 必需工件。
+  ok('AGENTS 模板的阶段 1 工件表指向 harness-constraints.md',
+    /\| `harness-constraints\.md` \|/.test(agentsTpl));
+  const stateTpl = readText(path.join(TEMPLATE_DIR, 'STATE.md'));
+  ok('STATE 模板的待办指向阶段 1 就存在的约束文件',
+    /确认 `harness-constraints\.md` 的拒绝列表/.test(stateTpl));
 
   const lessons = fs.readFileSync(path.join(TEMPLATE_DIR, 'LESSONS.md'), 'utf8');
   ok('LESSONS 模板含 Seen N× 格式说明', /Seen N×/.test(lessons));

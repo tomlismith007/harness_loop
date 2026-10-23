@@ -34,7 +34,7 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target>
 |---|---|---|---|
 | 1 | `loop-ledger.json` 存在且不是占位账本 | 机械 | `ledger-check.mjs` 返回非 `placeholder-ledger` |
 | 2 | `loop-run-log.md` 存在 | 机械 | 文件存在且有 `## Log` 章节 |
-| 3 | `harness-loop` 已装到可发现路径 | 机械 | 只查**项目内** `.claude/skills/` 或 `.agents/skills/`；user-scope 安装不计入 |
+| 3 | `harness-loop` 已装到可发现路径 | 机械 | 查项目内 `.claude/skills/`、`.agents/skills/` 与用户级 `~/.claude/skills`、`~/.agents/skills`；项目内优先 |
 | 4 | `init.sh` 无占位符 | 机械 | 不含 `replace this line` / `No test script` |
 | 5 | **拒绝列表已本地化** | 机械 | 含 `harness-constraints.md` 自身，且至少 2 条模板外路径 |
 | 6 | **两份拒绝列表一致** | 机械 | `harness-constraints.md` ↔ `docs/04-safety.md` 逐条比对 |
