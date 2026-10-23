@@ -32,6 +32,15 @@ Evidence: <commit / issue / PR 号>
 
 <!-- 尚未转正的经验。每条挂证据与出现次数。 -->
 
+**装了就能用，不能只看「文件复制成功」。**
+原因：`npx skills add` 只复制技能目录，不写装配器的安装清单；技能第一条命令读那份清单，
+装完必报 `Cannot find module`。同一类错误还有两处：`harness-loop-init` 的 bundle 只带 2 个
+模板（阶段 1 要 6 个），缺的模板被渲染成 `SKIPPED (exists)` 并退出 0；从技能目录装配时
+兄弟技能在上一层，旧实现静默跳过、清单写 `skills: []`。三处都是「退出码 0 + 看起来成功」。
+Seen 1× (2026-10-22)
+Evidence: 2026-10-22 技能审计 P0-1/P0-2/P1-1（报告已清理）；commit 5ed2c6f；
+8 条新断言回退旧实现后全红
+
 **改「路径 / 落盘位置」的脚本，测试必须断言实际写入的目录，不能只看退出码。**
 原因：`install-skills.mjs` 只写 `.zcode`，`--layout agents` 被静默忽略——退出码 0、
 输出像成功，技能全落到错的地方。只断言退出码的测试一直是绿的。
@@ -64,7 +73,7 @@ Evidence: `gate-check` 四种参数排列实跑（2026-10-16；原始审查报�
 **文档里的示例命令必须被至少一条断言覆盖，否则它和代码的漂移没有任何东西能发现。**
 原因：`/harness-loop` 第 0 步写着 `--state STATE.md`，而脚本把该参数当目录——kill switch 在文档命令里静默失效；第 5 步只跑 `--phase fix`，证据/sha/回退测试三道闸永不触发。两处都不是实现错，是文档与代码各按自己的理解写，335 条断言没有一条读它们。
 Seen 1× (2026-10-19)
-Evidence: REPAIR-SPEC.md P1-1、P1-2；test.mjs 新增 `--state STATE.md` 与 `--phase gate` 断言
+Evidence: 当时的 REPAIR-SPEC P1-1、P1-2；test.mjs 新增 `--state STATE.md` 与 `--phase gate` 断言
 
 **断言的分叉判据要绑能力，不要绑平台名。**
 原因：`test.mjs` 的孙进程断言依赖 GNU `timeout`，报告写「原生 Windows → 978/1」。
@@ -103,6 +112,14 @@ Evidence: 修复前实测 `ledger-check → stagnation EXIT=2` 同时 `gate-chec
 只能手工重建。正确做法是 `cp` 到 /tmp 备份、改、跑测试、`cp` 回来。
 Seen 1× (2026-10-21)
 Evidence: 本轮 README/AGENTS 被整体回滚后重建；test.mjs 从 604 掉回 569 又恢复
+
+**移除一个落盘行为时，先 grep 测试里对该路径的执行断言，和实现一起迁移。**
+原因：删除阶段 1 的 `copyRuntimeScripts` 后，`test.mjs` 还有 5 条按 `empty/scripts/*.mjs`
+执行的断言。它们失败成 `Cannot find module`，看起来像新代码坏了，实际是测试还在消费
+已经不该存在的副本。只改实现不改断言，移除会被一片"模块找不到"的红掩盖。
+红检要用 HEAD 的旧装配器实跑一遍，确认旧行为真的写那份产物，而不是靠记忆。
+Seen 1× (2026-10-23)
+Evidence: `test.mjs` 702/0；HEAD 工作树跑阶段 1 在消费者根产出 7 个脚本
 
 ---
 

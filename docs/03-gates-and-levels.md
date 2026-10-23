@@ -1,6 +1,6 @@
 # 03 · 闸门与等级：什么条件下允许做什么
 
-本文档定义 L1–L2 两个阶段等级、闸门规则和判定逻辑。它是 `scripts/gate-check.mjs` 的规格说明。
+本文档定义 L1–L2 两个阶段等级、闸门规则和判定逻辑。它是闸门脚本的规格说明（源文件 `scripts/gate-check.mjs`，消费方运行 `.claude/skills/harness-loop/scripts/gate-check.mjs`）。
 
 ---
 
@@ -151,10 +151,10 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ---
 
-## `scripts/gate-check.mjs` 用法
+## `.claude/skills/harness-loop/scripts/gate-check.mjs` 用法
 
 ```bash
-node scripts/gate-check.mjs \
+node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --item pr-123 \
   --phase gate \
   --attempts 1 \
@@ -178,7 +178,7 @@ node scripts/gate-check.mjs \
 kill switch 由 `gate-check.mjs` 自己读取（`--state` 指向的目录下查 `STATE.md` 与 `loop-constraints.md`）：
 
 ```bash
-node scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state .
+node .claude/skills/harness-loop/scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state .
 # exit 0 = proceed；exit 3 = 立即退出（kill switch 生效）
 ```
 

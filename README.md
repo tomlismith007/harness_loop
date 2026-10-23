@@ -13,7 +13,7 @@ GitHub issue/PR 是**可选模块**（`/harness-loop-issue`），不属于核心
 
 | 命令 | 做什么 | 产出 |
 |---|---|---|
-| `/harness-init` | 阶段 1：建地基 | 6 个文件：`AGENTS.md`、`feature_list.json`、`STATE.md`、`init.sh`、`loop-constraints.md`、`LESSONS.md` |
+| `/harness-init` | 阶段 1：建地基 | 6 个地基文件（`AGENTS.md`、`feature_list.json`、`STATE.md`、`LESSONS.md`、`harness-constraints.md`、`verifier-report.md`）+ 生成的 `init.sh` |
 | `/harness-loop-init` | 阶段 2：装 loop 机制 | `loop-ledger.json`、`loop-run-log.md`，并确认验证入口就位 |
 | `/harness-loop` | 顶层编排：跑完一个 work item | 约束 → 选一项 → 执行 → 独立验证 → 闸门 → 熔断 → 写状态 |
 | `/harness-loop-issue` | GitHub 发现（只读） | 用 `gh` 读 issue/PR/CI，把 Top 5 写进 `STATE.md`，然后停 |
@@ -57,8 +57,8 @@ kill switch → 加载约束 → 选定唯一一项 → 执行者（独立 workt
 ## 快速开始
 
 ```bash
-# 1. 安装技能（技能目录自带脚本与模板，装完即可运行）
-npx skills add tomlismith007/harness_loop
+# 1. 安装技能（非交互：4 个技能 → Claude Code）
+npx skills add tomlismith007/harness_loop --skill '*' -a claude-code -y
 
 # 2. 重启会话，然后在一个项目里：
 /harness-init            # 建地基文件
@@ -74,7 +74,7 @@ npx skills add tomlismith007/harness_loop
 node <clone>/skills/harness-init/scripts/harness-stage.mjs . --upgrade --stage 1
 ```
 
-技能目录自带 `scripts/` 与 `templates/`，所以装配器不需要再从别处找 pack。
+装配技能（`harness-init` / `harness-loop-init`）自带 `scripts/` 与 `templates/`，所以装配器不需要再从别处找 pack。
 
 也可以直接用脚本（`harness-stage.mjs` 是 pack 级工具，从本仓库运行，不复制进消费方）：
 
@@ -97,7 +97,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 
 | 阶段 | 目标 | 判据 | 等级 |
 |---|---|---|---|
-| **1 初始化** | 6 个地基文件（含 `harness-constraints.md`），下一会话可重启 | 7 项，全机械 | L1 |
+| **1 初始化** | 6 个地基文件 + 生成的 `init.sh`，下一会话可重启 | 7 项，全机械 | L1 |
 | **2 装配 loop 机制** | 账本、运行日志、熔断、独立验证入口、护栏演练、`loop-constraints.md` | 7 机械 + 2 人工 | L2 |
 
 **不要跳级。** 阶段 1 让文件存在，阶段 2 让机制**起作用**。`--upgrade` 有跳级保护，前一阶段未达成时拒绝写入。
@@ -120,14 +120,14 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`，manifest 记状态 | 0 成功；2 有未提交改动未清理 |
 | `state-write.mjs` | 往 `STATE.md` 追加待办；第三方文本强制清洗并包成 code span | 0 写入；2 自检失败 |
 | `state-commit.mjs` | 一轮结束时原子更新 `STATE.md` + `loop-run-log.md`（备份 → tmp → rename，失败回滚） | 0 写入；2 写入失败已回滚 |
-| `sync-skills.mjs` | 把脚本与模板复制进每个技能目录（`--check` 校验一致性），让技能自包含 | 0 已同步；1 `--check` 发现漂移 |
-| `test.mjs` | 自检（644 项断言） | 0 全通过 |
+| `sync-skills.mjs` | 按闭包把脚本与模板复制进各技能目录（`--check` 校验漂移） | 0 已同步；1 `--check` 发现漂移 |
+| `test.mjs` | 自检（702 项断言） | 0 全通过 |
 
-装配时复制进目标仓库的只有 `gate-check.mjs`、`ledger-check.mjs`、`drill-check.mjs`、`clean-state.mjs`、`worktree.mjs`、`state-write.mjs`、`state-commit.mjs` 与 `lib/common.mjs`。
+装配阶段**不再向目标仓库复制运行时脚本**：所有技能命令读已安装技能目录里的副本（`.claude/skills/<name>/scripts/...`）。
 
-**技能目录自带脚本与模板**（由 `sync-skills.mjs` 从 `scripts/`、`templates/` 生成）。这样 `npx skills add` 这类"只复制技能目录"的安装器也能得到可运行的技能；根目录仍是唯一真相源，`--check` 让副本漂移可机械判定。
+**技能目录自带脚本**（由 `sync-skills.mjs` 从 `scripts/`、`templates/` 生成）：`harness-init` 与 `harness-loop-init` 要在任意安装布局下跑 `harness-stage`，所以自带装配器闭包（`harness-stage` / `drill-check` / `ledger-check` / `gate-check` + `lib/common.mjs`）+ 8 个模板；`harness-loop` 与 `harness-loop-issue` 的命令走 `.claude/skills/<name>/scripts/...`，所以各自带自己用到的脚本（无模板）。根目录仍是唯一真相源，`--check` 让副本漂移可机械判定。
 
-`skills/*/scripts/` 与 `skills/*/templates/` 是**产物目录**：里面的一切都由 `sync-skills` 生成。手放进去的文件会被删除，且删除会逐条打印（`REMOVED …`）。要加东西请改 `scripts/`、`templates/` 里的源。
+`skills/*/scripts/`（按闭包）与 `skills/*/templates/`（仅装配技能）是**产物目录**：里面的一切都由 `sync-skills` 生成。手放进去的文件会被删除，且删除会逐条打印（`REMOVED …`）。要加东西请改 `scripts/`、`templates/` 里的源。
 
 ---
 
@@ -194,10 +194,11 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ├── loop-constraints.md        # 阶段 2：验证 / 预算 / 教训 / 清理
 ├── loop-run-log.md            # 只追加运行日志
 ├── docs/                      # 方法论（7 篇）+ archive/（v1 结构，仅参考）
-├── skills/                    # 4 个技能：各自自包含（SKILL.md + scripts/ + templates/）
+├── skills/                    # 4 个技能：各自自带 SKILL.md + scripts/ + VERSION；
+│                              # 装配技能另有 templates/
 │                              # 副本由 sync-skills.mjs 生成并入库，改源后重跑
 ├── templates/                 # 8 个模板的源（init.sh 由装配器生成）
-├── scripts/                   # 11 个零依赖 Node 脚本 + lib/（装配时复制 7 个运行时脚本）
+├── scripts/                   # 11 个零依赖 Node 脚本 + lib/（pack 自身的运行时与技能副本的源）
 └── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```
 
@@ -206,7 +207,7 @@ node scripts/harness-stage.mjs /path/to/repo --stage 2 --require   # CI 闸门�
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 644 项断言
+node scripts/test.mjs           # 702 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + CLI 冒烟（含 kill switch 与拒绝列表）
 ```
@@ -219,7 +220,7 @@ CI 在每次 push 时运行测试套件、CLI 冒烟与一条凭据字面量检�
 
 | 验证 | 方式 | 结果 | 可重跑？ |
 |---|---|---|---|
-| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 644 项断言全绿 | **是** |
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 702 项断言全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
 | 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |

@@ -153,7 +153,7 @@ function skillInDiscoverablePath(root, skillName, requiredText) {
 
 /**
  * 模板里预置的拒绝列表路径（用于判断用户是否本地化过）。
- * 必须与 templates/loop-constraints.md 逐条一致——否则模板自己会被判成"已本地化"。
+ * 必须与 templates/harness-constraints.md 逐条一致——否则模板自己会被判成"已本地化"。
  * 测试断言模板是仓库列表的子集，且仓库至少多 2 条。
  */
 const TEMPLATE_DENYLIST = [
@@ -161,8 +161,8 @@ const TEMPLATE_DENYLIST = [
   '**/*_key*', '**/*_secret*', '.terraform/**', 'k8s/production/**',
   '**/migrations/**', 'auth/**', 'payments/**', 'billing/**',
   'harness-constraints.md', 'loop-constraints.md',
-  'scripts/gate-check.mjs', 'scripts/ledger-check.mjs',
-  'scripts/lib/common.mjs', '.github/workflows/**', 'package.json',
+  'skills/*/scripts/**', 'skills/*/templates/**',
+  '.github/workflows/**', 'package.json',
   'package-lock.json', 'templates/**',
 ];
 
@@ -438,7 +438,9 @@ function checkStage2(root, opts = {}) {
       : exists(path.join(root, 'skills', 'harness-loop', 'SKILL.md'))
         ? '技能在 <repo>/skills/ —— 没有任何 agent 会扫描这个路径'
         : '未找到 harness-loop 技能，或其正文没有 kill switch / 独立验证的实操描述',
-    '运行 node scripts/install-skills.mjs --target .');
+    // install-skills.mjs 不随技能分发——按旧提示执行必得 MODULE_NOT_FOUND。
+    // 装技能只有一条对外路径。
+    '运行 npx skills add <repo> --skill harness-loop，或把技能目录复制到 .claude/skills/');
 
   const ph = initScriptHasPlaceholder(root);
   add('验证命令是真实的（无占位符）', !ph.placeholder, ph.reason,
@@ -464,7 +466,7 @@ function checkStage2(root, opts = {}) {
     drillOk ? null
       : drill.reason
         || `演练有 ${drill.failed.length} 项失败：${drill.failed.join(', ')}`,
-    '运行 node scripts/drill-check.mjs --record，然后提交 loop-drill.json');
+    `运行 node ${path.join(path.dirname(process.argv[1]), 'drill-check.mjs')} --record，然后提交 loop-drill.json`);
 
   add('回退测试被实际执行过（需人工确认）', null,
     '至少有一次：新测试在修复前的代码上真的挂掉，且失败信息指出了错误的行为。'
@@ -564,11 +566,45 @@ const SKILL_DEST_DIRS = [path.join('.claude', 'skills'), path.join('.agents', 's
  * 判据是 `SKILL.md` 而不是目录存在：只判目录时，一个空的 `.claude/skills/<name>/`
  * 会让安装静默跳过并报成功，而那个宿主上其实什么都没有。
  */
+/**
+ * 技能源目录。
+ *
+ * 两种布局都要支持：
+ *   pack 仓库       <PACK_ROOT>/skills/<name>
+ *   装好的技能      <宿主>/skills/<name>——此时 PACK_ROOT 就是某一个技能目录，
+ *                   兄弟技能在它的上一层。
+ * 从技能目录跑装配器是 SKILL.md 的首选路径，所以兄弟查找不是可选优化。
+ */
+function skillSourceDir(name) {
+  const inPack = path.join(SKILLS_DIR, name);
+  if (exists(path.join(inPack, 'SKILL.md'))) return inPack;
+  const sibling = path.join(path.dirname(PACK_ROOT), name);
+  if (exists(path.join(sibling, 'SKILL.md'))) return sibling;
+  return null;
+}
+
 function copySkillDir(name, target, force, results) {
-  const src = path.join(SKILLS_DIR, name);
-  if (!exists(path.join(src, 'SKILL.md'))) return;
+  const src = skillSourceDir(name);
+  // 静默 return 会让「装配器不在 pack 布局里」报成功却一个技能都没装：
+  // 清单写 skills: []，用户以为好了。必须报错，由调用方汇总成非零退出。
+  if (!src) {
+    results.push({
+      status: 'error',
+      path: path.join(SKILLS_DIR, name),
+      reason: `找不到技能 ${name}。装配器需要同目录下的兄弟技能——`
+        + `只装了部分技能时，用 npx skills add <repo> --skill '*' 装齐；`
+        + `或在 pack 仓库里运行`,
+    });
+    return;
+  }
   for (const destDir of SKILL_DEST_DIRS) {
     const dest = path.join(target, destDir, name);
+    // 源就是目标：从已安装的技能目录装配、且 target 就是该宿主时会发生。
+    // `--force` 下先 rmSync 再 cpSync 会把源自己删掉（ENOENT）。
+    if (samePath(src, dest)) {
+      results.push({ status: 'skipped', path: dest, reason: '源即目标，无需复制' });
+      continue;
+    }
     if (exists(path.join(dest, 'SKILL.md'))) {
       if (!force) {
         results.push({ status: 'skipped', path: dest });
@@ -624,43 +660,12 @@ function writeInstallManifest(target, results) {
 }
 
 /**
- * 把运行层脚本复制进目标仓库。
+ * 不再把运行层脚本复制进目标仓库。
  *
- * 技能命令都写 `node scripts/xxx.mjs` 并隐含 cwd = 项目根，少了这一步，
- * 新项目里每条命令都是 ERR_MODULE_NOT_FOUND。
- *
- * 不复制：`test.mjs`（源仓库自检套件）、`install-skills.mjs` 与
- * `harness-stage.mjs`（装配工具，依赖 pack 内的 templates/ 与 skills/）。
+ * 技能命令走 `.claude/skills/<name>/scripts/...`，脚本随技能目录安装。
+ * 复制一份到项目根会让同一个脚本有两个版本，且消费方误以为项目自带闸门。
+ * 目标仓库只需要地基文件与技能目录。
  */
-const RUNTIME_SCRIPTS = ['gate-check.mjs', 'ledger-check.mjs', 'drill-check.mjs', 'clean-state.mjs', 'worktree.mjs', 'state-write.mjs', 'state-commit.mjs'];
-
-function copyRuntimeScripts(root, force, results) {
-  const packScripts = path.join(PACK_ROOT, 'scripts');
-  const destDir = path.join(root, 'scripts');
-  const libDest = path.join(destDir, 'lib');
-  fs.mkdirSync(libDest, { recursive: true });
-  for (const f of RUNTIME_SCRIPTS) {
-    const src = path.join(packScripts, f);
-    if (!exists(src)) continue;
-    const dest = path.join(destDir, f);
-    if (!force && exists(dest)) {
-      results.push({ status: 'skipped', path: dest });
-      continue;
-    }
-    fs.copyFileSync(src, dest);
-    results.push({ status: 'written', path: dest });
-  }
-  const libSrc = path.join(packScripts, 'lib', 'common.mjs');
-  if (exists(libSrc)) {
-    const dest = path.join(libDest, 'common.mjs');
-    if (force || !exists(dest)) {
-      fs.copyFileSync(libSrc, dest);
-      results.push({ status: 'written', path: dest });
-    } else {
-      results.push({ status: 'skipped', path: dest });
-    }
-  }
-}
 
 function upgrade(root, targetStage, force, results, opts = {}) {
   const commands = Array.isArray(opts.commands) && opts.commands.length
@@ -695,7 +700,6 @@ function upgrade(root, targetStage, force, results, opts = {}) {
       copySkillDir(s, root, force, results);
     }
     writeInstallManifest(root, results);
-    copyRuntimeScripts(root, force, results);
   }
 
   if (targetStage >= 2) {
@@ -751,7 +755,8 @@ function renderReport(root, current, checksByStage, memo) {
 
   if (next) {
     lines.push('下一步：');
-    lines.push(`  node scripts/harness-stage.mjs ${root} --upgrade --stage ${next.id}`);
+    // 同上：用正在运行的这个脚本的路径，消费方仓库里没有 scripts/harness-stage.mjs。
+    lines.push(`  node ${process.argv[1]} ${root} --upgrade --stage ${next.id}`);
     lines.push(`  然后运行 /${next.id === 1 ? 'harness-init' : 'harness-loop-init'}`);
   } else {
     lines.push('两个阶段全部达成。后续维护：跑 /harness-loop，返工时在 LESSONS.md 记一行。');
@@ -840,9 +845,11 @@ Exit codes:
         if (!checks.every((c) => c.ok === true || c.human || c.na)) unmet.push(s);
       }
       if (unmet.length) {
+        // 用**正在运行的这个脚本**的路径，不要写死 `node scripts/harness-stage.mjs`：
+        // 消费方仓库里没有那个路径，从技能目录运行时它也不存在。
         process.stderr.write(
           `error: cannot upgrade to stage ${to}: stage ${unmet.join(', ')} not complete.\n`
-          + `       Run: node scripts/harness-stage.mjs ${root} --upgrade --stage ${unmet[0]}\n`
+          + `       Run: node ${process.argv[1]} ${root} --upgrade --stage ${unmet[0]}\n`
           + `       Override (not recommended): add --force\n`);
         process.exit(2);
       }
@@ -852,10 +859,18 @@ Exit codes:
     upgrade(root, to, Boolean(args.force), results,
       { commands: explicitCommands, packageManager: explicitPm });
     const written = results.filter((r) => r.status === 'written').length;
+    const errors = results.filter((r) => r.status === 'error');
     process.stdout.write(`Upgraded harness to stage ${to} in ${root}\n`);
-    process.stdout.write(`  written: ${written}, skipped: ${results.length - written}\n\n`);
+    process.stdout.write(`  written: ${written}, skipped: ${results.length - written - errors.length}, errors: ${errors.length}\n\n`);
+    const MARK = { written: 'WRITTEN', skipped: 'SKIPPED (exists)', error: 'ERROR' };
     for (const r of results) {
-      process.stdout.write(`  ${r.status === 'written' ? 'WRITTEN' : 'SKIPPED (exists)'}  ${path.relative(root, r.path).split(path.sep).join('/')}\n`);
+      const line = `  ${MARK[r.status] || r.status}  ${path.relative(root, r.path).split(path.sep).join('/')}`;
+      process.stdout.write(`${line}${r.reason ? `  — ${r.reason}` : ''}\n`);
+    }
+    // error 不能被渲染成 SKIPPED：缺模板 / 缺技能目录时退出 0 等于报了一个假的成功。
+    if (errors.length) {
+      process.stderr.write(`\nerror: ${errors.length} file(s) could not be written (see ERROR above)\n`);
+      process.exit(1);
     }
     process.stdout.write(`\nRe-run without --upgrade to see the updated stage report.\n`);
     return;

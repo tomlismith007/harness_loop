@@ -1,6 +1,6 @@
 {
   "project": "harness_loop",
-  "last_updated": "2026-10-21",
+  "last_updated": "2026-10-23",
   "rules": {
     "single_active_feature": true,
     "passing_requires_evidence": true,
@@ -19,15 +19,15 @@
       "priority": 1,
       "area": "stage1",
       "title": "harness-init 产出 6 个地基文件",
-      "user_visible_behavior": "在一个空项目里运行 /harness-init，得到 AGENTS.md、feature_list.json、STATE.md、init.sh、loop-constraints.md、LESSONS.md",
+      "user_visible_behavior": "在一个空项目里运行 /harness-init，得到 AGENTS.md、feature_list.json、STATE.md、init.sh、harness-constraints.md、LESSONS.md",
       "status": "passing",
       "verification": [
-        "node scripts/harness-stage.mjs <tmp> --upgrade --stage 1",
-        "确认 6 个文件存在，且不产出 loop-ledger.json / loop-run-log.md",
+        "node .claude/skills/harness-init/scripts/harness-stage.mjs <tmp> --upgrade --stage 1（装好的技能目录内运行）",
+        "确认 AGENTS.md / feature_list.json / STATE.md / LESSONS.md / harness-constraints.md / verifier-report.md / init.sh 存在",
         "确认 .claude/skills 与 .agents/skills 下各有 4 个技能"
       ],
       "evidence": [
-        "test.mjs 第 14 节：阶段 1 产出 6 文件、不产出 loop 文档、双路径技能、消费者内脚本可运行；Passed 327 / Failed 0"
+        "test.mjs 第 14 节：阶段 1 产出、不产出 loop 文档、双路径技能、消费者内技能脚本可运行；2026-10-22 新增「从已安装技能目录装配」「只装了部分技能时非零退出」「源即目标 + --force」三条回退测试，回退旧实现后全部变红；2026-10-23 技能命令改走技能目录内脚本、阶段 1/2 不再向项目根复制运行时脚本后 Passed 702 / Failed 0；临时目录 npx 实装，阶段 1 与阶段 2 跑完后消费者根均无 scripts/，技能内 gate-check 可跑（kill switch exit 3）、state-write --self-test 通过"
       ],
       "notes": ""
     },
@@ -63,7 +63,8 @@
       ],
       "evidence": [
         "test.mjs 第 4 节熔断 30+ 条、第 5 节闸门 60+ 条；变异回退确认（删 red-check 分支 → 3 条红）",
-        "靶场 /d/loop-harness-test 真机一轮：回退测试有效、独立验证者 APPROVE、gate-check proceed、ledger-check ok、run-log 落盘"
+        "靶场 /d/loop-harness-test 真机一轮：回退测试有效、独立验证者 APPROVE、gate-check proceed、ledger-check ok、run-log 落盘",
+        "2026-10-23：harness-loop 的 SKILL.md 命令改走 .claude/skills/harness-loop/scripts/；临时项目未跑阶段 1、无项目根 scripts 时，技能内 gate-check 仍能读取 STATE.md 并返回 exit 3（kill switch）"
       ],
       "notes": ""
     },

@@ -1,15 +1,13 @@
 ---
 name: harness-init
 description: >-
-  Stage 1 of harness building: create the 6 foundation files so a project has a complete,
-  restartable harness structure — AGENTS.md, feature_list.json, STATE.md, init.sh,
-  harness-constraints.md, loop-constraints.md and LESSONS.md. Use when starting harness work on a new or
-  un-harnessed project. Deliberately does NOT install the loop mechanism (ledger, run log);
-  that is stage 2, harness-loop-init. Do not use this skill to add a verifier or a circuit
-  breaker.
+  Stage 1 of harness building: create the foundation files so a project has a complete,
+  restartable harness structure — AGENTS.md, feature_list.json, STATE.md, LESSONS.md,
+  harness-constraints.md, verifier-report.md, plus a generated init.sh. Use when starting
+  harness work on a new or un-harnessed project. Deliberately does NOT install the loop
+  mechanism (ledger, run log, loop-constraints.md); that is stage 2, harness-loop-init.
+  Do not use this skill to add a verifier or a circuit breaker.
 license: MIT
-user_invocable: true
-stage: 1
 ---
 
 # Stage 1 · 初始化（Init）
@@ -20,17 +18,18 @@ stage: 1
 
 ## 前置检查
 
-`harness-stage.mjs` 是 **pack 级工具**，不在消费方仓库的 `scripts/` 里（消费方只有
-`gate-check.mjs`、`ledger-check.mjs`、`lib/common.mjs`）。先定位 pack：
+装配器随技能一起安装。直接用**本技能目录**里的那一份——它在任何安装布局下都在：
 
 ```bash
-# 读项目内安装清单里的 packRoot
-node -e "console.log(require('./.claude/skills/.harness-loop-install.json').packRoot)"
-node <packRoot>/scripts/harness-stage.mjs <target>
+node .claude/skills/harness-init/scripts/harness-stage.mjs <target>
 ```
 
-清单也可能在 `.agents/skills/` 或用户级 `~/.claude/skills/`。都找不到 → 问用户 pack 在哪，
-不要猜路径。
+技能装在 `.agents/skills/` 或用户级 `~/.claude/skills/` 时，把前缀换成对应目录。
+
+`<target>` 是**要装配的仓库根**，不是技能目录。从技能目录运行没问题：
+装配器只从自己的位置读 `scripts/` 与 `templates/`，写入的是 `<target>`。
+
+`node scripts/harness-stage.mjs`（无前缀）只在**本包仓库内**成立，不要照抄到消费方。
 
 看报告里阶段 1 的判据，确认缺什么。**不要凭印象判断缺什么。**
 
@@ -49,7 +48,7 @@ node <packRoot>/scripts/harness-stage.mjs <target>
 ## 执行
 
 ```bash
-node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 1
+node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --stage 1
 ```
 
 生成 **6 个文件**：
@@ -63,8 +62,9 @@ node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 1
 | `harness-constraints.md` | 拒绝列表、合并规则、kill switch | 按本仓库实际情况增删路径 |
 | `LESSONS.md` | 错题本 | 一般不用改 |
 
-同时把 `harness-loop`、`harness-init`、`harness-loop-init` 装到 `.claude/skills/` 与
-`.agents/skills/`，并复制运行层脚本（`gate-check.mjs`、`ledger-check.mjs`、`lib/common.mjs`）。
+同时把 4 个技能（`harness-init`、`harness-loop-init`、`harness-loop`、`harness-loop-issue`）
+装到 `.claude/skills/` 与 `.agents/skills/`。运行时脚本随技能目录安装，**不再复制到项目根**；
+所有技能命令走 `.claude/skills/<name>/scripts/...`。
 
 **手工改两处**（脚本改不了）：
 
@@ -75,7 +75,7 @@ node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 1
 
 ```bash
 bash init.sh
-node <packRoot>/scripts/harness-stage.mjs <target> --stage 1 --require   # 退出码 0 = 达成
+node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --stage 1 --require   # 退出码 0 = 达成
 ```
 
 注意：出厂模板的 3 条 feature 带 `占位：` 标记，替换前 `--require` 必须退出 2。
@@ -93,7 +93,7 @@ node <packRoot>/scripts/harness-stage.mjs <target> --stage 1 --require   # 退�
 ## 下一步
 
 ```bash
-node <packRoot>/scripts/harness-stage.mjs <target> --upgrade --stage 2
+node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
 或直接对话：`/harness-loop-init`。
