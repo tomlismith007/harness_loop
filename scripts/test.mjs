@@ -1124,6 +1124,12 @@ section('10. 技能完整性');
   const issue = readText(path.join(SKILLS_DIR, 'harness-loop-issue', 'SKILL.md'));
   ok('harness-loop-issue 标明仅 GitHub', /仅支持 GitHub/.test(issue));
   ok('harness-loop-issue 只读', /只读/.test(issue));
+  // "只读"必须限定在 GitHub 上：本技能确实会写 STATE.md（经 state-write.mjs），
+  // 而旧正文一边说"不执行任何写操作"一边要求更新 Last run 与 run-log——
+  // 后两条它没有任何脚本能做（state-commit 在别的技能里，跨技能引用会断）。
+  ok('harness-loop-issue 的只读限定在 GitHub 上', /对 GitHub 只读/.test(issue));
+  ok('harness-loop-issue 不要求它做不到的 Last run / run-log',
+    !/更新 `STATE\.md` 的 `Last run`/.test(issue) && !/追加一条 `loop-run-log\.md`/.test(issue));
   ok('harness-loop-issue 要求完成标准', /完成标准/.test(issue));
   ok('harness-loop-issue 含 env 不修规则', /env.*绝不|环境.*代码/.test(issue));
   ok('harness-loop-issue 不在同一轮修复', /不要.*同一轮|停下/.test(issue));

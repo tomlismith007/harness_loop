@@ -37,7 +37,8 @@ gh pr list --state open --limit 50 --json number,title,isDraft,reviewDecision,st
 gh pr checks <number>   # 仅对 CI 红的 PR 逐个取失败 job
 ```
 
-只读。本技能**不执行**任何写操作。
+**对 GitHub 只读**：不应用标签、不评论、不关闭、不合并、不推送。
+本地只写一处——`STATE.md` 的待办，且只经 `state-write.mjs`。
 
 ## 第 2 步：分类
 
@@ -91,8 +92,8 @@ node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --secti
 - 每条必须带**完成标准**。没有完成标准的条目不写进去——`/harness-loop` 第 2 步会拒绝它。
 - 不重复 issue 正文，只引用编号与一行摘要。
 - 已有条目不重复添加；已关闭/已合并的条目移除。
-- 更新 `STATE.md` 的 `Last run`。
-- 追加一条 `loop-run-log.md`，`outcome: "report-only"`。
+- 不更新 `Last run`、不写 `loop-run-log.md`——本技能只带 `state-write.mjs`，
+  它没有这两个能力；写运行日志属于 `/harness-loop` 第 7 步。
 
 ## 第 4 步：停下
 
@@ -113,7 +114,7 @@ node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --secti
 
 ## 规则
 
-- **只读。** 不应用标签、不评论、不关闭、不合并。
+- **对 GitHub 只读。** 不应用标签、不评论、不关闭、不合并、不推送。
 - **极度简洁。** 只有"一个理性工程师今天会想知道"的才进 Top 5。
 - **发现期间绝不提议架构改造** —— 本技能是找信号，不是发明。
 - 重复检测保守：只说 `possible duplicate of #NNN`，**绝不自动关闭**。
