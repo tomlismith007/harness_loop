@@ -268,7 +268,11 @@ export function checkGates(input, opts = {}) {
   // 2b. 不可信输入的形状：带 src:untrusted 标记的条目，正文必须已经包成
   //     code span。裸文本来自第三方，下一轮会被当成自身笔记读进去。
   if (input.stateText) {
-    const section = String(input.stateText).split(/^##\s+High Priority\s*$/m)[1];
+    // 按标题前缀切分，不要求逐字相等：出厂模板写的是
+    // `## High Priority (loop is acting or waiting on human)`，
+    // 精确匹配切不出 section，闸门就在默认模板上永远不触发（实测过）。
+    // 与 state-write.mjs 的 appendItem 用同一个前缀规则。
+    const section = String(input.stateText).split(/^##\s+High Priority\b.*$/m)[1];
     if (section !== undefined) {
       const body = section.split(/^##\s/m)[0];
       const bad = body.split(String.fromCharCode(10)).filter((l) => /src:untrusted/.test(l))
