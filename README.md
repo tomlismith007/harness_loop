@@ -180,7 +180,7 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 而实际被注入生效的是 AGENTS.md。测试断言两边的条数一致。
 
 **注意区分两类约束**：这里列的是**开发这个技能仓库**的规则。技能发给用户后，
-用户项目里生效的是 `templates/harness-constraints.md` 与 `templates/loop-constraints.md`
+用户项目里生效的是 `skills/harness-init/templates/harness-constraints.md` 与 `skills/harness-loop-init/templates/loop-constraints.md`
 里的那套（独立验证、3 次上限、拒绝列表、回退测试、NOT RUN、真机验证、机械判定）。
 
 1. 技能目录是产物，源在根目录
@@ -213,8 +213,7 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 ├── init.sh                    # 验证路径：test.mjs
 ├── docs/                      # 方法论（7 篇）+ archive/（v1 结构，仅参考）
 ├── skills/                    # 4 个技能，各自自包含：SKILL.md + scripts/ + VERSION；
-│                              # 装配技能另有 templates/
-├── templates/                 # 8 个模板的源（技能里的副本由手工同步）
+│                              # 装配技能另有 templates/  # 8 个模板（唯一的一份）
 ├── scripts/                   # 2 个零依赖 Node 脚本 + lib/（维护者工具）
 └── .github/workflows/         # self-check：测试 + CLI 冒烟 + 凭据扫描
 ```

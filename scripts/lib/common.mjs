@@ -11,7 +11,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 
 export const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const PACK_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
-export const TEMPLATE_DIR = path.join(PACK_ROOT, 'templates');
+// 模板只有一份：技能目录里的那些就是要发给用户的那份。
+// 根目录曾有一份手工同步的副本，两份都改不红——漂移过一次，没人发现。
+export const TEMPLATE_DIR = path.join(PACK_ROOT, 'skills', 'harness-init', 'templates');
+export const LOOP_TEMPLATE_DIR = path.join(PACK_ROOT, 'skills', 'harness-loop-init', 'templates');
 export const SKILLS_DIR = path.join(PACK_ROOT, 'skills');
 
 /**

@@ -11,6 +11,7 @@
  */
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
@@ -20,7 +21,7 @@ import {
   parseArgs, boolArg, matchesDenylist, loadDenylist, parseDenylistFrom,
   structuredText, textHas, structuredHas, detectProject, verificationCommands,
   initScriptFromCommands, loadLimits, untrusted, sanitizeUntrusted, MAX_UNTRUSTED_LENGTH,
-  PACK_ROOT, TEMPLATE_DIR, SKILLS_DIR, readText,
+  PACK_ROOT, TEMPLATE_DIR, LOOP_TEMPLATE_DIR, SKILLS_DIR, readText,
   runWithTreeKill, hasGnuTimeout, samePath,
 } from './lib/common.mjs';
 // 运行时脚本只有一份，住在技能目录里。测试直接测**要交付的那份**，
@@ -51,8 +52,8 @@ const { localToday } = await import(pathToFileURL(skillScript('clean-state.mjs')
 const VERBOSE = process.argv.includes('--verbose');
 // 本仓库是 skills 开发仓库，不是 harness 消费方：没有根 harness-constraints.md /
 // loop-constraints.md。约束文件的断言一律读 templates/ 里发给用户的模板。
-const readConstraints = () => ['harness-constraints.md', 'loop-constraints.md']
-  .map((n) => readText(path.join(TEMPLATE_DIR, n))).join(String.fromCharCode(10));
+const readConstraints = () => [readText(path.join(TEMPLATE_DIR, 'harness-constraints.md')),
+  readText(path.join(LOOP_TEMPLATE_DIR, 'loop-constraints.md'))].join(String.fromCharCode(10));
 let passed = 0;
 let failed = 0;
 const failures = [];
@@ -944,12 +945,16 @@ section('9. 模板完整性');
 {
   // init.sh 不在模板里：装配器用 initScriptFromCommands 生成它。
   // 保留一份手写模板只会与生成器分叉（旧模板缺 LOOP_HARNESS_ACTIVE_INIT 标记）。
+  // 阶段 1 技能自带这些；loop 专属的两个只在 harness-loop-init 里。
   const requiredTemplates = [
     'AGENTS.md', 'feature_list.json',
-    'loop-constraints.md', 'loop-run-log.md', 'STATE.md', 'LESSONS.md',
+    'STATE.md', 'LESSONS.md', 'harness-constraints.md', 'verifier-report.md',
   ];
   for (const t of requiredTemplates) {
     ok(`模板存在: ${t}`, fs.existsSync(path.join(TEMPLATE_DIR, t)));
+  }
+  for (const t of ['loop-constraints.md', 'loop-run-log.md']) {
+    ok(`loop 模板存在: ${t}`, fs.existsSync(path.join(LOOP_TEMPLATE_DIR, t)));
   }
 
   const fl = JSON.parse(fs.readFileSync(path.join(TEMPLATE_DIR, 'feature_list.json'), 'utf8'));
@@ -981,15 +986,16 @@ section('9. 模板完整性');
   ok('LESSONS 模板有 Promoted 表', /## Promoted to hard rules/.test(lessons));
 
   // 消费方拿到的约束集不能比 pack 自己少。
-  const constraintsTpl = ['harness-constraints.md', 'loop-constraints.md']
-    .map((n) => readText(path.join(TEMPLATE_DIR, n))).join(String.fromCharCode(10));
+  const constraintsTpl = ['harness-constraints.md']
+    .map((n) => readText(path.join(TEMPLATE_DIR, n)))
+    .concat(readText(path.join(LOOP_TEMPLATE_DIR, 'loop-constraints.md'))).join(String.fromCharCode(10));
   ok('约束模板含可执行入口规则', /可执行入口规则/.test(constraintsTpl));
   ok('约束模板含 Worktrees 章节', /## Worktrees/.test(constraintsTpl));
 
   // 出厂 feature 必须自带占位标记，否则会绕过阶段 1 判据。
   ok('feature 模板每条都带占位标记', fl.features.every((f) => /^\s*占位/.test(f.notes || '')));
 
-  const log = fs.readFileSync(path.join(TEMPLATE_DIR, 'loop-run-log.md'), 'utf8');
+  const log = fs.readFileSync(path.join(LOOP_TEMPLATE_DIR, 'loop-run-log.md'), 'utf8');
   ok('run-log 模板声明 outcome 枚举', /`outcome` 枚举/.test(log));
   for (const v of ['no-op', 'report-only', 'fix-proposed', 'verified', 'escalated']) {
     ok(`run-log 模板枚举含 ${v}`, log.includes('`' + v + '`'));
@@ -1076,6 +1082,38 @@ section('10. 技能完整性');
       const bare = [...new Set([...body.matchAll(/node scripts\/([a-z-]+\.mjs)/g)].map((m) => m[1]))];
       ok(`技能 ${s} 不引用裸 node scripts/*.mjs`, bare.length === 0, bare.join(', '));
     }
+  }
+
+  // 同一份脚本在多个技能里各有一份副本（技能必须自包含，不能跨目录 import）。
+  // 副本漂移过一次：改了一份、漏了另一份，而测试只测其中一份。
+  // 现在逐字节比对——副本必须相同，因为它们是同一份代码。
+  {
+    const byName = new Map();
+    // 脚本与模板都要比：模板同样在多个技能里各有一份（harness-init 与
+    // harness-loop-init 都带阶段 1 的 6 个模板）。
+    for (const s of expectedSkills) {
+      for (const sub of ['scripts', 'templates']) {
+        const dir = path.join(SKILLS_DIR, s, sub);
+        if (!fs.existsSync(dir)) continue;
+        const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+          const p = path.join(d, e.name);
+          if (e.isDirectory()) return walk(p);
+          return (e.name.endsWith('.mjs') || e.name.endsWith('.md') || e.name.endsWith('.json')) ? [p] : [];
+        });
+        for (const f of walk(dir)) {
+          const key = `${sub}/${path.relative(dir, f).split(path.sep).join('/')}`;
+          if (!byName.has(key)) byName.set(key, []);
+          byName.get(key).push(f);
+        }
+      }
+    }
+    const drifted = [];
+    for (const [key, files] of byName) {
+      if (files.length < 2) continue;
+      const hashes = new Set(files.map((f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex')));
+      if (hashes.size > 1) drifted.push(key);
+    }
+    ok('同名脚本副本逐字节一致', drifted.length === 0, drifted.join(', '));
   }
 
   for (const s of expectedSkills) {
@@ -1243,7 +1281,8 @@ section('12. 文档完整性');
   ok('README 不宣称自动棘轮', !/自动转正|第三次出现\s*→\s*转正/.test(readme));
   ok('README 明说转正靠人工判断', /转正靠人工判断|是\*\*人的判断\*\*/.test(readme));
   // 目录树里的模板数必须与磁盘一致（"6 个模板"与实际的 7 个曾经同时存在）。
-  const tplCount = fs.readdirSync(path.join(PACK_ROOT, 'templates')).length;
+  // 模板只住在技能目录里：根 templates/ 已删，第二份副本不会再漂移。
+  const tplCount = fs.readdirSync(LOOP_TEMPLATE_DIR).length;
   const tplClaim = Number((readme.match(/templates\/\s+# [^\n]*?(\d+) 个模板/) || [])[1]);
   eq('README 目录树的模板数与磁盘一致', tplClaim, tplCount);
 

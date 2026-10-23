@@ -268,5 +268,5 @@
 ## 下一步
 
 - 闸门规则 → [03-gates-and-levels.md](03-gates-and-levels.md)
-- 模板 → `templates/`
+- 模板 → `skills/harness-init/templates/`（阶段 1）、`skills/harness-loop-init/templates/`（阶段 2）
 - 脚本实现 → `.claude/skills/harness-loop/scripts/ledger-check.mjs`

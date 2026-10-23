@@ -11,7 +11,6 @@ harness-loop 技能仓库的入口文件。这是一个**路由器，不是手�
 | `skills/<name>/SKILL.md` | 技能的正文（给 agent 的指令） | **能** |
 | `skills/<name>/scripts/`、`templates/` | 运行时脚本与模板——**唯一的一份** | **能** |
 | `scripts/` | 三个维护者工具（`test.mjs` / `install-skills.mjs` / `lib/`） | 能 |
-| `templates/` | 模板的源；技能里的副本由手工同步 | 能 |
 | `docs/` | 方法论（发给用户看的说明） | 能 |
 
 **本仓库不是 harness 消费方。** 它不跑 `/harness-loop`，不维护 `STATE.md`、账本、运行日志——那些文件属于用这些技能装配出来的项目。根目录出现它们就是身份混了，`test.mjs` 会红。
@@ -30,8 +29,7 @@ harness-loop 技能仓库的入口文件。这是一个**路由器，不是手�
 
 - **一次只改一个技能或一个脚本。** 直到它被验证。
 - **不跑验证命令，不得宣称完成。** 完成由证据判定，不由代码写完判定。
-- **直接改技能目录里的文件**——那里就是唯一的一份，没有需要同步的副本。
-  改模板时注意：`templates/` 是源，技能里的 `templates/` 是手工复制的副本。
+- **直接改技能目录里的文件**——脚本与模板都只有那一份，没有需要同步的副本。
 - **不修改与当前改动无关的文件。** 一个修复一个 diff。
 - **实现过程中不得静默修改验证规则。** 放宽断言以让测试通过，等同于作弊。
 - **不推送前先说明。** 未经明确批准不自动合并到 main。
@@ -78,7 +76,7 @@ harness-loop 技能仓库的入口文件。这是一个**路由器，不是手�
 | 真实生产案例（全自动 loop） | `docs/09-case-magpie.md` |
 | v1 结构（已归档，仅参考） | `docs/archive/` |
 | 具体动作怎么做 | `skills/<技能名>/SKILL.md` |
-| 验证者报告格式 | `templates/verifier-report.md` |
+| 验证者报告格式 | `skills/harness-init/templates/verifier-report.md` |
 | 装配新项目 | `node skills/harness-init/scripts/harness-stage.mjs <repo> --upgrade --stage 1` |
 
 ## 两个建设阶段
