@@ -1,6 +1,6 @@
 # 03 · 闸门与等级：什么条件下允许做什么
 
-本文档定义 L1–L2 两个阶段等级、闸门规则和判定逻辑。它是闸门脚本的规格说明（源文件 `scripts/gate-check.mjs`，消费方运行 `.claude/skills/harness-loop/scripts/gate-check.mjs`）。
+本文档定义 L1–L2 两个阶段等级、闸门规则和判定逻辑。它是闸门脚本的规格说明（消费方运行 `.claude/skills/harness-loop/scripts/gate-check.mjs`）。
 
 ---
 
