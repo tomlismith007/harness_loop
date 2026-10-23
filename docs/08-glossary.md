@@ -110,7 +110,7 @@ work item 的处理步骤：`intake` / `review` / `fix` / `verify` / `gate` / `p
 ## 闸门与等级
 
 **Gate（闸门）**
-"允许继续"的条件。代码里有 10 个 gate 名：pause、wip-limit、denylist、untrusted-shape、scope、
+"允许继续"的条件。代码里有 11 个 gate 名：pause、wip-limit、dirty-tree、denylist、untrusted-shape、scope、
 head-commit、red-check、verification-evidence、verification、awaiting-verification。
 尝试上限与预算**不是闸门**，由 `ledger-check.mjs` 判定（`attempt-limit` / `report-only`）。
 与代码 gate 名的对应关系见 `docs/03-gates-and-levels.md`；顺序由 `GATE_ORDER` 定义并被测试断言。

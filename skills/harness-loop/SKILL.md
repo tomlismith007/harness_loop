@@ -178,6 +178,10 @@ git status --porcelain   # 只允许出现 changed-files.txt / verifier-report.m
 git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实际替换
 ```
 
+闸门会自己读 `git status`：工作区有未提交改动时以 `dirty-tree` 拒绝
+（`changed-files.txt` / `verifier-report.md` 豁免）。这条闸存在的原因是
+清单来自**已提交的** diff——未提交的编辑不在清单里，拒绝列表与范围两道闸都看不见它。
+
 `--state` 与后续写状态命令都指向**主检出**的绝对路径——worktree 里的 `STATE.md`
 是旧副本，kill switch 与 WIP 判定都看不到主检出的最新值。
 

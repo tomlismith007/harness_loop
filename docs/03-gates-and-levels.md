@@ -25,9 +25,9 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 ## 闸门
 
-闸门是"允许继续"的条件。任一不通过，work item 进入 `escalated`。代码里的 gate 名共 10 个
+闸门是"允许继续"的条件。任一不通过，work item 进入 `escalated`。代码里的 gate 名共 11 个
 （顺序即判定顺序，由 `gate-check.mjs` 的 `GATE_ORDER` 定义，测试断言本文与它一致）：
-`pause`、`wip-limit`、`denylist`、`untrusted-shape`、`scope`、`head-commit`、`red-check`、
+`pause`、`wip-limit`、`dirty-tree`、`denylist`、`untrusted-shape`、`scope`、`head-commit`、`red-check`、
 `verification-evidence`、`verification`、`awaiting-verification`。
 
 「该不该继续试」不在这里判：尝试次数是账本的事实，归 `ledger-check.mjs --item <id>` 的
@@ -112,14 +112,15 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 ```
 1.  loop-pause-all 生效？          → exit 3（gate-check 读 --state 目录）
 2.  `## Active` 多于一项 / 表损坏？  → escalate（wip-limit）
-3.  触及拒绝列表？                  → escalate（不执行编辑）
-4.  第三方条目未包成 code span？     → escalate（untrusted-shape）
-5.  改动超过约束文件的文件数阈值？    → escalate（scope）
-6.  gate 阶段 sha 缺失 / 不一致？    → escalate（约束 7）
-7.  回退测试 fail；behavior 类 not-run？ → escalate（约束 8）
-8.  approve 但证据缺失 / 自相矛盾 / 缺 Checks not run / 无输出片段？ → escalate
-9.  verifier reject / escalate-human？ → escalate
-10. gate 阶段无 verdict？            → escalate（awaiting-verification）
+3.  gate 阶段工作区有未提交改动？    → escalate（dirty-tree）
+4.  触及拒绝列表？                  → escalate（不执行编辑）
+5.  第三方条目未包成 code span？     → escalate（untrusted-shape）
+6.  改动超过约束文件的文件数阈值？    → escalate（scope）
+7.  gate 阶段 sha 缺失 / 不一致？    → escalate（约束 7）
+8.  回退测试 fail；behavior 类 not-run？ → escalate（约束 8）
+9.  approve 但证据缺失 / 自相矛盾 / 缺 Checks not run / 无输出片段？ → escalate
+10. verifier reject / escalate-human？ → escalate
+11. gate 阶段无 verdict？            → escalate（awaiting-verification）
 ```
 
 预算（`## Budget`）与尝试上限由 `ledger-check.mjs` 判定，不属于闸门：

@@ -140,7 +140,7 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 
 | 脚本 | 用途 |
 |---|---|
-| `test.mjs` | 自检（724 项断言）。直接测技能目录里要交付的那份脚本 |
+| `test.mjs` | 自检（732 项断言）。直接测技能目录里要交付的那份脚本 |
 | `install-skills.mjs` | 把技能推到本机宿主并比对已装副本（`--check`）。终端用户用 `npx skills add` |
 | `lib/common.mjs` | 上面两个工具共用的库 |
 
@@ -159,14 +159,15 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 |---|---|---|---|
 | 1 | `pause` | `loop-pause-all` 独占一行，或 `--pause` | exit 3 |
 | 2 | `wip-limit` | `STATE.md` 的 `## Active` 有多于一项，或表结构损坏 | escalate |
-| 3 | `denylist` | 改动命中拒绝列表（含 `.secrets/` 等隐藏目录） | escalate |
-| 4 | `untrusted-shape` | `STATE.md` 里带 `src:untrusted` 的条目没有包成 code span | escalate |
-| 5 | `scope` | 文件数超过 `loop-constraints.md` 的阈值（默认 5，cleanup 10） | escalate |
-| 6 | `head-commit` | gate 阶段 sha 缺失或不一致 | escalate |
-| 7 | `red-check` | 回退测试 `fail`；`behavior` 类改动的 `not-run` | escalate |
-| 8 | `verification-evidence` | `approve` 无证据、证据自相矛盾、缺 `Checks not run`、缺 `Author`/`Reviewed commit`、PASS 无输出片段 | escalate |
-| 9 | `verification` | 验证者 `reject` / `escalate-human` | escalate |
-| 10 | `awaiting-verification` | gate 阶段没有 verdict | escalate（与"验失败"区分） |
+| 3 | `dirty-tree` | gate 阶段工作区有未提交改动（`changed-files.txt` / `verifier-report.md` 豁免） | escalate |
+| 4 | `denylist` | 改动命中拒绝列表（含 `.secrets/` 等隐藏目录） | escalate |
+| 5 | `untrusted-shape` | `STATE.md` 里带 `src:untrusted` 的条目没有包成 code span | escalate |
+| 6 | `scope` | 文件数超过 `loop-constraints.md` 的阈值（默认 5，cleanup 10） | escalate |
+| 7 | `head-commit` | gate 阶段 sha 缺失或不一致 | escalate |
+| 8 | `red-check` | 回退测试 `fail`；`behavior` 类改动的 `not-run` | escalate |
+| 9 | `verification-evidence` | `approve` 无证据、证据自相矛盾、缺 `Checks not run`、缺 `Author`/`Reviewed commit`、PASS 无输出片段 | escalate |
+| 10 | `verification` | 验证者 `reject` / `escalate-human` | escalate |
+| 11 | `awaiting-verification` | gate 阶段没有 verdict | escalate（与"验失败"区分） |
 
 「该不该继续试」不在这里判：尝试次数是账本的事实，由 `ledger-check.mjs --item <id>` 的 `attempt-limit` 判定（默认 3，可用 `--max-attempts` 或约束文件的「最多 N 次」覆盖）。
 
@@ -227,7 +228,7 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 724 项断言
+node scripts/test.mjs           # 732 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + 技能副本一致性
 ```
@@ -240,7 +241,7 @@ CI 在每次 push 时运行测试套件、副本一致性、CLI 冒烟与一条�
 
 | 验证 | 方式 | 结果 | 可重跑？ |
 |---|---|---|---|
-| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 724 项断言全绿 | **是** |
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 732 项断言全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
 | 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |

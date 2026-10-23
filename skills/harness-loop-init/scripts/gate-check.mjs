@@ -41,9 +41,12 @@ const CHANGE_CLASSES = ['behavior', 'docs', 'config', 'refactor'];
 
 /** 闸门判定顺序。README 与 docs/03 的表格由它驱动，测试断言三者一致。 */
 export const GATE_ORDER = [
-  'pause', 'wip-limit', 'denylist', 'untrusted-shape', 'scope', 'head-commit',
+  'pause', 'wip-limit', 'dirty-tree', 'denylist', 'untrusted-shape', 'scope', 'head-commit',
   'red-check', 'verification-evidence', 'verification', 'awaiting-verification',
 ];
+
+/** 本轮临时产物：它们本来就该留在工作区，不该触发 dirty-tree。 */
+export const LOOP_ARTIFACTS = ['changed-files.txt', 'verifier-report.md'];
 
 /**
  * kill switch：只认独占一行的标记。
@@ -170,6 +173,8 @@ export function checkGates(input, opts = {}) {
     // 拒绝列表由调用方从 loop-constraints.md 读入；不给则用 JS 常量兜底。
     denylist = DENYLIST_PATTERNS,
     stateText = null,
+    // 未提交的改动路径。空数组 = 工作区干净（或调用方不判，如 fix 阶段的预检）。
+    dirtyFiles = [],
   } = input;
 
   const base = {
@@ -217,6 +222,27 @@ export function checkGates(input, opts = {}) {
       allowed_actions: ['finish or explicitly block one item first'],
       exit_code: 2,
       next: '把多余的项移回 High Priority 或标记阻塞，只留一项在 ## Active',
+    };
+  }
+
+  // 1c. 脏工作区：改动清单来自已提交的 diff，未提交的改动根本不在清单里。
+  //
+  // 这是 denylist 与 scope 两道闸的**前提**：清单为空时它们都"通过"，
+  // 而一个未提交的 `templates/evil.txt` 会静默穿过两个闸（实测过）。
+  // 只豁免本轮临时产物——它们本来就该在工作区里出现。
+  const dirty = (input.dirtyFiles || []).filter((f) => !LOOP_ARTIFACTS.includes(f));
+  if (dirty.length) {
+    return {
+      ...base,
+      decision: 'escalate',
+      gate: 'dirty-tree',
+      reason: `working tree has ${dirty.length} uncommitted change(s): ${dirty.slice(0, 3).join(', ')}`
+        + (dirty.length > 3 ? ', …' : ''),
+      dirty_files: dirty,
+      allowed_actions: ['commit the change to the loop branch', 'stash or discard unrelated edits'],
+      exit_code: 2,
+      next: 'the gate judges the committed diff. Commit first: git add -A && git commit, '
+        + 'then re-run. Only changed-files.txt / verifier-report.md may stay uncommitted.',
     };
   }
 
@@ -703,12 +729,39 @@ function resolveHeadSha(args) {
   }
 }
 
+/**
+ * 工作区里未提交的改动（含未跟踪文件）。
+ *
+ * 不在 git 仓库里返回 null——那是调用环境问题，由 head-sha 那条路径报参数错误；
+ * 这里不能把"读不到"读成"干净"。
+ */
+export function dirtyFiles(cwd) {
+  const env = { ...process.env };
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+  let out;
+  try {
+    // -uall：未跟踪目录默认折叠成 `templates/`，那个名字匹配不上 `templates/**`，
+    // 于是"新增了一整个被禁目录"在输出里看起来像一件小事。逐个文件报。
+    out = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env, cwd,
+    });
+  } catch {
+    return null;
+  }
+  return out.split('\n').filter(Boolean).map((line) => {
+    // `R  old -> new` 取新路径；其余 `XY path` 从第 4 个字符起。
+    const rest = line.slice(3).trim();
+    const arrow = rest.indexOf(' -> ');
+    return (arrow === -1 ? rest : rest.slice(arrow + 4)).replace(/^"|"$/g, '');
+  });
+}
+
 function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
     'item', 'phase', 'attempts', 'diffFiles', 'verdict', 'pause', 'cleanup',
     'reviewedSha', 'headSha', 'redCheck', 'changeClass', 'implementer', 'constraintsRoot', 'notRun',
-    'evidenceFile', 'evidenceCwd', 'noReplay', 'state', 'json', 'help',
+    'evidenceFile', 'evidenceCwd', 'noReplay', 'state', 'json', 'help', 'dirtyFiles',
   ], 'gate-check');
   if (args.help) {
     process.stdout.write(`gate-check — enforce loop gates before acting
@@ -744,6 +797,11 @@ Options:
   --constraints-root <d> Directory holding loop-constraints.md (default: cwd). The denylist is
                          read from it so repo-specific paths are actually enforced.
   --not-run <list>       Comma-separated checks that were NOT run (listed, never omitted)
+  --dirty-files <list>   Override the uncommitted-change list. Omitted -> read from
+                         git status --porcelain. Non-empty at --phase gate -> escalate
+                         (dirty-tree): the diff list is built from committed changes,
+                         so uncommitted edits would slip past denylist and scope.
+                         changed-files.txt / verifier-report.md are exempt.
   --json                 Emit JSON (default)
   --help                 Show this help
 
@@ -844,6 +902,12 @@ Exit codes:
     fail('--phase gate needs --head-sha, or a git repository to read HEAD from', 1);
   }
 
+  // 脏工作区只在 gate 阶段判：fix 阶段是派发前的预检，那时改动本来就还没提交。
+  // 显式传 --dirty-files 时以调用方为准（测试与特殊布局需要）。
+  const dirty = args.dirtyFiles !== undefined
+    ? String(args.dirtyFiles).split(',').map((s) => s.trim()).filter(Boolean)
+    : (args.phase === 'gate' ? (dirtyFiles(process.cwd()) ?? []) : []);
+
   const activeFile = state.files.find((f) => f.name === 'STATE.md');
   const active = activeFile ? activeItems(activeFile.text) : { count: null, malformed: null };
 
@@ -875,6 +939,7 @@ Exit codes:
     // 维护者按文档在 ## Repo-Specific 加的路径必须真的被强制执行。
     denylist: loadDenylist(constraintsRoot),
     stateText: activeFile ? activeFile.text : null,
+    dirtyFiles: dirty,
     reviewedSha: typeof args.reviewedSha === 'string' ? args.reviewedSha : null,
     headSha: resolveHeadSha(args),
     redCheck: enumArg(args.redCheck, RED_CHECKS, '--red-check') ?? 'not-run',

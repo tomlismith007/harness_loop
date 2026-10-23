@@ -460,6 +460,15 @@ section('5. 闸门判定');
   eq('pause 退出码 3', checkGates({ item: 'p', pause: true }).exit_code, 3);
   eq('拒绝列表 → escalate', checkGates({ item: 'p', diffFiles: ['auth/x.ts'] }).decision, 'escalate');
   eq('拒绝列表闸门名', checkGates({ item: 'p', diffFiles: ['auth/x.ts'] }).gate, 'denylist');
+  // 脏工作区：改动清单来自已提交的 diff，未提交的编辑不在清单里，
+  // 于是 denylist 与 scope 两道闸同时看不见它。
+  eq('脏工作区 → escalate',
+    checkGates({ item: 'p', ...GATE, diffFiles: ['src/app.ts'], dirtyFiles: ['templates/evil.txt'] }).gate, 'dirty-tree');
+  eq('脏工作区先于拒绝列表命中',
+    checkGates({ item: 'p', ...GATE, diffFiles: ['auth/x.ts'], dirtyFiles: ['auth/x.ts'] }).gate, 'dirty-tree');
+  eq('只有本轮临时产物 → 不拦',
+    checkGates({ item: 'p', ...GATE, diffFiles: ['src/app.ts'],
+      dirtyFiles: ['changed-files.txt', 'verifier-report.md'] }).decision, 'proceed');
   // 尝试次数不在这里判：账本是唯一真相源，见 ledger-check 的 attempt-limit。
   eq('闸门不再读 --attempts 判上限', checkGates({ item: 'p', attempts: 99, diffFiles: ['a.ts'] }).decision, 'proceed');
   eq('6 文件 → scope escalate', checkGates({ item: 'p', attempts: 1, diffFiles: ['a', 'b', 'c', 'd', 'e', 'f'], verdict: 'approve' }).decision, 'escalate');
@@ -2117,12 +2126,45 @@ section('17. 升级回归（批次 2）');
     execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo, env: gitEnv });
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8', env: gitEnv }).trim();
     // 报告必须指名它审过的 commit，且必须等于 --reviewed-sha——先有 head 再写报告。
-    fs.writeFileSync(path.join(repo, 'ev.md'),
+    // 文件名用文档约定的 verifier-report.md：dirty-tree 只豁免这两个本轮临时产物。
+    fs.writeFileSync(path.join(repo, 'verifier-report.md'),
       `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head}\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
     eq('U-04 head-sha 缺省时自取 git HEAD',
       runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
         '--reviewed-sha', head, '--diff-files', 'a.ts', '--state', repo,
-        '--evidence-file', 'ev.md'], repo).code, 0);
+        '--evidence-file', 'verifier-report.md'], repo).code, 0);
+
+    // U-04b：工作区脏时 gate 阶段必须停下。改动清单来自已提交的 diff，
+    // 一个未提交的 templates/evil.txt 曾经在 denylist 与 scope 都"通过"的情况下穿过闸门。
+    const gateArgs = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
+      '--reviewed-sha', head, '--head-sha', head, '--diff-files', 'a.ts', '--state', repo,
+      '--evidence-file', 'verifier-report.md'];
+    fs.mkdirSync(path.join(repo, 'templates'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'templates', 'evil.txt'), 'x\n');
+    const dirtyRun = runGateIn(gateArgs, repo);
+    eq('U-04b 未提交的改动 → gate 阶段 escalate', dirtyRun.code, 2);
+    ok('U-04b 命中 dirty-tree 并点名文件',
+      /"gate": "dirty-tree"/.test(dirtyRun.out) && /templates\/evil\.txt/.test(dirtyRun.out),
+      dirtyRun.out.slice(0, 300));
+
+    // 豁免清单只认本轮临时产物：把它们提交掉，再让它们出现在工作区。
+    execFileSync('git', ['add', '-A'], { cwd: repo, env: gitEnv });
+    execFileSync('git', ['commit', '-qm', 'evil'], { cwd: repo, env: gitEnv });
+    const head2 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8', env: gitEnv }).trim();
+    fs.writeFileSync(path.join(repo, 'verifier-report.md'),
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head2}\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
+    fs.writeFileSync(path.join(repo, 'changed-files.txt'), 'a.ts\n');
+    eq('U-04b 临时产物不触发 dirty-tree',
+      runGateIn(gateArgs.map((a) => (a === head ? head2 : a)), repo).code, 0);
+
+    // 显式 --dirty-files 覆盖（无 git 的布局也能判）
+    eq('U-04b --dirty-files 覆盖自动读取',
+      runGateIn([...gateArgs.map((a) => (a === head ? head2 : a)), '--dirty-files', 'src/x.ts'], repo).code, 2);
+
+    // fix 阶段是派发前预检，改动本来就还没提交
+    eq('U-04b fix 阶段不判脏工作区',
+      runGateIn(['--item', 'p', '--phase', 'fix', '--diff-files', 'a.ts', '--state', repo], repo).code, 0);
+
     rmrf(repo);
     rmrf(t);
   }
