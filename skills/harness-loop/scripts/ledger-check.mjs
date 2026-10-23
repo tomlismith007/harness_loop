@@ -13,7 +13,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseArgs, readJson, printJson, fail, rejectUnknownFlags, loadBudget, loadLimits, isEntryPoint } from './lib/common.mjs';
+import { parseArgs, readJson, printJson, fail, rejectUnknownFlags, boolArg, loadBudget, loadLimits, isEntryPoint } from './lib/common.mjs';
+
+export const ATTEMPT_OUTCOMES = ['success', 'failure', 'noop'];
 
 export const DEFAULT_BREAKER = {
   maxIterations: 10,
@@ -84,6 +86,43 @@ function unreadableLedger(why, thresholds) {
 }
 
 /**
+ * 追加一次尝试。账本是熔断器唯一的输入，而此前没有任何写入入口——
+ * 技能正文要求"每次尝试追加"，agent 只能手改 JSON，schema 又不在技能里，
+ * 于是失败尝试根本进不了账本，attempt-limit / stagnation 在真实失败路径上永不触发。
+ *
+ * 校验放在这里而不是 CLI 层：schema 只定义一次，调用方（技能、测试、脚本）共用。
+ */
+export function appendAttempt(ledger, entry = {}) {
+  if (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) {
+    return { ok: false, reason: '账本不可读（缺失、非法 JSON 或不是对象）' };
+  }
+  if (!Array.isArray(ledger.attempts)) {
+    return { ok: false, reason: ledger.attempts === undefined ? 'attempts 字段缺失' : 'attempts 不是数组' };
+  }
+  if (!entry.item) return { ok: false, reason: '缺少 item' };
+  if (!ATTEMPT_OUTCOMES.includes(entry.outcome)) {
+    return { ok: false, reason: `outcome 必须是 ${ATTEMPT_OUTCOMES.join(' / ')}` };
+  }
+  // 失败尝试必须带 error：stagnation 靠错误签名，缺了它这条记录对熔断器不可见。
+  if (entry.outcome === 'failure' && !String(entry.error || '').trim()) {
+    return { ok: false, reason: 'outcome=failure 必须带 error（熔断器靠错误签名检测停滞）' };
+  }
+  const iteration = ledger.attempts.reduce((m, a) => Math.max(m, Number(a?.iteration) || 0), 0) + 1;
+  const record = {
+    iteration,
+    item: entry.item,
+    action: entry.action || '',
+    outcome: entry.outcome,
+    ...(entry.error ? { error: String(entry.error) } : {}),
+    tokensUsed: Number(entry.tokensUsed) || 0,
+    at: entry.at || new Date().toISOString(),
+    ...(entry.pattern ? { pattern: entry.pattern } : {}),
+  };
+  ledger.attempts = [...ledger.attempts, record];
+  return { ok: true, record, ledger };
+}
+
+/**
  * 判定熔断状态。
  *
  * 账本不可读时**必须**停在 no-ledger，而不是回落到"没有尝试记录所以一切正常"。
@@ -130,6 +169,7 @@ export function checkLedger(ledger, opts = {}) {
     if (itemAttempts >= maxAttempts) {
       return {
         iterations: itemAttempts,
+        item_attempts: itemAttempts,
         consecutive_failures: 0,
         tokens_used: 0,
         last_error_signature: null,
@@ -214,6 +254,9 @@ export function checkLedger(ledger, opts = {}) {
     consecutive_failures: consecutiveFailures,
     tokens_used: tokensUsed,
     last_error_signature: lastSignature || null,
+    // 本 item 的尝试数。`iterations` 是**整本账**的条数，把它当尝试次数会让
+    // 一个跑过 2 次的 item 看起来已经用完 3 次上限。
+    ...(opts.item ? { item_attempts: all.filter((a) => a.item === opts.item).length } : {}),
     thresholds: {
       max_iterations: maxIterations,
       stagnation: stagnationThreshold,
@@ -353,13 +396,15 @@ function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, [
     'ledger', 'stagnation', 'noProgress', 'maxIterations', 'maxAttempts', 'tokenBudget',
-    'item', 'pattern', 'escalation', 'constraintsRoot', 'json', 'help',
+    'item', 'pattern', 'escalation', 'append', 'outcome', 'action', 'error', 'tokens',
+    'constraintsRoot', 'json', 'help',
   ], 'ledger-check');
   if (args.help) {
     process.stdout.write(`ledger-check — loop circuit breaker
 
 Usage:
   node scripts/ledger-check.mjs --ledger <path> [options]
+  node scripts/ledger-check.mjs --ledger <path> --append --item <id> --outcome <o> --action <text>
 
 Options:
   --ledger <path>        Path to loop-ledger.json (default: loop-ledger.json)
@@ -375,12 +420,20 @@ Options:
   --pattern <id>         Only judge attempts belonging to this loop. A shared ledger
                          would otherwise let one loop's failures trip another's breaker.
   --escalation           Emit an escalation markdown document
+  --append               Append one attempt instead of judging. Requires
+                         --item, --outcome and --action. --error is required for
+                         outcome=failure. --tokens defaults to 0.
+  --outcome <o>          success | failure | noop   (--append only)
+  --action <text>        What was attempted            (--append only)
+  --error <text>         Error text; feeds stagnation detection (failure only)
+  --tokens <n>           Token estimate for this attempt (--append only, default 0)
   --json                 Emit JSON result
   --help                 Show this help
 
 Exit codes:
-  0  continue
-  2  stop and escalate to human
+  0  continue (or attempt appended)
+  1  invalid argument
+  2  stop and escalate to human (or the ledger is unreadable and cannot be appended to)
 `);
     return;
   }
@@ -401,6 +454,34 @@ Exit codes:
     if (args.escalation) process.stdout.write(renderEscalation(null, result));
     else printJson(result);
     process.exit(2);
+  }
+
+  // --append：写一条尝试记录，然后退出。账本是熔断器唯一的输入，
+  // 没有写入入口时"每次尝试追加"只能靠手改 JSON——那条路径实测从未发生过。
+  if (boolArg(args.append)) {
+    if (typeof args.item !== 'string' || !args.item.trim()) fail('--append requires --item', 1);
+    if (typeof args.outcome !== 'string') fail('--append requires --outcome (success|failure|noop)', 1);
+    if (typeof args.action !== 'string' || !args.action.trim()) fail('--append requires --action', 1);
+    if (args.tokens !== undefined && !Number.isFinite(Number(args.tokens))) {
+      fail(`--tokens must be a finite number (got: ${args.tokens})`, 1);
+    }
+    const r = appendAttempt(ledger, {
+      item: args.item.trim(),
+      outcome: args.outcome,
+      action: args.action.trim(),
+      error: typeof args.error === 'string' ? args.error : '',
+      tokensUsed: Number(args.tokens) || 0,
+      pattern: typeof args.pattern === 'string' ? args.pattern : undefined,
+    });
+    // 校验失败是调用方写错了参数（1）；账本不可写是状态问题（2）。
+    if (!r.ok) fail(`cannot append: ${r.reason}`, /账本/.test(r.reason) ? 2 : 1);
+    // tmp → rename：写到一半崩溃留下半份账本，熔断器会把"读不懂"读成"没有记录"。
+    const tmp = `${ledgerPath}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(r.ledger, null, 2) + '\n', 'utf8');
+    fs.renameSync(tmp, ledgerPath);
+    if (args.json) printJson({ appended: r.record, total: r.ledger.attempts.length });
+    else process.stdout.write(`appended attempt ${r.record.iteration} for ${r.record.item} (${r.record.outcome})\n`);
+    return;
   }
 
   // Number('abc') 是 NaN，而 checkLedger 里的 ?? 只接 null/undefined——NaN 会原样
@@ -444,6 +525,9 @@ Exit codes:
     process.stdout.write(`  iterations:           ${result.iterations} / ${result.thresholds.max_iterations}\n`);
     process.stdout.write(`  consecutive failures: ${result.consecutive_failures} / ${result.thresholds.no_progress}\n`);
     process.stdout.write(`  tokens used:          ${result.tokens_used}${result.thresholds.token_budget ? ' / ' + result.thresholds.token_budget : ''}\n`);
+    if (typeof result.item_attempts === 'number') {
+      process.stdout.write(`  item attempts:        ${result.item_attempts} / ${result.thresholds.max_attempts ?? DEFAULT_BREAKER.maxAttempts}\n`);
+    }
     if (result.last_error_signature) {
       process.stdout.write(`  last error:           ${result.last_error_signature.slice(0, 100)}\n`);
     }

@@ -140,7 +140,7 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 
 | 脚本 | 用途 |
 |---|---|
-| `test.mjs` | 自检（707 项断言）。直接测技能目录里要交付的那份脚本 |
+| `test.mjs` | 自检（724 项断言）。直接测技能目录里要交付的那份脚本 |
 | `install-skills.mjs` | 把技能推到本机宿主并比对已装副本（`--check`）。终端用户用 `npx skills add` |
 | `lib/common.mjs` | 上面两个工具共用的库 |
 
@@ -227,7 +227,7 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 ## 自检
 
 ```bash
-node scripts/test.mjs           # 707 项断言
+node scripts/test.mjs           # 724 项断言
 node scripts/test.mjs --verbose # 显示每一项
 bash init.sh                    # 测试 + 技能副本一致性
 ```
@@ -240,7 +240,7 @@ CI 在每次 push 时运行测试套件、副本一致性、CLI 冒烟与一条�
 
 | 验证 | 方式 | 结果 | 可重跑？ |
 |---|---|---|---|
-| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 707 项断言全绿 | **是** |
+| 闸门与脚本行为 | `node scripts/test.mjs`（CI 三平台） | 724 项断言全绿 | **是** |
 | 拒绝列表与熔断器会响 | `node scripts/drill-check.mjs` | 每条模式命中，良性路径放行 | **是** |
 | 两阶段装配 | 临时项目端到端 | 阶段 1 出 7 文件、阶段 2 出 2 文件，`--require` 退出 0 | 否（手工一次性） |
 | 完整一轮 `/harness-loop` | 靶场 `/d/loop-harness-test`：`sum([])` bug | 回退测试失败 → 修复 → 独立子智能体 APPROVE → 闸门 `proceed` → 账本与 run-log 落盘 | 否（手工一次性） |

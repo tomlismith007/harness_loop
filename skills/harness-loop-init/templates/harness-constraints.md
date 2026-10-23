@@ -57,7 +57,9 @@ templates/**
   <!-- 阈值来源：本行由 gate-check.mjs 的 loadLimits 解析；改数字即改变 scope 闸门的行为 -->
 - 每个 work item 最多 3 次修复尝试；之后升级。
   <!-- 阈值来源：ledger-check.mjs 的 attempt-limit 从本行读取；计数来自 loop-ledger.json，不是命令行参数 -->
-- 每次尝试追加到 `loop-ledger.json`，重试前跑 `node .claude/skills/harness-loop/scripts/ledger-check.mjs`。
+- 每次尝试追加到 `loop-ledger.json`——用脚本，不要手改 JSON：
+  `node .claude/skills/harness-loop/scripts/ledger-check.mjs --append --item <id> --outcome <success|failure|noop> --action <text> [--error <text>]`
+- 重试前跑 `node .claude/skills/harness-loop/scripts/ledger-check.mjs --item <id>`；退出码 2 即停止并升级。
 
 ## Kill Switch
 

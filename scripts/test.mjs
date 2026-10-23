@@ -360,6 +360,73 @@ section('4. 熔断器判定');
   rmrf(tmp);
 }
 
+// 账本写入入口：熔断器唯一的输入。此前没有任何脚本能追加尝试，
+// "每次尝试追加到 loop-ledger.json" 只能手改 JSON。
+{
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-ledappend-'));
+  const lp = path.join(tmp, 'loop-ledger.json');
+  fs.writeFileSync(lp, JSON.stringify({ goal: 'real goal', attempts: [] }));
+  const runAppend = (args) => {
+    try {
+      const out = execFileSync(process.execPath,
+        [skillScript('ledger-check.mjs'), '--ledger', lp, '--append', ...args], { encoding: 'utf8', cwd: tmp });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  const read = () => JSON.parse(fs.readFileSync(lp, 'utf8'));
+
+  eq('append 缺 --item → 退出 1', runAppend(['--outcome', 'success', '--action', 'a']).code, 1);
+  eq('append 缺 --action → 退出 1', runAppend(['--item', 'x', '--outcome', 'success']).code, 1);
+  eq('append 非法 outcome → 退出 1', runAppend(['--item', 'x', '--outcome', 'done', '--action', 'a']).code, 1);
+  eq('append failure 缺 --error → 退出 1',
+    runAppend(['--item', 'x', '--outcome', 'failure', '--action', 'a']).code, 1);
+
+  const okRun = runAppend(['--item', 'x', '--outcome', 'failure', '--error', 'TypeError at a.ts:1',
+    '--action', 'tried A', '--tokens', '10']);
+  eq('append 正常写入 → 退出 0', okRun.code, 0);
+  const afterFirst = read();
+  const first = afterFirst.attempts[0] || {};
+  eq('append 写入一条', afterFirst.attempts.length, 1);
+  eq('append 的 iteration 从 1 开始', first.iteration, 1);
+  eq('append 保留 error', first.error, 'TypeError at a.ts:1');
+  eq('append 保留 tokensUsed', first.tokensUsed, 10);
+
+  runAppend(['--item', 'y', '--outcome', 'success', '--action', 'tried B']);
+  const afterSecond = read();
+  eq('append 递增 iteration', (afterSecond.attempts[1] || {}).iteration, 2);
+  eq('append 不丢既有记录', (afterSecond.attempts[0] || {}).error, 'TypeError at a.ts:1');
+
+  // 熔断器读的是这本账：两条失败同签名 → stagnation（证明写入真的被消费）。
+  fs.writeFileSync(lp, JSON.stringify({
+    goal: 'real goal',
+    attempts: [
+      { iteration: 1, item: 'x', action: 'a', outcome: 'failure', error: 'TypeError at a.ts:1', tokensUsed: 1, at: 'x' },
+      { iteration: 2, item: 'x', action: 'a', outcome: 'failure', error: 'TypeError at a.ts:9', tokensUsed: 1, at: 'x' },
+      { iteration: 3, item: 'x', action: 'a', outcome: 'failure', error: 'TypeError at a.ts:42', tokensUsed: 1, at: 'x' },
+    ],
+  }));
+  const verdictOut = (() => {
+    try {
+      return execFileSync(process.execPath,
+        // 同一 item 3 条已达尝试上限，attempt-limit 会先命中（顺序正确）。
+        // 这里要验的是"写入的记录被 stagnation 消费"，所以把上限放宽。
+        [skillScript('ledger-check.mjs'), '--ledger', lp, '--item', 'x', '--max-attempts', '5'],
+        { encoding: 'utf8', cwd: tmp });
+    } catch (e) { return (e.stdout || '') + (e.stderr || ''); }
+  })();
+  ok('append 写入的记录能被熔断器读成 stagnation', /verdict: stagnation/.test(verdictOut), verdictOut.slice(0, 120));
+  ok('--item 输出本 item 的尝试数，而不是整本账的条数', /item attempts:\s+3/.test(verdictOut), verdictOut.slice(0, 200));
+
+  // 账本不可读时不能"凭空创建"：熔断器看不到的账本不该被写入掩盖。
+  fs.writeFileSync(lp, '{ not json');
+  eq('append 账本非法 JSON → 退出 2',
+    runAppend(['--item', 'x', '--outcome', 'success', '--action', 'a']).code, 2);
+  fs.rmSync(lp);
+  eq('append 账本不存在 → 退出 2',
+    runAppend(['--item', 'x', '--outcome', 'success', '--action', 'a']).code, 2);
+  rmrf(tmp);
+}
+
 // ---------------------------------------------------------------- 5. 闸门
 
 section('5. 闸门判定');
