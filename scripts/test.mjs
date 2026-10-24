@@ -35,7 +35,6 @@ const skillScript = (f) => {
     'worktree.mjs': 'harness-loop',
     'state-write.mjs': 'harness-loop-issue',
     'drill-check.mjs': 'harness-loop-init',
-    'drill-record.mjs': 'harness-loop-init',
     'stage2.mjs': 'harness-loop-init',
     'harness-stage.mjs': 'harness-init',
     'stage1.mjs': 'harness-init',
@@ -1045,7 +1044,7 @@ section('10. 技能完整性');
       // 每个技能只带自己任务用得到的脚本。harness-init 只做阶段 1：
       // 阶段 2 的判据模块与 loop 运行时（drill-check/ledger-check/gate-check）都不进。
       if (s === 'harness-init') {
-        for (const f of ['stage2.mjs', 'drill-record.mjs', 'drill-check.mjs', 'ledger-check.mjs', 'gate-check.mjs']) {
+        for (const f of ['stage2.mjs', 'drill-check.mjs', 'ledger-check.mjs', 'gate-check.mjs']) {
           ok(`harness-init 不带阶段 2 的 ${f}`, !fs.existsSync(path.join(SKILLS_DIR, s, 'scripts', f)));
         }
         for (const f of ['loop-constraints.md', 'loop-run-log.md']) {

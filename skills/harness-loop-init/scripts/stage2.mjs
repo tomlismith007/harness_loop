@@ -5,9 +5,9 @@
  * 只有阶段 2 的技能（`harness-loop-init`）带它。阶段 1 的东西（地基文件、
  * 工作规则、feature 完成标准）不在这里重复实现——那是 stage1 的职责。
  *
- * 依赖：stage-core（共享原语）+ drill-record（演练记录是否有效）。
- * 不 import stage1，也不 import drill-check / ledger-check / gate-check：
- * 判据只读记录，不跑演练。
+ * 依赖：stage-core（共享原语）+ drill-check（其中的演练记录有效性判定 recordStatus）。
+ * 不 import stage1 / ledger-check / gate-check：判据只读记录，不跑演练
+ * （recordStatus 是纯函数，演练入口仍在 drill-check）。
  */
 
 import fs from 'node:fs';
@@ -17,7 +17,7 @@ import {
   SKILL_DIRS, USER_SKILL_DIRS,
 } from './lib/common.mjs';
 import { initScriptHasPlaceholder, copyStageTemplate } from './stage-core.mjs';
-import { recordStatus } from './drill-record.mjs';
+import { recordStatus } from './drill-check.mjs';
 
 /**
  * 模板里预置的拒绝列表路径（用于判断用户是否本地化过）。
