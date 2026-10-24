@@ -190,6 +190,9 @@ git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实�
 是旧副本，kill switch 与 WIP 判定都看不到主检出的最新值。
 **这不是说在主检出运行**：本步命令仍在 worktree 内执行（见本步开头）。
 
+`--verdict` 必须在本步之前取得：`none` 在 gate 阶段一律 escalate（`awaiting-verification`）；且默认
+`behavior` + `not-run` 会先被 `red-check` 以「回退测试未跑」拦下——那是误导性原因，真正缺的是验证。
+
 **先声明改动类型**（`--change-class`），它决定回退测试是否强制：
 
 | 类型 | 判据 | 回退测试 |
@@ -223,7 +226,8 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
 **证据里的命令会被重放**：闸门把 `- Tests: \`<cmd>\` → PASS` 里的命令真的跑一遍，
 退出码与 PASS/FAIL 对不上就拒绝。所以验证者报告里的命令必须是可重入的，
 且 `--evidence-cwd`（默认当前目录）要能跑通它们。确实无法重跑时用 `--no-replay`，
-结果会被记为 NOT RUN。
+结果会被记为 NOT RUN。`docs` / `config` / `refactor` 类改动会**自动**跳过重放（同样记为
+NOT RUN）——不必为文档类改动硬凑可重放的命令。
 
 `--diff-files` 的 `@` 前缀**不可省**：裸路径会被当成"单个改动文件"，拒绝列表与范围两个闸门同时失效。
 
