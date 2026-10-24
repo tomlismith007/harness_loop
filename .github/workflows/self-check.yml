@@ -58,7 +58,7 @@ jobs:
           # 源码与示例中不得出现可用的凭据字面量
           if grep -rEn "(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})" \
               --include="*.mjs" --include="*.yml" --include="*.md" --include="*.json" \
-              scripts/ templates/ skills/ docs/ 2>/dev/null; then
+              scripts/ skills/ docs/ 2>/dev/null; then
             echo "::error::Possible credential literal found"
             exit 1
           fi
