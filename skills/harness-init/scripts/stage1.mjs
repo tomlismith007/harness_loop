@@ -205,7 +205,7 @@ export function checkStage1(root, opts = {}) {
 /**
  * 阶段 1 产出 harness 地基。loop 机制（账本、运行日志）属于阶段 2。
  */
-const STAGE1_FILES = [
+export const STAGE1_FILES = [
   ['AGENTS.md', 'AGENTS.md'],
   ['feature_list.json', 'feature_list.json'],
   ['STATE.md', 'STATE.md'],

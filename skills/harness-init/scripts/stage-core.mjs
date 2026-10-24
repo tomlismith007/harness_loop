@@ -24,7 +24,7 @@ export const STAGES = [
     id: 1,
     name: '初始化',
     en: 'Init',
-    goal: '创建 6 个地基文件，让 harness 结构完整、下一会话可重启',
+    goal: '创建 6 个模板文件与生成的 init.sh，让 harness 结构完整、下一会话可重启',
     level: 'L1',
     grounding: [
       'LHE 五子系统最小工件：AGENTS.md / feature_list.json / STATE.md / init.sh',

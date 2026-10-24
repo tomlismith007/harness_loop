@@ -2,7 +2,7 @@
 /**
  * stage2.mjs — 阶段 2（装配 loop 机制）的判据与补齐
  *
- * 只有阶段 2 的技能（`harness-loop-init`）带它。阶段 1 的东西（6 个地基文件、
+ * 只有阶段 2 的技能（`harness-loop-init`）带它。阶段 1 的东西（地基文件、
  * 工作规则、feature 完成标准）不在这里重复实现——那是 stage1 的职责。
  *
  * 依赖：stage-core（共享原语）+ drill-record（演练记录是否有效）。

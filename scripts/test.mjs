@@ -48,6 +48,7 @@ const skillScript = (f) => {
 const { checkLedger, normalizeError } = await import(pathToFileURL(skillScript('ledger-check.mjs')).href);
 const { checkGates, isPaused, GATE_ORDER } = await import(pathToFileURL(skillScript('gate-check.mjs')).href);
 const { localToday } = await import(pathToFileURL(skillScript('clean-state.mjs')).href);
+const { STAGE1_FILES } = await import(pathToFileURL(skillScript('stage1.mjs')).href);
 
 const VERBOSE = process.argv.includes('--verbose');
 // 本仓库是 skills 开发仓库，不是 harness 消费方：没有根 harness-constraints.md /
@@ -1125,7 +1126,9 @@ section('10. 技能完整性');
 
   // 四个命令的职责必须真的写在正文里——技能是给 agent 的指令，不是标题。
   const init = readText(path.join(SKILLS_DIR, 'harness-init', 'SKILL.md'));
-  ok('harness-init 声明 6 个文件', /6 个文件/.test(init));
+  // 产物数对着代码数（STAGE1_FILES + 生成的 init.sh），不锁字样——锁字样会让文档改对反而红。
+  const claimedFiles = Number((init.match(/创建 (\d+) 个文件/) || [])[1]);
+  eq('harness-init 声明的文件数 = STAGE1_FILES + 生成的 init.sh', claimedFiles, STAGE1_FILES.length + 1);
   ok('harness-init 声明判据会执行 init.sh', /实际执行/.test(init));
 
   const loopInit = readText(path.join(SKILLS_DIR, 'harness-loop-init', 'SKILL.md'));
@@ -1459,8 +1462,8 @@ section('14. 两阶段驱动器');
   eq('替换占位 feature 后阶段 1 达成',
     runStage(empty, ['--stage', '1', '--require']).code, 0);
 
-  // 阶段 1 产出 6 个文件
-  for (const f of ['AGENTS.md', 'feature_list.json', 'STATE.md', 'LESSONS.md', 'harness-constraints.md', 'init.sh']) {
+  // 阶段 1 产出 STAGE1_FILES 的全部模板 + 生成的 init.sh（verifier-report.md 曾漏在这个清单外）
+  for (const f of [...STAGE1_FILES.map(([, out]) => out), 'init.sh']) {
     ok(`阶段 1 产出 ${f}`, fs.existsSync(path.join(empty, f)));
   }
   ok('阶段 1 不产出 loop 机制文档', !fs.existsSync(path.join(empty, 'loop-ledger.json'))

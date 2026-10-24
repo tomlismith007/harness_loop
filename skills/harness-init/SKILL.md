@@ -12,7 +12,7 @@ license: MIT
 
 # Stage 1 · 初始化（Init）
 
-**目标**：创建 6 个文件，让 harness 结构完整、**下一会话可重启**。
+**目标**：创建 7 个文件（6 个模板 + 生成的 init.sh），让 harness 结构完整、**下一会话可重启**。
 
 对应等级 **L1**：只报告，不改代码，不合并。
 
@@ -51,7 +51,7 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target>
 node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --stage 1
 ```
 
-生成 **6 个文件**：
+生成 **6 个模板文件 + 1 个生成的 init.sh（共 7 个）**：
 
 | 文件 | 作用 | 必须改什么 |
 |---|---|---|
@@ -61,6 +61,7 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --
 | `init.sh` | 标准启动与验证路径 | 把 `npm install && npm test` 换成项目真实命令 |
 | `harness-constraints.md` | 拒绝列表、合并规则、kill switch | 按本仓库实际情况增删路径 |
 | `LESSONS.md` | 错题本 | 一般不用改 |
+| `verifier-report.md` | 验证者报告的格式模板（闸门按它校验 Author / sha / 输出片段） | 一般不用改 |
 
 同时把 4 个技能（`harness-init`、`harness-loop-init`、`harness-loop`、`harness-loop-issue`）
 装到 `.claude/skills/` 与 `.agents/skills/`。运行时脚本随技能目录安装，**不再复制到项目根**；
