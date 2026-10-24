@@ -2,7 +2,7 @@
 
 > **性质**：实施计划（spec），基于同日 Part A 审计报告（19 项发现 F-01…F-19，含 1 项 P0）。
 > **基线**：`node scripts/test.mjs` → **Passed: 757 Failed: 0**；`bash init.sh` 全绿（2026-10-24 实测）。
-> **状态**：`待执行`。逐项勾选；全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
+> **状态**：`执行中`——决策已落定，批次 1（B1-01）完成于 2026-10-24；批次 2–4 待执行。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
 > **本文件不是技能产物**，不随 `npx skills add` 分发，不受 `test.mjs` 的模板/路径断言约束。
 > **行号均为 2026-10-24 基线**，编辑后会漂移；执行时以引用的**原文片段**定位，不要盲搜行号。
 > **接替** `spec-plan/audit-remediation-spec.md`（v1，其批次已实施完毕，见 git log；处置见 E-02）。
@@ -102,15 +102,15 @@ drill-check 只有 gate / breaker / verifier 三组，无 pause 组；kill switc
 
 > 本步所有命令（`git status` / `git diff` / `gate-check.mjs`）都在**本次尝试的 worktree 目录**内执行；`--state` 与第 7 步的写状态命令传**主检出**的绝对路径。在主检出执行本步会得到空清单与错误的 head sha，两道安全闸同时失效。
 
-- [ ] B1-01a：SKILL.md 第 6 步已加入上述说明
+- [x] B1-01a：SKILL.md 第 6 步已加入上述说明
 
 **方法 2**：`skills/harness-loop/SKILL.md` 第 6 步 gate 命令块中 `--state <主检出绝对路径>` 行下补一行注释「命令本身仍在 worktree 内运行」（或并入方法 1 的句子，二选一即可）。
 
-- [ ] B1-01b：命令块处已消除「--state 指主检出 = 在主检出运行」的误读
+- [x] B1-01b：命令块处已消除「--state 指主检出 = 在主检出运行」的误读
 
 **方法 3**：`scripts/test.mjs` 第 10 节（技能完整性，约 :1146-1151 区域）加一条断言：`ok('harness-loop 写明 gate 命令在 worktree 内执行', /worktree 目录.*内执行|在.*worktree.*内/.test(loop))`。改前该断言红（回退测试成立）。
 
-- [ ] B1-01c：断言已加入且改前验证过会红
+- [x] B1-01c：断言已加入且改前验证过会红（2026-10-24 实测：FAIL 后改 SKILL 转 PASS，758/0）
 
 **验收**：
 - 只读 SKILL.md 的 agent 能回答「gate 命令在哪个目录跑、--state 传什么」；

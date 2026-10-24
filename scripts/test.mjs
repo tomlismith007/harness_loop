@@ -1148,6 +1148,10 @@ section('10. 技能完整性');
   ok('harness-loop 第 5 步使用 gate 阶段', /--phase gate/.test(loop));
   ok('harness-loop gate 命令带证据文件', /--evidence-file/.test(loop));
   ok('harness-loop gate 命令绑定 sha', /--reviewed-sha/.test(loop) && /--head-sha/.test(loop));
+  // 第 6 步必须写明命令在 worktree 内执行：在主检出跑会得到空清单与错误的 head sha，
+  // 拒绝列表与范围两道闸同时失效（F-01）。
+  ok('harness-loop 写明 gate 命令在 worktree 内执行',
+    /本步所有命令[^\n]*worktree 目录[^\n]*内执行/.test(loop));
   ok('harness-loop 不承诺不存在的 --verify 模式', !/--verify/.test(loop));
 
   // 装配器随技能安装。`npx skills add` 不写安装清单，所以「从清单读 packRoot」

@@ -171,6 +171,10 @@ Change class confirmed: <behavior|docs|config|refactor——必须 = --change-cl
 
 ### 第 6 步：闸门
 
+本步所有命令（`git status` / `git diff` / `gate-check.mjs`）都在**本次尝试的 worktree 目录**内执行；
+`--state` 与第 7 步的写状态命令传**主检出**的绝对路径。在主检出执行本步会得到空的改动清单
+与错误的 head sha——拒绝列表与范围两道闸同时失效。
+
 先确认工作区干净、改动都已提交（否则清单为空，两道闸同时失效）：
 
 ```bash
@@ -184,6 +188,7 @@ git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实�
 
 `--state` 与后续写状态命令都指向**主检出**的绝对路径——worktree 里的 `STATE.md`
 是旧副本，kill switch 与 WIP 判定都看不到主检出的最新值。
+**这不是说在主检出运行**：本步命令仍在 worktree 内执行（见本步开头）。
 
 **先声明改动类型**（`--change-class`），它决定回退测试是否强制：
 
