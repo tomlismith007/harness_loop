@@ -150,7 +150,7 @@ audits/**
 
 | 层级 | 方式 |
 |---|---|
-| 单轮 | `loop-pause-all` 标签或 `STATE.md` 标志 → 循环立即退出 |
+| 单轮 | `STATE.md` / `harness-constraints.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` → 循环立即退出（GitHub label **不**触发：本框架无 label 入口） |
 | 调度层 | 删除调度器 / 禁用 workflow |
 | 全局 | 撤销连接器 token |
 
