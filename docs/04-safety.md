@@ -88,9 +88,13 @@ audits/**
 
 ## 连接器（MCP）最小权限
 
+> **本框架现状**：唯一的外部连接是 `/harness-loop-issue` 的 `gh` **只读**访问——不评论、
+> 不打标签、不关闭、不合并、不推送。下表是上游 loop-engineering 的参考做法，供将来
+> 接入连接器时对照，**不代表本框架当前能力**。
+
 | 连接器 | 读取 | 写入 | 禁止 |
 |---|---|---|---|
-| GitHub | issues、PRs、checks | comment、label | 默认不执行 merge |
+| GitHub | issues、PRs、checks | （参考）comment、label——本框架未启用 | 默认不执行 merge |
 | Linear / Jira | 团队 issues | comment、status | 不执行 delete |
 | Slack | 频道历史 | 仅 post 到 `#loop-escalations` | 不发私信、不 @ 全体 |
 | 数据库 | — | — | **禁止循环写入生产环境** |
