@@ -21,7 +21,7 @@ import {
   parseArgs, boolArg, matchesDenylist, loadDenylist, parseDenylistFrom,
   structuredText, textHas, structuredHas, detectProject, verificationCommands,
   initScriptFromCommands, loadLimits, untrusted, sanitizeUntrusted, MAX_UNTRUSTED_LENGTH,
-  PACK_ROOT, TEMPLATE_DIR, LOOP_TEMPLATE_DIR, SKILLS_DIR, readText,
+  PACK_ROOT, SKILLS_DIR, readText,
   runWithTreeKill, hasGnuTimeout, samePath,
 } from './lib/common.mjs';
 // 运行时脚本只有一份，住在技能目录里。测试直接测**要交付的那份**，
@@ -48,6 +48,11 @@ const { checkLedger, normalizeError } = await import(pathToFileURL(skillScript('
 const { checkGates, isPaused, GATE_ORDER } = await import(pathToFileURL(skillScript('gate-check.mjs')).href);
 const { localToday } = await import(pathToFileURL(skillScript('clean-state.mjs')).href);
 const { STAGE1_FILES } = await import(pathToFileURL(skillScript('stage1.mjs')).href);
+
+// 模板目录（消费方视角）：根 lib 与技能库逐字节统一后，lib 里的 TEMPLATE_DIR
+// 随技能目录布局解析，测试在这里显式指向两个装配技能的 templates/。
+const TEMPLATE_DIR = path.join(SKILLS_DIR, 'harness-init', 'templates');
+const LOOP_TEMPLATE_DIR = path.join(SKILLS_DIR, 'harness-loop-init', 'templates');
 
 const VERBOSE = process.argv.includes('--verbose');
 // 本仓库是 skills 开发仓库，不是 harness 消费方：没有根 harness-constraints.md /
@@ -1112,6 +1117,8 @@ section('10. 技能完整性');
         }
       }
     }
+    // 根 scripts/lib/common.mjs 与技能副本是同一份代码（D-02=A）：纳入同一张比对表。
+    byName.get('scripts/lib/common.mjs').push(path.join(PACK_ROOT, 'scripts', 'lib', 'common.mjs'));
     const drifted = [];
     for (const [key, files] of byName) {
       if (files.length < 2) continue;
