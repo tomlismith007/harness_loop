@@ -216,9 +216,11 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --reviewed-sha <审查时的 commit> \
   --head-sha "$(git rev-parse HEAD)" \
   --evidence-file <verifier-report.md> \
-  --implementer <执行者标识> \   # 必填：缺了闸门无法判独立性，直接退出 1
+  --implementer <执行者标识> \
   --state <主检出绝对路径>
 ```
+
+`--implementer` 必填（gate 阶段 approve）：缺了它闸门无法判独立性，直接退出 1。
 
 **必须用 `--phase gate`**：证据、head-commit、回退测试"未跑"三道闸只在 gate 阶段生效。
 用 `--phase fix` + `--verdict approve` 会得到 `proceed` 加一条 warning，但那是中间检查，
