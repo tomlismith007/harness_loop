@@ -16,7 +16,8 @@ license: MIT
 
 **不是**用来发现工作的。发现由人（或 `/harness-loop-issue`）完成，本技能只负责把选定的一项做对。
 
-**前置**：目标仓库已跑过 `/harness-init`（需要 `STATE.md` / `harness-constraints.md` / `init.sh`）。
+**前置**：目标仓库已跑过 `/harness-init`（需要 `STATE.md` / `harness-constraints.md` / `init.sh`）；
+完整循环另需阶段 2 的 `loop-ledger.json` 与 `loop-run-log.md`——缺账本时第 3 步以 no-ledger 停止。
 本技能自带脚本，下面命令都走技能目录内的 `.claude/skills/harness-loop/scripts/`；
 若技能装在 `.agents/skills/` 或用户级 `~/.claude/skills/`，把前缀换成对应目录。
 在 worktree 内运行时，用主检出的绝对路径。
@@ -101,7 +102,7 @@ node .claude/skills/harness-loop/scripts/ledger-check.mjs --ledger loop-ledger.j
 ```
 
 `--outcome` 取 `success | failure | noop`；`failure` 必须带 `--error`（熔断器靠错误签名判停滞）。
-验证通过时用 `--outcome success` 追加一条。账本不可读时 `--append` 退出 2——先修账本，不要重试。
+验证通过时同样用 `--append` 记一笔（`--outcome success --action "<做了什么>"`）。账本不可读时 `--append` 退出 2——先修账本，不要重试。
 
 ### 第 4 步：执行者
 
@@ -150,7 +151,7 @@ node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-att
 ## Verdict: APPROVE | REJECT | ESCALATE_HUMAN
 
 Author: <验证者标识——必须 ≠ --implementer>
-Reviewed commit: <审过的 sha——必须 = --reviewed-sha>
+Reviewed commit: <审过的 sha，40 位完整值——必须 = --reviewed-sha>
 Change class confirmed: <behavior|docs|config|refactor——必须 = --change-class>
 
 ### Evidence
@@ -209,7 +210,7 @@ git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实�
 node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --item <item-id> \
   --phase gate \
-  --attempts <第 3 步 ledger-check --item 输出的 item attempts> \
+  --attempts <本轮尝试入账后 ledger-check --item 输出的 item attempts> \
   --change-class <behavior|docs|config|refactor> \
   --diff-files @changed-files.txt \
   --verdict <approve|reject|escalate-human|none> \
@@ -225,7 +226,7 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
 
 **必须用 `--phase gate`**：证据、head-commit、回退测试"未跑"三道闸只在 gate 阶段生效。
 用 `--phase fix` + `--verdict approve` 会得到 `proceed` 加一条 warning，但那是中间检查，
-不是合并许可。`--phase fix` 只做派发前的预检（拒绝列表/范围/暂停/脏工作区）。
+不是合并许可。`--phase fix` 只做派发前的预检（拒绝列表/范围/暂停；脏工作区只在 gate 阶段判）。
 
 **证据里的命令会被重放**：闸门把 `- Tests: \`<cmd>\` → PASS` 里的命令真的跑一遍，
 退出码与 PASS/FAIL 对不上就拒绝。所以验证者报告里的命令必须是可重入的，
@@ -259,7 +260,7 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 
 `--attempts` 取第 3 步 `ledger-check --item` 输出的 `item attempts`（本轮结束时的值）。
 
-它先备份、再写临时文件、最后 rename；任一步失败会把已替换的文件恢复（exit 2）。
+它先备份、再写临时文件、最后 rename；任一步失败会把已替换的文件恢复（exit 2，两个文件都回到写入前——修好原因后重跑同一条命令，不要手工补写）。
 `--outcome` 取 `no-op | report-only | fix-proposed | verified | escalated`。
 `--dry-run` 只打印将写入的内容。表结构损坏时它**报错而不是猜**（exit 1）。
 
@@ -302,6 +303,7 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 - 执行者**不得**标记自己的 work item 为完成。
 - 触及拒绝列表 → 立即 `escalated`，**不执行任何编辑**。
 - 账本里同一 item 的尝试 ≥ 3 → 强制 `escalated`，覆盖其他所有规则（`ledger-check --item`）。
+- 升级条目统一写在 `STATE.md` 的 `## Human Inbox`：一行记 item、命中的闸门或熔断原因、证据位置；需要完整交代时用 `ledger-check --escalation` 生成升级文档。
 - 合并永远由人工执行。
 - 每轮结束必须写状态。不写状态的运行等于没跑。
 

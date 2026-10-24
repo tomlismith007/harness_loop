@@ -66,6 +66,8 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --
 同时把 4 个技能（`harness-init`、`harness-loop-init`、`harness-loop`、`harness-loop-issue`）
 装到 `.claude/skills/` 与 `.agents/skills/`。运行时脚本随技能目录安装，**不再复制到项目根**；
 所有技能命令走 `.claude/skills/<name>/scripts/...`。
+已存在的文件与技能目录一律跳过（`SKIPPED (exists)`），不覆盖；要用出厂模板重置须显式加
+`--force`（先删再复制，整体替换）。
 
 **手工改两处**（脚本改不了）：
 
@@ -81,6 +83,8 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --stage 1 --
 
 注意：出厂模板的 3 条 feature 带 `占位：` 标记，替换前 `--require` 必须退出 2。
 若退出 0，说明判据被削弱了，不要继续。
+`--require` 退出 1 是参数或路径错误（目标不存在、`--stage` 值非法）——修命令重跑，与达成
+与否无关。
 
 ## 常见错误
 
@@ -95,3 +99,5 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --stage 1 --
 
 阶段 2 属于 `/harness-loop-init`：本技能只带阶段 1 的模板与脚本，**不要**在这里跑
 `--upgrade --stage 2`（缺阶段 2 的模板，装配器会报错退出）。直接调用 `/harness-loop-init`。
+本技能输出的报告里，阶段 2 一栏固定为 NOT RUN——阶段 2 判据未随本技能安装，不是失败；
+按其 evidence 的指引转去 `/harness-loop-init`。

@@ -32,11 +32,11 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target>
 
 | # | 判据 | 类型 | 检查方式 |
 |---|---|---|---|
-| 1 | `loop-ledger.json` 存在且不是占位账本 | 机械 | `ledger-check.mjs` 返回非 `placeholder-ledger` |
+| 1 | `loop-ledger.json` 存在且不是占位账本 | 机械 | 装配器判据直接读 JSON：`attempts` 是数组、`goal` 非出厂占位（不是调 ledger-check） |
 | 2 | `loop-run-log.md` 存在 | 机械 | 文件存在且有 `## Log` 章节 |
-| 3 | `harness-loop` 已装到可发现路径 | 机械 | 查项目内 `.claude/skills/`、`.agents/skills/` 与用户级 `~/.claude/skills`、`~/.agents/skills`；项目内优先 |
-| 4 | `init.sh` 无占位符 | 机械 | 不含 `replace this line` / `No test script` |
-| 5 | **拒绝列表已本地化** | 机械 | 含 `harness-constraints.md` 自身，且至少 2 条模板外路径 |
+| 3 | `harness-loop` 已装到可发现路径 | 机械 | 查项目内 `.claude/skills/`、`.agents/skills/`（及 `.zcode`/`.grok`/`.codex`）与用户级 `~/.claude/skills`、`~/.agents/skills`、`~/.codex/skills`；项目内优先；且 SKILL.md 正文含 kill switch / 独立验证的实操描述（关键词任一命中） |
+| 4 | `init.sh` 无占位符 | 机械 | 不含占位标记（`replace this line` 等 4 个）且带 `set -e` |
+| 5 | **拒绝列表已本地化** | 机械 | 列表含 `loop-constraints.md` 自身（策略自我保护），且至少 2 条模板外路径 |
 | 6 | **两份拒绝列表一致** | 机械 | `harness-constraints.md` ↔ `docs/04-safety.md` 逐条比对 |
 | 7 | **护栏演练通过** | 机械 | `loop-drill.json` 存在、sha256 与当前约束一致、无失败项 |
 | 8 | **回退测试被实际执行过** | **人工** | 有命令与输出为证，记进 `STATE.md` |
@@ -50,7 +50,7 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target>
 node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
-产出 **4 个文件**（`docs/04-safety.md` 已存在时跳过它，实际写 3 个）+ 手工生成的
+产出 **4 个文件**（已存在的一律跳过不覆盖，`--force` 才整体替换）+ 手工生成的
 `loop-drill.json`（判据 7，下一节）：
 
 | 文件 | 作用 |
@@ -60,16 +60,18 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 | `loop-constraints.md` | loop 规则（验证 / 预算 / 教训 / 清理） |
 | `docs/04-safety.md` | 拒绝列表的文档副本；判据 6 与 `harness-constraints.md` 逐条比对。已存在则**不覆盖**，只在输出里报告漂移 |
 
-完整产物 = **4 个文件 + 1 份演练记录**（`docs/04-safety.md` 被跳过时是 3 个文件 + 1 份记录）。
+完整产物 = **4 个文件 + 1 份演练记录**（有文件被跳过时相应减少）。
 
 同时确认 `harness-loop` 技能已装到 agent 能扫描的路径。
 
-**手工改两处**：
+**手工改三处**：
 
 1. `harness-constraints.md` 的拒绝列表按本仓库实际路径增删（判据 5）。
    `gate-check.mjs` 会真的读它——它必须是真的。
    **改完同步 `docs/04-safety.md` 的代码块**，否则判据 6 会红（两处必须逐条一致）。
-2. 生成护栏演练记录（判据 7）：
+2. `loop-ledger.json` 的 `goal` 换成本循环的真实目标（判据 1；出厂值是
+   `Replace with the current loop goal`，不改它判据 1 永远红）。
+3. 生成护栏演练记录（判据 7）：
 
    ```bash
    node .claude/skills/harness-loop-init/scripts/drill-check.mjs --record
@@ -78,6 +80,10 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 
    记录绑定 `harness-constraints.md` 的 sha256。**改了拒绝列表就要重跑**，否则记录过期，
    阶段 2 判据 7 会失败——旧记录不能为新策略担保。
+
+   演练退出码：`0` 全过；`1` 既有记录对当前约束已过期（不带 `--record` 运行时才判）——
+   重跑 `--record` 刷新；`2` 有护栏没响——按输出点名的条目修约束文件（如永不命中的
+   glob）后重跑，不得带着失败项提交记录。
 
 ## 核心：验证者为什么是阶段 2 的关键
 
@@ -100,6 +106,7 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 | `stagnation` | 3 | 同一错误签名出现 3 次 |
 | `no-progress` | 5 | 连续失败 5 次 |
 | `max-iterations` | 10 | 总迭代上限 |
+| `attempt-limit` | 3 | 同一 item 的尝试上限（`ledger-check --item`，读账本计数） |
 
 错误签名归一化：抹掉时间戳、十六进制地址、路径（折叠为 basename）、行列号。
 `TypeError at profile.ts:42` 与 `TypeError at profile.ts:87` 是同一个错误。
