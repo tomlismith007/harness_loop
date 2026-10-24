@@ -147,7 +147,7 @@ L1 报告 / L2 辅助。由 `harness-stage` 的阶段判据给出；本框架不
 归一化后的错误文本：抹掉时间戳、十六进制地址、路径（折叠为 basename）、行列号、位置/时长类数字；退出码、HTTP 状态码、断言期望值保留。使"同一个错误"能被识别，又不把不同根因合并。
 
 **Early Exit（提前退出）**
-无待办时在 <5k token 内退出。高节奏循环的经济性完全依赖它。
+无待办时在极低成本内退出，不跑完整的验证链。高节奏循环的经济性完全依赖它。
 
 **Run Log（运行日志）**
 `loop-run-log.md`。只追加，每轮一条 JSON。`outcome` 枚举：`no-op` / `report-only` / `fix-proposed` / `verified` / `escalated`。
