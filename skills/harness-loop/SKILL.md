@@ -208,6 +208,7 @@ git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实�
 node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --item <item-id> \
   --phase gate \
+  --attempts <第 3 步 ledger-check --item 输出的 item attempts> \
   --change-class <behavior|docs|config|refactor> \
   --diff-files @changed-files.txt \
   --verdict <approve|reject|escalate-human|none> \

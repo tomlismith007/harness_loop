@@ -478,6 +478,11 @@ section('5. 闸门判定');
   eq('清理 8 文件 → 允许', checkGates({ item: 'p', attempts: 1, diffFiles: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], verdict: 'approve', isCleanup: true }).decision, 'proceed');
   eq('清理 11 文件 → escalate', checkGates({ item: 'p', attempts: 1, diffFiles: Array.from({ length: 11 }, (_, i) => `f${i}.ts`), verdict: 'approve', isCleanup: true }).decision, 'escalate');
   eq('verdict reject → escalate', checkGates({ item: 'p', attempts: 1, diffFiles: ['a.ts'], verdict: 'reject' }).decision, 'escalate');
+  // reject 且尝试将耗尽时 next 必须提示升级——cfg.maxAttempts 缺省时该分支永不出现（F-11）。
+  {
+    const r = checkGates({ item: 'p', attempts: 2, diffFiles: ['a.ts'], verdict: 'reject' });
+    ok('reject 且 attempts+1 ≥ 上限时 next 提示升级', /exhausted|escalate to human/.test(r.next), r.next);
+  }
   eq('verdict escalate-human → escalate', checkGates({ item: 'p', attempts: 1, diffFiles: ['a.ts'], verdict: 'escalate-human' }).decision, 'escalate');
   eq('gate 阶段无 verdict → escalate', checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'none' }).decision, 'escalate');
 

@@ -21,6 +21,8 @@ import { execFileSync } from 'node:child_process';
 import {
   parseArgs, readText, printJson, matchesDenylist, loadDenylist, loadLimits,
   DENYLIST_PATTERNS, fail, rejectUnknownFlags, boolArg, isEntryPoint } from './lib/common.mjs';
+// 上限默认与熔断器同源（同一技能内一份阈值），CLI 侧再由约束文件覆盖。
+import { DEFAULT_BREAKER } from './ledger-check.mjs';
 
 /**
  * 兜底阈值。只在本目录没有 loop-constraints.md（或解析不出该行）时使用，
@@ -152,7 +154,7 @@ export function activeItems(text) {
  * attempt-limit。闸门只看这次改动本身。
  */
 export function checkGates(input, opts = {}) {
-  const cfg = { ...DEFAULTS, ...opts };
+  const cfg = { maxAttempts: DEFAULT_BREAKER.maxAttempts, ...DEFAULTS, ...opts };
   const {
     item = null,
     phase = null,
@@ -951,6 +953,7 @@ Exit codes:
   const constraintsRoot = typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd();
   const limits = loadLimits(constraintsRoot);
   const cfg = {
+    maxAttempts: limits.maxAttempts ?? DEFAULT_BREAKER.maxAttempts,
     maxFilesPerFix: limits.maxFilesPerFix ?? DEFAULTS.maxFilesPerFix,
     maxFilesPerCleanup: limits.maxFilesPerCleanup ?? DEFAULTS.maxFilesPerCleanup,
     limitsSource: limits.maxFilesPerFix !== null ? 'constraints' : 'defaults',
