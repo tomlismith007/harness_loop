@@ -2,7 +2,7 @@
 
 > **性质**：实施计划（spec），基于同日 Part A 审计报告（19 项发现 F-01…F-19，含 1 项 P0）。
 > **基线**：`node scripts/test.mjs` → **Passed: 757 Failed: 0**；`bash init.sh` 全绿（2026-10-24 实测）。
-> **状态**：`执行中`——批次 1–4 全部完成（2026-10-24）；仅剩 §6 收尾（E-01…E-03）。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
+> **状态**：`已完成`（2026-10-24）——批次 1–4 与收尾 E-01…E-03 全部执行；v1 spec 已归档至 `docs/archive/audit-remediation-spec-v1.md`。本文件留在 `spec-plan/` 供逐项验收，验收后归档或删除。
 > **本文件不是技能产物**，不随 `npx skills add` 分发，不受 `test.mjs` 的模板/路径断言约束。
 > **行号均为 2026-10-24 基线**，编辑后会漂移；执行时以引用的**原文片段**定位，不要盲搜行号。
 > **接替** `spec-plan/audit-remediation-spec.md`（v1，其批次已实施完毕，见 git log；处置见 E-02）。
@@ -385,19 +385,19 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**：`bash init.sh` 完整跑一遍，记录 Passed 数（应 ≥ 757 + 新增断言数）；`node skills/harness-loop-issue/scripts/state-write.mjs --self-test` 通过。
 
-- [ ] E-01 已跑，输出已记录：Passed = ___
+- [x] E-01 已跑，输出已记录：Passed = **760** / Failed 0（`bash init.sh` 全绿，2026-10-24；`state-write --self-test` PASS；五个 lib/common.mjs 同一 md5）
 
 ### E-02 · 归档 v1 spec
 
 **方法**：确认 `spec-plan/audit-remediation-spec.md`（v1）所有条目已实施（对照其 §2 批次与 git log），然后 `git rm` 或移入 `docs/archive/`；本文件状态行改为 `已完成`。
 
-- [ ] E-02 已处置（方式：___）
+- [x] E-02 已处置（方式：**归档**至 `docs/archive/audit-remediation-spec-v1.md`，文件头附逐项核对说明——15 项已实施、C-18 由 B3-11 另行解决、C-19/C-20 未按原文实施并注明）
 
 ### E-03 · 最终提交
 
 **方法**：工作区干净后用描述性 message 提交本 spec 的最终状态（勾选进度即验收记录）。不推送。
 
-- [ ] E-03 已提交（commit: ___）
+- [x] E-03 已提交（即本次收尾提交；v2 spec 留在 `spec-plan/` 供验收，归档待验收后另行处理）
 
 ---
 
