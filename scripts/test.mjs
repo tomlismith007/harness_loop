@@ -1148,7 +1148,7 @@ section('10. 技能完整性');
   // --state 接受目录，不是文件路径。写 STATE.md 会让 kill switch 静默失效。
   ok('harness-loop 不使用错误的 --state 文件路径', !/--state\s+STATE\.md/.test(loop));
   // 证据 / head-commit / red-check not-run 三道闸只在 gate 阶段生效。
-  ok('harness-loop 第 5 步使用 gate 阶段', /--phase gate/.test(loop));
+  ok('harness-loop 第 6 步使用 gate 阶段', /--phase gate/.test(loop));
   ok('harness-loop gate 命令带证据文件', /--evidence-file/.test(loop));
   ok('harness-loop gate 命令绑定 sha', /--reviewed-sha/.test(loop) && /--head-sha/.test(loop));
   // 第 6 步必须写明命令在 worktree 内执行：在主检出跑会得到空清单与错误的 head sha，

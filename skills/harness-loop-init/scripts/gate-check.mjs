@@ -403,7 +403,7 @@ export function checkGates(input, opts = {}) {
     }
     const report = readText(evidenceFile);
     // 报告必须自带可核对的要素：verdict 行 + 至少一条命令输出行。
-    // 这两条正则与 /harness-loop 第 4 步的验证者输出格式一致——那份格式早就是现成的接口，
+    // 这两条正则与 /harness-loop 第 5 步的验证者输出格式一致——那份格式早就是现成的接口，
     // 只是此前没有任何东西读它。
     const verdictLine = report.match(/^##\s*Verdict:\s*(APPROVE|REJECT|ESCALATE_HUMAN)/m);
     // 解析出**状态值**，而不只是匹配形状。
@@ -436,7 +436,7 @@ export function checkGates(input, opts = {}) {
         reason: `evidence file ${evidenceFile} is missing: ${missing.join('; ')}`,
         allowed_actions: ['re-run the independent verifier and save its full report'],
         exit_code: 2,
-        next: 'the report exists but carries no verifiable verdict/command lines. See the verifier output format in /harness-loop step 4.',
+        next: 'the report exists but carries no verifiable verdict/command lines. See the verifier output format in /harness-loop step 5.',
       };
     }
     // 自相矛盾：报告说 APPROVE，但有一项检查 FAIL。
@@ -476,7 +476,7 @@ export function checkGates(input, opts = {}) {
         reason: `evidence file ${evidenceFile} is missing: ${missing.join('; ')}`,
         allowed_actions: ['re-run the independent verifier and save its full report'],
         exit_code: 2,
-        next: 'the report exists but does not account for what was not run. See the verifier output format in /harness-loop step 4.',
+        next: 'the report exists but does not account for what was not run. See the verifier output format in /harness-loop step 5.',
       };
     }
     // 非行为类改动跳过回退测试，但"为什么不需要"必须写进报告。
