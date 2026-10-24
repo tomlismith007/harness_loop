@@ -15,7 +15,7 @@ GitHub issue/PR 是**可选模块**（`/harness-loop-issue`），不属于核心
 |---|---|---|
 | `/harness-init` | 阶段 1：建地基 | 6 个地基文件（`AGENTS.md`、`feature_list.json`、`STATE.md`、`LESSONS.md`、`harness-constraints.md`、`verifier-report.md`）+ 生成的 `init.sh` |
 | `/harness-loop-init` | 阶段 2：装 loop 机制 | `loop-ledger.json`、`loop-run-log.md`，并确认验证入口就位 |
-| `/harness-loop` | 顶层编排：跑完一个 work item | 约束 → 选一项 → 执行 → 独立验证 → 闸门 → 熔断 → 写状态 |
+| `/harness-loop` | 顶层编排：跑完一个 work item | 约束 → 选一项 → 熔断预检 → 执行 → 独立验证 → 闸门 → 写状态 |
 | `/harness-loop-issue` | GitHub 发现（只读） | 用 `gh` 读 issue/PR/CI，把 Top 5 写进 `STATE.md`，然后停 |
 
 **`/harness-loop-issue` 是可选模块**：不装它，框架照样完整工作——本地仓库直接把待办写进 `STATE.md`。
@@ -23,8 +23,9 @@ GitHub issue/PR 是**可选模块**（`/harness-loop-issue`），不属于核心
 一次 `/harness-loop` 的流程：
 
 ```
-kill switch → 加载约束 → 选定唯一一项 → 执行者（独立 worktree）
-→ 验证者（新实例，只拿 diff 与验证命令）→ gate-check → ledger-check → 写状态
+kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-check）
+→ 执行者（独立 worktree）→ 验证者（新实例，只拿 diff 与验证命令）→ gate-check
+→ 写状态（REJECT → 回熔断预检，达上限即停）
 ```
 
 验证者的独立性：有子智能体就派新实例；没有就要求人另开会话跑 `/harness-loop <item>`，并在指令中写明"只执行独立验证，不得修改代码"，未经验证不得标记完成。
