@@ -2,7 +2,7 @@
 
 > **性质**：实施计划（spec），基于同日 Part A 审计报告（19 项发现 F-01…F-19，含 1 项 P0）。
 > **基线**：`node scripts/test.mjs` → **Passed: 757 Failed: 0**；`bash init.sh` 全绿（2026-10-24 实测）。
-> **状态**：`执行中`——决策已落定，批次 1–3（B1-01、B2-01…06、B3-08…18）完成于 2026-10-24；批次 4 待执行。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
+> **状态**：`执行中`——批次 1–4 全部完成（2026-10-24）；仅剩 §6 收尾（E-01…E-03）。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
 > **本文件不是技能产物**，不随 `npx skills add` 分发，不受 `test.mjs` 的模板/路径断言约束。
 > **行号均为 2026-10-24 基线**，编辑后会漂移；执行时以引用的**原文片段**定位，不要盲搜行号。
 > **接替** `spec-plan/audit-remediation-spec.md`（v1，其批次已实施完毕，见 git log；处置见 E-02）。
@@ -353,11 +353,11 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法 1（先加断言）**：现有 U-05 演练断言不动（重构无行为变化，全绿即证）。
 
-- [ ] B4-01a：确认现有 U-05 断言覆盖 readRecord/writeRecord/recordStatus 的行为
+- [x] B4-01a：确认现有 U-05 断言覆盖 readRecord/writeRecord/recordStatus 的行为（记录生成 / 指纹 / 篡改约束后 stale exit 1 等，test.mjs §18）
 
 **方法 2**：`drill-record.mjs` 全部导出移入 `drill-check.mjs`（`RECORD_FILE`/`RECORD_SCHEMA`/`fingerprint`/`readRecord`/`writeRecord`/`recordStatus`）；`stage2.mjs` 的 `import { recordStatus } from './drill-record.mjs'` 改指 `./drill-check.mjs`；删除 `drill-record.mjs`；`scripts/test.mjs` 的 `skillScript` 映射删去 `drill-record.mjs` 条目。
 
-- [ ] B4-01b：合并与引用更新已完成
+- [x] B4-01b：合并与引用更新已完成（0565ba8；含 README 两处表格、test.mjs 映射与反向清单；stage2 头注释同步改写）
 
 **验收**：`node scripts/test.mjs` 全绿；`ls skills/harness-loop-init/scripts/` 无 drill-record.mjs；`bash init.sh` 全绿。
 
@@ -365,15 +365,15 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法 1（前置）**：`grep -n "TEMPLATE_DIR" scripts/install-skills.mjs` 确认为空（只有 test.mjs 用）。
 
-- [ ] B4-02a：前置确认完成
+- [x] B4-02a：前置确认完成（install-skills.mjs 无 TEMPLATE_DIR 引用，grep 为空）
 
 **方法 2（先加断言）**：`scripts/test.mjs` 的逐字节比对（:1087-1116）把 `scripts/lib/common.mjs` 纳入比对范围。改前红（当前 4 行差异）。
 
-- [ ] B4-02b：断言已加入且改前验证过会红
+- [x] B4-02b：断言已加入且改前验证过会红（759/1：drifted = scripts/lib/common.mjs）
 
 **方法 3**：`scripts/lib/common.mjs` 删去 `TEMPLATE_DIR`/`LOOP_TEMPLATE_DIR` 两常量（含注释，:14-17），与技能副本一致；`scripts/test.mjs` 顶部改为本地定义 `const TEMPLATE_DIR = path.join(SKILLS_DIR,'harness-init','templates'); const LOOP_TEMPLATE_DIR = path.join(SKILLS_DIR,'harness-loop-init','templates');` 并从 import 列表移除。
 
-- [ ] B4-02c：统一完成
+- [x] B4-02c：统一完成（根库 4 行替换为技能副本的 1 行；五个 common.mjs 同一 md5 cf16a0fd…；760/0）
 
 **验收**：`md5sum scripts/lib/common.mjs skills/*/scripts/lib/common.mjs` 五个哈希一致；`node scripts/test.mjs` 全绿。
 
