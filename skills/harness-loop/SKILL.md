@@ -90,7 +90,8 @@ node .claude/skills/harness-loop/scripts/ledger-check.mjs --ledger loop-ledger.j
 | `2` | **停止，不再重试**，写升级条目（账本缺失或非法 JSON 也返回 2，不是"未知"） |
 | `1` | 命令写错了（非法参数），不是通过 |
 
-预算从 `loop-constraints.md` 的 `## Budget` 段读取；`0` 表示不启用。
+预算从 `loop-constraints.md` 的 `## Budget` 段读取；`0` 表示不启用。预算的 `tokensUsed`
+无自动计量——每次 `--append` 时用 `--tokens` 手填估算，不填则恒为 0，预算与 `report-only` 永不触发。
 
 **每次尝试都要入账**——用脚本，不要手改 JSON。验证被拒时在回到本步之前追加：
 
