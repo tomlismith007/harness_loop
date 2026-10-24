@@ -2,7 +2,7 @@
 
 > **性质**：实施计划（spec），基于同日 Part A 审计报告（19 项发现 F-01…F-19，含 1 项 P0）。
 > **基线**：`node scripts/test.mjs` → **Passed: 757 Failed: 0**；`bash init.sh` 全绿（2026-10-24 实测）。
-> **状态**：`执行中`——决策已落定，批次 1（B1-01）完成于 2026-10-24；批次 2–4 待执行。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
+> **状态**：`执行中`——决策已落定，批次 1（B1-01）与批次 2（B2-01…B2-06）完成于 2026-10-24；批次 3–4 待执行。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
 > **本文件不是技能产物**，不随 `npx skills add` 分发，不受 `test.mjs` 的模板/路径断言约束。
 > **行号均为 2026-10-24 基线**，编辑后会漂移；执行时以引用的**原文片段**定位，不要盲搜行号。
 > **接替** `spec-plan/audit-remediation-spec.md`（v1，其批次已实施完毕，见 git log；处置见 E-02）。
@@ -126,7 +126,7 @@ drill-check 只有 gate / breaker / verifier 三组，无 pause 组；kill switc
 
 **方法 1**：`README.md` 四个命令表 `/harness-loop` 行（:18）改为「约束 → 选一项 → **熔断预检** → 执行 → 独立验证 → 闸门 → 写状态」。
 
-- [ ] B2-01a：命令表行已改
+- [x] B2-01a：命令表行已改（860e2a4）
 
 **方法 2**：`README.md` :26-27 的流程代码块改为：
 
@@ -136,7 +136,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 → 写状态（REJECT → 回熔断预检，达上限即停）
 ```
 
-- [ ] B2-01b：流程图已改，且与 SKILL:15 一致
+- [x] B2-01b：流程图已改，且与 SKILL:15 一致（860e2a4）
 
 **验收**：README 两处与 `skills/harness-loop/SKILL.md:15` 三方能对上；`bash init.sh` 全绿（此项无测试断言，人工比对）。
 
@@ -146,15 +146,15 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法 1**：`docs/03-gates-and-levels.md` 示例命令块中 `--evidence-file verifier-report.md` 之前加一行：`--implementer implementer-1 \`。
 
-- [ ] B2-02a：示例命令已补参数
+- [x] B2-02a：示例命令已补参数（a945ae7）
 
 **方法 2**：在临时目录实测补全后的命令（STATE.md + changed.txt 含 `auth/session.ts`），确认输出仍为文档所贴的 denylist escalate JSON；若有出入，用实测输出替换文档中的 JSON 块。
 
-- [ ] B2-02b：命令已实测且输出与文档一致（或文档已换成实测输出）
+- [x] B2-02b：命令已实测且输出与文档一致（denylist escalate JSON 逐字段相同，exit 2）
 
 **方法 3**：`scripts/test.mjs` 文档完整性节（第 12 节）加断言：docs/03 的 gate 示例命令含 `--implementer`（如 `ok('docs/03 gate 示例带 --implementer', /--implementer/.test(doc03ExampleBlock))`）。改前红。
 
-- [ ] B2-02c：断言已加入且改前验证过会红
+- [x] B2-02c：断言已加入且改前验证过会红（758/1 → 759/0）
 
 **验收**：`node scripts/test.mjs` 全绿；手动重跑示例命令退出 2（denylist escalate），不再是退出 1。
 
@@ -164,19 +164,19 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法 1**：`skills/harness-init/SKILL.md` :15「创建 6 个文件」→「创建 7 个文件（6 个模板 + 生成的 init.sh）」。
 
-- [ ] B2-03a：:15 已改
+- [x] B2-03a：:15 已改（3043b59）
 
 **方法 2**：同文件 :54「生成 **6 个文件**」→「生成 **6 个模板文件 + 1 个生成的 init.sh（共 7 个）**」，表格补一行 `verifier-report.md | 验证者报告格式模板（闸门按它校验 Author/sha/输出片段）| 一般不用改`。
 
-- [ ] B2-03b：表格与标题行已改
+- [x] B2-03b：表格与标题行已改（补 verifier-report.md 行）
 
 **方法 3**：`skills/harness-init/scripts/stage-core.mjs` :27 的 STAGES[0].goal「创建 6 个地基文件」→「创建 6 个模板文件与生成的 init.sh」；**同步另一份副本** `skills/harness-loop-init/scripts/stage-core.mjs`（逐字节一致）。
 
-- [ ] B2-03c：两份 stage-core.mjs 已同步修改
+- [x] B2-03c：两份 stage-core.mjs 已同步修改（另同步了 harness-stage 头注释 ×2 与 stage2 注释）
 
 **方法 4**：`scripts/test.mjs` :1128 的断言 `/6 个文件/.test(init)` 改为机械校验：`stage1.mjs` 导出 `STAGE1_FILES`，断言 `SKILL 中的数字 === STAGE1_FILES.length + 1`（两份 stage1.mjs 副本同步加 export）。改前：新断言读出 SKILL 写 6 vs 代码 7 → 红（回退测试成立）。
 
-- [ ] B2-03d：test.mjs 断言已改为对着代码数
+- [x] B2-03d：test.mjs 断言已改为对着代码数（STAGE1_FILES 导出 + eq 校验；改前红 759/1：SKILL 6 vs 代码 7；产出清单也改为由 STAGE1_FILES 派生）
 
 **验收**：`node scripts/test.mjs` 全绿；`grep -rn "6 个文件\|6 个地基" skills/ docs/03-gates-and-levels.md AGENTS.md README.md` 只剩「6 个模板 / 6 个地基文件 + init.sh」这类与 7 对得上的表述。
 
@@ -196,11 +196,11 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 其余行（Seen N× / Done right / 成本分层 / 真实使用验证 / 黑名单）维持现状标记。
 
-- [ ] B2-04a：对照表已重写
+- [x] B2-04a：对照表已重写（ef82dba；真实使用验证行也修正为「有约束无闸门」）
 
 **方法 2**：同文件「三个最值得补的缺口」（:333-349）重写——回退测试与「未跑写明」已不是缺口，替换为现存缺口：成本分层（廉价门卫）、夜审 + `Seen N×` 机械棘轮、真机/agent 行为层验证。
 
-- [ ] B2-04b：缺口清单已更新
+- [x] B2-04b：缺口清单已更新（同批更新第 8 节最小复制版本第 5/6 步）
 
 **验收**：`grep -n "弱化版\|post-merge-cleanup\|每日 triage" docs/09-case-magpie.md` 输出为空（或仅剩与已实现机制无关的行，逐条核对）；`bash init.sh` 全绿。
 
@@ -212,11 +212,11 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 > **本框架现状**：唯一的外部连接是 `/harness-loop-issue` 的 `gh` **只读**访问（不评论、不打标签、不关闭、不合并、不推送）。下表描述的是上游 loop-engineering 的参考做法，供将来接入连接器时对照，**不代表本框架当前能力**。
 
-- [ ] B2-05a：现状说明已加
+- [x] B2-05a：现状说明已加（5e3c3c1）
 
 **方法 2**：同表 GitHub 行的「写入」列改为「（参考）comment、label——本框架未启用」。
 
-- [ ] B2-05b：表格行已限定
+- [x] B2-05b：表格行已限定
 
 **验收**：docs/04 该节与 `skills/harness-loop-issue/SKILL.md` 的只读规则不再冲突（人工比对）；`bash init.sh` 全绿。
 
@@ -226,11 +226,11 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法 1**：`skills/harness-loop-init/SKILL.md` :53 改为「产出 **4 个文件**（`docs/04-safety.md` 已存在时跳过它，剩 3 个）+ 手工生成的 `loop-drill.json`（判据 7）」，:62 保持「完整产物是 4 个文件 + 1 份演练记录」并在两处之间不再出现第三种数字。
 
-- [ ] B2-06a：SKILL 两处口径已统一
+- [x] B2-06a：SKILL 两处口径已统一（53 行 4 文件 + 63 行 4+1）
 
 **方法 2**：`README.md` :17 四个命令表 `/harness-loop-init` 行改为「`loop-ledger.json`、`loop-run-log.md`、`loop-constraints.md`（+ 条件生成的 `docs/04-safety.md` 与演练记录）」。
 
-- [ ] B2-06b：README 行已改
+- [x] B2-06b：README 行已改（列全 3 必产物 + 条件产物与演练记录）
 
 **验收**：README:17、SKILL:53、SKILL:62 三处数字互相咬合（4 文件 + 1 记录，docs/04 条件生成）；`bash init.sh` 全绿。
 

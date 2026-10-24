@@ -50,7 +50,8 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target>
 node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgrade --stage 2
 ```
 
-产出 **3 个文件**（`docs/04-safety.md` 已存在时跳过）：
+产出 **4 个文件**（`docs/04-safety.md` 已存在时跳过它，实际写 3 个）+ 手工生成的
+`loop-drill.json`（判据 7，下一节）：
 
 | 文件 | 作用 |
 |---|---|
@@ -59,7 +60,7 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 | `loop-constraints.md` | loop 规则（验证 / 预算 / 教训 / 清理） |
 | `docs/04-safety.md` | 拒绝列表的文档副本；判据 6 与 `harness-constraints.md` 逐条比对。已存在则**不覆盖**，只在输出里报告漂移 |
 
-另外判据 7 要 `loop-drill.json`（下一节手工生成），所以完整产物是 4 个文件 + 1 份演练记录。
+完整产物 = **4 个文件 + 1 份演练记录**（`docs/04-safety.md` 被跳过时是 3 个文件 + 1 份记录）。
 
 同时确认 `harness-loop` 技能已装到 agent 能扫描的路径。
 
