@@ -165,6 +165,7 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --reviewed-sha "$(git rev-parse HEAD)" \
   --head-sha "$(git rev-parse HEAD)" \
   --red-check pass \
+  --implementer implementer-1 \
   --evidence-file verifier-report.md
 ```
 

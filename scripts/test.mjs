@@ -2501,6 +2501,10 @@ section('17. 升级回归（批次 2）');
     const order03 = (doc03.match(/`GATE_ORDER` 定义[^：]*：\s*([\s\S]*?)。/) || [])[1] || '';
     const names03 = [...order03.matchAll(/`([a-z-]+)`/g)].map((m) => m[1]);
     eq('docs/03 列出的 gate 顺序与 GATE_ORDER 一致', names03.join(','), GATE_ORDER.join(','));
+    // 示例命令必须能跑：gate 阶段 approve 缺 --implementer 时 gate-check 退出 1（F-03）。
+    const gateExample = [...doc03.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1])
+      .find((b) => b.includes('--phase gate'));
+    ok('docs/03 的 gate 示例带 --implementer', Boolean(gateExample) && /--implementer/.test(gateExample));
 
     // 每篇 docs 里出现的闸门名必须是代码里真实存在的闸门。
     const known = new Set([...GATE_ORDER, 'max-attempts', 'attempt-limit',
