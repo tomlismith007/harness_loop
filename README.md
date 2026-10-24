@@ -125,12 +125,12 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 
 | 脚本 | 用途 | 退出码 |
 |---|---|---|
-| `harness-stage.mjs` | 两阶段检测 / 补齐 / 校验 | 0 报告或已达成；1 参数错误或写不出文件；2 `--require` 未达成 |
+| `harness-stage.mjs` | 两阶段检测 / 补齐 / 校验 | 0 报告或已达成；1 参数错误或写不出文件；2 `--require` 未达成或跳级保护拒绝 |
 | `stage1.mjs` / `stage2.mjs` | 各阶段的判据与补齐 | 无 CLI，由 `harness-stage` 调用 |
 | `stage-core.mjs` | 阶段元数据、三态判定、报告渲染、技能目录复制 | 无 CLI |
 | `gate-check.mjs` | 闸门判定 + kill switch | 0 通过；1 参数错误；2 升级；3 退出 |
 | `ledger-check.mjs` | 熔断检查 | 0 继续；2 停止并升级 |
-| `drill-check.mjs` | 护栏演练（`--record` 写 `loop-drill.json`） | 0 全过；2 护栏没响 |
+| `drill-check.mjs` | 护栏演练（`--record` 写 `loop-drill.json`） | 0 全过；1 记录过期；2 护栏没响 |
 | `drill-record.mjs` | `loop-drill.json` 的读写与有效性判定 | 无 CLI |
 | `clean-state.mjs` | 结束前检查：init.sh 无占位、无调试残留、Last run 是今天 | 0 干净；2 有未清理项 |
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list` | 0 成功；2 有未提交改动未清理 |
