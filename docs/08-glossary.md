@@ -210,9 +210,7 @@ Prompt Engineering（指令）→ Context Engineering（信息）→ Loop Engine
 | 3 / 5 / 10 | 熔断阈值：同一错误 / 连续失败 / 总迭代 |
 | 100 | `AGENTS.md` 建议行数 |
 | 50–150 | 主题文档建议行数 |
-| 15 | 全局硬约束上限条数 |
 | — | 就绪度评分已移除（v2）；等级由 `harness-stage` 阶段判据给出 |
-| 5k | 空转退出的 token 上限 |
 
 ---
 

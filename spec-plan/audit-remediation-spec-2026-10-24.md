@@ -2,7 +2,7 @@
 
 > **性质**：实施计划（spec），基于同日 Part A 审计报告（19 项发现 F-01…F-19，含 1 项 P0）。
 > **基线**：`node scripts/test.mjs` → **Passed: 757 Failed: 0**；`bash init.sh` 全绿（2026-10-24 实测）。
-> **状态**：`执行中`——决策已落定，批次 1（B1-01）与批次 2（B2-01…B2-06）完成于 2026-10-24；批次 3–4 待执行。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
+> **状态**：`执行中`——决策已落定，批次 1–3（B1-01、B2-01…06、B3-08…18）完成于 2026-10-24；批次 4 待执行。全部完成后把状态改为 `已完成`，本文件归档到 `docs/archive/` 或删除。
 > **本文件不是技能产物**，不随 `npx skills add` 分发，不受 `test.mjs` 的模板/路径断言约束。
 > **行号均为 2026-10-24 基线**，编辑后会漂移；执行时以引用的**原文片段**定位，不要盲搜行号。
 > **接替** `spec-plan/audit-remediation-spec.md`（v1，其批次已实施完毕，见 git log；处置见 E-02）。
@@ -244,7 +244,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 > `--verdict` 必须在本步之前取得：`none` 在 gate 阶段一律 escalate（`awaiting-verification`）；且默认 `behavior` + `not-run` 会先被 `red-check` 以「回退测试未跑」拦下——那是误导性原因，真正缺的是验证。
 
-- [ ] B3-08 已完成
+- [x] B3-08 已完成（与 B3-09 同一提交）
 
 **验收**：SKILL 含该说明；`bash init.sh` 全绿。
 
@@ -252,7 +252,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**：`skills/harness-loop/SKILL.md` 第 6 步重放段（:218-221「确实无法重跑时用 `--no-replay`」后）补：「`docs`/`config`/`refactor` 类改动**自动**跳过重放并记为 NOT RUN——不必为文档改动硬凑可重放的命令。」
 
-- [ ] B3-09 已完成
+- [x] B3-09 已完成（与 B3-08 同一提交）
 
 **验收**：SKILL 含该说明且与 gate-check.mjs:631-635 行为一致；`bash init.sh` 全绿。
 
@@ -260,7 +260,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**：`skills/harness-loop/scripts/gate-check.mjs` :407「/harness-loop 第 4 步」与 :439「step 4」改为「第 5 步 / step 5」（验证者输出格式在 SKILL 第 5 步）；**同步另一份副本** `skills/harness-loop-init/scripts/gate-check.mjs`。
 
-- [ ] B3-10 已完成（两份副本都已改）
+- [x] B3-10 已完成（两份副本都已改；实际共三处 step-4 引用，含 spec 未列的 :479；另修 test.mjs 断言标签「第 5 步」→ 第 6 步）
 
 **验收**：`grep -n "第 4 步\|step 4" skills/*/scripts/gate-check.mjs` 输出为空；逐字节断言全绿。
 
@@ -270,15 +270,15 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法 1（先加断言）**：`scripts/test.mjs` 第 5 节（闸门判定）加：`checkGates({ item:'x', phase:'gate', diffFiles:['a.ts'], verdict:'reject', attempts:2 }, {})` 的 `next` 含 `escalate to human|exhausted`。改前红（cfg.maxAttempts 为 undefined）。
 
-- [ ] B3-11a：断言已加入且改前验证过会红
+- [x] B3-11a：断言已加入且改前验证过会红（760/1，症状即审计所述 next 永远「回修复阶段」）
 
 **方法 2（再改实现）**：`gate-check.mjs` 顶部 `import { DEFAULT_BREAKER } from './ledger-check.mjs'`（同技能目录内引用，自包含成立）；main() 的 cfg 增加 `maxAttempts: limits.maxAttempts ?? DEFAULT_BREAKER.maxAttempts`。**同步两份副本**。
 
-- [ ] B3-11b：实现已改（两份副本）
+- [x] B3-11b：实现已改（两份副本；默认值改为从 ./ledger-check.mjs import DEFAULT_BREAKER，CLI 由约束文件覆盖；md5 校验一致）
 
 **方法 3**：`skills/harness-loop/SKILL.md` 第 6 步 gate 命令块补 `--attempts <第 3 步输出的 item attempts> \`（使建议文案的输入真实存在）。
 
-- [ ] B3-11c：SKILL 命令已补 --attempts
+- [x] B3-11c：SKILL 命令已补 --attempts
 
 **验收**：`node scripts/test.mjs` 全绿；手动构造 attempts=2 + reject 的调用，`next` 出现上限升级文案。
 
@@ -286,11 +286,11 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法 1**：`README.md` :133 drill-check 行退出码补「1 记录过期（stale）」；:127 harness-stage 行补「2 `--require` 未达成**或跳级保护拒绝**」。
 
-- [ ] B3-12a：README 两行已补
+- [x] B3-12a：README 两行已补
 
 **方法 2**：`docs/02-state-model.md` :198「退出码：`0` = 继续；`2` = 停止」补「`1` = 参数错误（命令写错，不是通过）」（审计补充项，与 docs/05:209-215 对齐）。
 
-- [ ] B3-12b：docs/02 已补
+- [x] B3-12b：docs/02 已补
 
 **验收**：三处退出码表述与各脚本 `--help` 的 Exit codes 段一致；`bash init.sh` 全绿。
 
@@ -298,7 +298,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**：`.github/workflows/self-check.yml` :61 的 grep 目录列表删去 `templates/`。
 
-- [ ] B3-13 已完成
+- [x] B3-13 已完成（本地实测删目录后 grep 退出码 1 = 无匹配无错误）
 
 **验收**：本地重跑该 grep（不带 templates/）退出码为 1（无匹配、无错误）：`grep -rEn "(ghp_[A-Za-z0-9]{20,})" --include="*.mjs" scripts/ skills/ docs/; echo $?` → `1`。
 
@@ -306,7 +306,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**：`docs/04-safety.md` :149「`loop-pause-all` 标签或 `STATE.md` 标志」→「`STATE.md` / `harness-constraints.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all`（GitHub label **不**触发，本框架无 label 入口——上游原文是 label or flag，此处只实现了文件标志）」。
 
-- [ ] B3-14 已完成
+- [x] B3-14 已完成
 
 **验收**：docs/04 该行与 gate-check.mjs `stateFiles`（读三个文件）一致；`bash init.sh` 全绿。
 
@@ -314,7 +314,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**：`skills/harness-loop/SKILL.md` :210 `--implementer <执行者标识> \   # 必填：…` 的注释移到命令块下方正文（`\` 续行后跟 `#` 会断命令）。
 
-- [ ] B3-15 已完成
+- [x] B3-15 已完成
 
 **验收**：命令块内无 `#` 注释；`bash init.sh` 全绿。
 
@@ -324,7 +324,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 > 处置 worktree：先 `mark --status merged|rejected|escalated`，**然后总是** `cleanup`。已合并进 base 的 merged 与全部 rejected/escalated 会被回收；人工尚未合并的 merged 会被安全跳过（改标 escalated 并提示原因），留待下轮或人工处理——cleanup 从不带 `--force`，不会销毁未提交改动（exit 2 时如实报告）。
 
-- [ ] B3-16 已完成
+- [x] B3-16 已完成
 
 **验收**：SKILL 表述与 `worktree.mjs` 的 `CLEANUP_STATUSES`（含 merged）及「refusing to delete」分支一致；`bash init.sh` 全绿。
 
@@ -332,7 +332,7 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**（若 D-05=A）：`skills/harness-loop/SKILL.md` 第 3 步「预算从 `loop-constraints.md` 的 `## Budget` 段读取；`0` 表示不启用」后补：「预算的 `tokensUsed` 无自动计量——每次 `--append` 时用 `--tokens` 手填估算，不填则恒为 0，预算与 report-only 永不触发。」
 
-- [ ] B3-17 已完成（或 D-05 选 B：勾选此处并写明理由）
+- [x] B3-17 已完成（D-05 选 A）
 
 **验收**：SKILL 含该声明；`bash init.sh` 全绿。
 
@@ -340,8 +340,8 @@ kill switch → 加载约束 → 选定唯一一项 → 熔断预检（ledger-ch
 
 **方法**（若 D-04=A）：`docs/04-safety.md` :157「kill switch 必须至少演练一次，确认真的能停住」→「kill switch 的行为由 `test.mjs` 的 `isPaused` 断言与 `/harness-loop` 第 0 步的实测覆盖（gate-check 退出 3）」。同文件 `docs/08-glossary.md` 关键数字速查删去「15 | 全局硬约束上限条数」与「5k | 空转退出的 token 上限」两行（无代码入口）。
 
-- [ ] B3-18a：docs/04 已改（或 D-04 选 B：在此实施演练组并勾选）
-- [ ] B3-18b：docs/08 两行无入口数字已删
+- [x] B3-18a：docs/04 已改（D-04 选 A）
+- [x] B3-18b：docs/08 两行无入口数字已删
 
 **验收**：`grep -n "15 条\|5k" docs/08-glossary.md` 输出为空；`bash init.sh` 全绿。
 

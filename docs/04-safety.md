@@ -158,7 +158,7 @@ audits/**
 
 - 循环每轮开始**必须**检查 kill switch。
 - 恢复需要人工在 `STATE.md` 中清除标志，然后手动重启调度器。**循环不得自行恢复。**
-- kill switch 必须至少演练一次，确认真的能停住。
+- kill switch 的行为由 `test.mjs` 的 `isPaused` 断言与 `/harness-loop` 第 0 步的实测覆盖（`gate-check` 退出 3）。
 
 ---
 
