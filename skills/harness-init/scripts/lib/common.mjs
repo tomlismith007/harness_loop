@@ -374,7 +374,7 @@ export function initScriptFromCommands(commands) {
     '',
   ];
   for (const cmd of commands) {
-    lines.push(`echo "=== ${cmd} ==="`);
+    lines.push(`printf '%s\n' '=== ${cmd.replace(/'/g, "'\\''")} ==='`);
     lines.push(cmd);
     lines.push('');
   }

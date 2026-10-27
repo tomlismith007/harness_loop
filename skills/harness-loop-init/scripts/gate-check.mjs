@@ -612,13 +612,13 @@ export function checkGates(input, opts = {}) {
     // 只能算作未重放。
     const replayable = [...report.matchAll(EVIDENCE_LINE)]
       .map((m) => ({ name: m[1], command: (m[0].match(/`([^`]+)`/) || [])[1], status: m[2] }))
-      .filter((c) => c.command);
+      .filter((c) => c.command && c.status === 'PASS');
     if (replayable.length === 0) {
       return {
         ...base,
         decision: 'escalate',
         gate: 'verification-evidence',
-        reason: 'evidence carries no replayable command (every check line lacks a `<command>`)',
+        reason: 'evidence carries no replayable PASS command',
         allowed_actions: ['write the command next to each check so it can be re-run'],
         exit_code: 2,
         next: 'a check without its command cannot be verified. Use `- Tests: `<cmd>` → PASS`.',

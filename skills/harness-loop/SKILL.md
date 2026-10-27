@@ -120,7 +120,11 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 ```bash
 node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-attempt1 --base <基准分支>
 # 等价于 git worktree add -b loop/<id> .loop-worktrees/<id> <base>，但记进 manifest
+git -C .loop-worktrees/<slug>-attempt1 rev-parse HEAD > .loop-worktrees/<slug>-attempt1.base-sha
 ```
+
+创建后、任何修改前保存这个完整 commit 作为原始基准；该文件保留到本轮交接结束。
+返工与恢复时沿用它，不用移动的分支名重新计算；若记录缺失或无法核实，停止并交人检查。
 
 `--run-id` 只接受 `[A-Za-z0-9._-]`：中文 item 名要转成 ASCII slug
 （`/harness-loop 修复登录测试` → `--run-id fix-login-attempt1`），
@@ -191,8 +195,12 @@ Change class confirmed: <behavior|docs|config|refactor——必须 = --change-cl
 
 ```bash
 git status --porcelain   # 只允许出现 changed-files.txt / verifier-report.md
-git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实际替换
+BASE_SHA=$(cat "<主检出绝对路径>/.loop-worktrees/<slug>-attempt1.base-sha") &&
+  git cat-file -e "$BASE_SHA^{commit}" &&
+  git diff --name-only "$BASE_SHA" HEAD > changed-files.txt
 ```
+
+该基准必须与交给验证者的原始基准 commit 完全相同；读取失败或无法核实时停止，不生成替代清单。
 
 闸门会自己读 `git status`：工作区有未提交改动时以 `dirty-tree` 拒绝
 （`changed-files.txt` / `verifier-report.md` 豁免）。这条闸存在的原因是
@@ -241,7 +249,8 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
 不是合并许可。`--phase fix` 只做派发前的预检（拒绝列表/范围/暂停；脏工作区只在 gate 阶段判）。
 
 **证据里的命令会被重放**：闸门把 `- Tests: \`<cmd>\` → PASS` 里的命令真的跑一遍，
-退出码与 PASS/FAIL 对不上就拒绝。所以验证者报告里的命令必须是可重入的，
+只重放标为 PASS 的命令，NOT RUN 的命令不会执行；至少需要一条带命令的 PASS 证据。
+退出码与 PASS 对不上就拒绝。所以验证者报告里的命令必须是可重入的，
 在当前授权范围内且不会产生不允许的外部副作用；`--evidence-cwd`（默认当前目录）要能跑通它们。无法安全重跑时用 `--no-replay`，
 结果会被记为 NOT RUN。`docs` / `config` / `refactor` 类改动会**自动**跳过重放（同样记为
 NOT RUN）——不必为文档类改动硬凑可重放的命令。重放后闸门再次检查 HEAD 与工作区；若改变或无法核实则升级，重新验证。
@@ -258,7 +267,7 @@ NOT RUN）——不必为文档类改动硬凑可重放的命令。重放后闸�
 `--reviewed-sha` 与 `--head-sha` 不一致 → 审查后 head 动过，必须重新验证。
 
 `decision` 为 `proceed` 才继续；`escalate` → 写升级条目；`exit` → 立即停止。
-提交前删除 `changed-files.txt`（它是本轮临时产物，不入库）。
+提交前删除 `changed-files.txt`（它是本轮临时产物，不入库）；基准记录在交接结束后删除。
 
 ### 第 7 步：写状态
 

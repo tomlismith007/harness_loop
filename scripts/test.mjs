@@ -48,6 +48,8 @@ const { checkLedger, normalizeError } = await import(pathToFileURL(skillScript('
 const { checkGates, isPaused, GATE_ORDER } = await import(pathToFileURL(skillScript('gate-check.mjs')).href);
 const { localToday } = await import(pathToFileURL(skillScript('clean-state.mjs')).href);
 const { STAGE1_FILES } = await import(pathToFileURL(skillScript('stage1.mjs')).href);
+const { checkStage2 } = await import(pathToFileURL(skillScript('stage2.mjs')).href);
+const { renderReport: renderLoopReport } = await import(pathToFileURL(path.join(SKILLS_DIR, 'harness-loop-init/scripts/stage-core.mjs')).href);
 
 // 模板目录（消费方视角）：根 lib 与技能库逐字节统一后，lib 里的 TEMPLATE_DIR
 // 随技能目录布局解析，测试在这里显式指向两个装配技能的 templates/。
@@ -958,6 +960,17 @@ section('7. 项目检测与验证命令');
 section('8. init.sh 生成');
 {
   const script = initScriptFromCommands(['npm test']);
+  for (const owner of ['harness-init', 'harness-loop-init']) {
+    const { initScriptFromCommands: generate } = await import(pathToFileURL(path.join(SKILLS_DIR, owner, 'scripts/lib/common.mjs')).href);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-quoted-init-'));
+    const init = path.join(dir, 'init.sh');
+    fs.writeFileSync(init, generate([`node -e "require('fs').appendFileSync('count','x')"`]));
+    let code = 0;
+    try { execFileSync('bash', [init], { cwd: dir, stdio: 'pipe' }); } catch (e) { code = e.status; }
+    eq(`${owner} 带引号的命令生成可运行 init`, code, 0);
+    eq(`${owner} 验证命令恰好运行一次`, fs.existsSync(path.join(dir, 'count')) ? readText(path.join(dir, 'count')) : '', 'x');
+    rmrf(dir);
+  }
   ok('含 set -euo pipefail', /set -euo pipefail/.test(script));
   ok('含自我识别标记', /LOOP_HARNESS_ACTIVE_INIT/.test(script));
   ok('含传入命令', /npm test/.test(script));
@@ -1454,6 +1467,14 @@ section('13. 技能安装（双路径）');
 
 section('14. 两阶段驱动器');
 {
+  const checks = { 1: [{ label: 'stage 1', ok: true }], 2: [
+    { label: 'mechanical', ok: true }, { label: 'human', ok: null, human: true },
+  ] };
+  const report = renderLoopReport('.', 2, checks);
+  ok('阶段 2 机械通过时明确人工验证待确认', /机械.*完成/.test(report) && /人工.*待确认/.test(report), report);
+  ok('人工验证未确认时不声称两个阶段全部完成', !/已完成全部两个阶段/.test(report), report);
+}
+{
   const runStage = (target, extra = [], env = {}) => {
     try {
       return { code: 0, out: execFileSync(process.execPath,
@@ -1730,6 +1751,10 @@ section('14. 两阶段驱动器');
     eq('阶段 1 未达成时 --upgrade --stage 2 退出 2',
       runStage(half, ['--upgrade', '--stage', '2']).code, 2);
     ok('跳级失败时未写账本', !fs.existsSync(path.join(half, 'loop-ledger.json')));
+    fs.writeFileSync(path.join(half, 'AGENTS.md'), 'preserve user content');
+    eq('force 不绕过阶段 1', runStage(half, ['--upgrade', '--stage', '2', '--force']).code, 2);
+    eq('拒绝跳级时不覆盖用户文件', readText(path.join(half, 'AGENTS.md')), 'preserve user content');
+    ok('拒绝跳级时不创建阶段 2 账本', !fs.existsSync(path.join(half, 'loop-ledger.json')));
     rmrf(half);
   }
 
@@ -1741,7 +1766,12 @@ section('14. 两阶段驱动器');
   eq('阶段 1 --require 退出 0', runStage(empty, ['--stage', '1', '--require']).code, 0);
   // 出厂账本是占位内容，阶段 2 判据必须因此失败
   eq('占位账本 → 阶段 2 未达成', runStage(empty, ['--stage', '2', '--require']).code, 2);
+  for (const goal of [undefined, null, '', '   ', 123, 'Replace with the current loop goal']) {
+    fs.writeFileSync(path.join(empty, 'loop-ledger.json'), JSON.stringify({ goal, attempts: [] }));
+    eq(`无效目标 ${JSON.stringify(goal)} 不通过账本判据`, checkStage2(empty)[0].ok, false);
+  }
   fs.writeFileSync(path.join(empty, 'loop-ledger.json'), JSON.stringify({ goal: '让 auth 测试通过', attempts: [] }));
+  eq('真实目标通过账本判据', checkStage2(empty)[0].ok, true);
   // 阶段 2 判据 5 要求拒绝列表已本地化——模板原文不算。
   fs.writeFileSync(path.join(empty, 'harness-constraints.md'),
     fs.readFileSync(path.join(empty, 'harness-constraints.md'), 'utf8')
@@ -1763,7 +1793,7 @@ section('14. 两阶段驱动器');
   // 分层：阶段 1 只装 harness 底线，阶段 2 才装 loop 规则。
   {
     const h = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-harness-only-'));
-    runStage(h, ['--upgrade', '--stage', '1', '--commands', 'node -e "process.exit(0)"']);
+    runStage(h, ['--upgrade', '--stage', '1', '--commands', 'echo ok']);
     ok('阶段 1 有 harness-constraints.md', fs.existsSync(path.join(h, 'harness-constraints.md')));
     ok('阶段 1 没有 loop-constraints.md', !fs.existsSync(path.join(h, 'loop-constraints.md')));
     ok('阶段 1 没有 loop-ledger.json', !fs.existsSync(path.join(h, 'loop-ledger.json')));
@@ -1778,9 +1808,13 @@ section('14. 两阶段驱动器');
     eq('只有 harness 层时闸门可用', runGateH(['--item', 'p', '--phase', 'fix', '--diff-files', 'src/app.ts', '--state', h]), 0);
     eq('只有 harness 层时拒绝列表仍生效',
       runGateH(['--item', 'p', '--phase', 'fix', '--diff-files', 'auth/x.ts', '--state', h]), 2);
-    runStage(h, ['--upgrade', '--stage', '2', '--force']);
+    writeRealFeatures(path.join(h, 'feature_list.json'));
+    eq('完成阶段 1 后才能装阶段 2', runStage(h, ['--upgrade', '--stage', '2']).code, 0);
     ok('阶段 2 追加 loop-constraints.md', fs.existsSync(path.join(h, 'loop-constraints.md')));
     ok('阶段 2 追加 loop-ledger.json', fs.existsSync(path.join(h, 'loop-ledger.json')));
+    fs.appendFileSync(path.join(h, 'AGENTS.md'), '\nCUSTOM STAGE ONE CONTENT\n');
+    eq('阶段 2 force 更新可以执行', runStage(h, ['--upgrade', '--stage', '2', '--force']).code, 0);
+    ok('阶段 2 force 不覆盖已完成的阶段 1', readText(path.join(h, 'AGENTS.md')).includes('CUSTOM STAGE ONE CONTENT'));
     rmrf(h);
   }
 
@@ -2356,6 +2390,17 @@ section('17. 升级回归（批次 2）');
     fs.writeFileSync(path.join(t, 'ok.md'), report(OK, 'PASS'));
     eq('U-03 命令重放一致 → 0',
       runGateIn([...base, '--evidence-file', 'ok.md'], t).code, 0);
+
+    const notRunCommand = `node -e "require('fs').writeFileSync('not-run-marker','x');process.exit(1)"`;
+    fs.writeFileSync(path.join(t, 'not-run.md'), report(OK, 'PASS')
+      .replace('### Checks not run\n- —', `- Lint: \`${notRunCommand}\` → NOT RUN\n\n### Checks not run\n- Lint — not authorized`));
+    const notRunResult = runGateIn([...base, '--evidence-file', 'not-run.md'], t);
+    ok('NOT RUN 命令不得被重放', !fs.existsSync(path.join(t, 'not-run-marker')));
+    fs.rmSync(path.join(t, 'not-run-marker'), { force: true });
+    eq('跳过 NOT RUN 后已运行证据仍通过', notRunResult.code, 0);
+    fs.writeFileSync(path.join(t, 'only-not-run.md'), report(OK, 'NOT RUN')
+      .replace('### Checks not run\n- —', '### Checks not run\n- Tests — not authorized'));
+    eq('只有 NOT RUN 命令不能充当已运行证据', runGateIn([...base, '--evidence-file', 'only-not-run.md'], t).code, 2);
 
     fs.writeFileSync(path.join(t, 'bad.md'), report(NO, 'PASS'));
     const bad = runGateIn([...base, '--evidence-file', 'bad.md'], t);

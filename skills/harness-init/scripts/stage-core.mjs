@@ -253,14 +253,14 @@ export function renderReport(root, current, checksByStage) {
   lines.push(`harness-loop v${PACK_VERSION} — Harness Stage Report — ${root}`);
   lines.push('');
   lines.push(`Current stage: ${current === 0 ? '0（尚无 harness）' : `${current} ${STAGES[current - 1].name}`}`);
-  lines.push(`Next stage:    ${next ? `${next.id} ${next.name}（${next.en}）` : '— 已完成全部两个阶段'}`);
+  lines.push(`Next stage:    ${next ? `${next.id} ${next.name}（${next.en}）` : '— 机械装配完成；人工验证待确认'}`);
   lines.push('');
 
   for (const stage of STAGES) {
     const checks = checksByStage[stage.id];
     const mechanical = checks.filter((c) => !c.human && !c.na);
     const done = mechanical.filter((c) => c.ok === true).length;
-    const state = stageComplete(checks) ? 'COMPLETE' : (current + 1 === stage.id ? 'IN PROGRESS' : 'NOT STARTED');
+    const state = stageComplete(checks) ? (checks.some((c) => c.human) ? '机械完成，人工验证待确认' : 'COMPLETE') : (current + 1 === stage.id ? 'IN PROGRESS' : 'NOT STARTED');
     lines.push(`── 阶段 ${stage.id} · ${stage.name}（${stage.en}） [${state}] ${done}/${mechanical.length}`);
     lines.push(`   目标：${stage.goal}`);
     lines.push(`   对应等级：${stage.level}`);
@@ -282,7 +282,7 @@ export function renderReport(root, current, checksByStage) {
     lines.push(`  node ${process.argv[1]} ${root} --upgrade --stage ${next.id}`);
     lines.push(`  然后运行 /${next.id === 1 ? 'harness-init' : 'harness-loop-init'}`);
   } else {
-    lines.push('两个阶段全部达成。后续维护：跑 /harness-loop，返工时在 LESSONS.md 记一行。');
+    lines.push('机械装配完成；人工判据需另行确认。后续维护：跑 /harness-loop，返工时在 LESSONS.md 记一行。');
   }
   return lines.join('\n');
 }

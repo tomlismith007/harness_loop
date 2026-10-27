@@ -155,16 +155,21 @@ Exit codes:
   if (args.upgrade) {
     const to = targetStage ?? Math.min(2, current + 1);
 
-    // 跳级保护：前一阶段未达成时拒绝写入，除非 --force。
-    if (to > 1 && !args.force) {
+    if (to >= 2 && !s2) {
+      process.stderr.write('error: stage 2 is not installed with this skill (no stage2.mjs).\n'
+        + '       Run /harness-loop-init, or: npx skills add <repo> --skill harness-loop-init\n');
+      process.exit(1);
+    }
+
+    // 阶段前置条件与覆盖开关相互独立；force 不能绕过跳级保护。
+    if (to > 1) {
       const unmet = unmetStages(checksByStage, to);
       if (unmet.length) {
         // 用**正在运行的这个脚本**的路径，不要写死 `node scripts/harness-stage.mjs`：
         // 消费方仓库里没有那个路径，从技能目录运行时它也不存在。
         process.stderr.write(
           `error: cannot upgrade to stage ${to}: stage ${unmet.join(', ')} not complete.\n`
-          + `       Run: node ${process.argv[1]} ${root} --upgrade --stage ${unmet[0]}\n`
-          + `       Override (not recommended): add --force\n`);
+          + `       Run: node ${process.argv[1]} ${root} --upgrade --stage ${unmet[0]}\n`);
         process.exit(2);
       }
     }
@@ -172,15 +177,10 @@ Exit codes:
     const results = [];
     // 阶段是累积的：装阶段 2 之前先把阶段 1 补齐（阶段 1 已达成时全部 SKIPPED）。
     if (to >= 1) {
-      upgradeStage1(root, Boolean(args.force), results,
+      upgradeStage1(root, to === 1 && Boolean(args.force), results,
         { commands: explicitCommands, packageManager: explicitPm });
     }
     if (to >= 2) {
-      if (!s2) {
-        process.stderr.write('error: stage 2 is not installed with this skill (no stage2.mjs).\n'
-          + '       Run /harness-loop-init, or: npx skills add <repo> --skill harness-loop-init\n');
-        process.exit(1);
-      }
       s2.upgradeStage2(root, Boolean(args.force), results);
     }
 

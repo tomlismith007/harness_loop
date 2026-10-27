@@ -117,8 +117,9 @@ function ledgerIsReal(root) {
   if (!ledger || !Array.isArray(ledger.attempts)) {
     return { ok: false, reason: 'loop-ledger.json 不存在或 attempts 不是数组' };
   }
-  if (/^\s*(example\b|replace with)/i.test(String(ledger.goal || ''))) {
-    return { ok: false, reason: 'loop-ledger.json 仍是出厂占位 goal（Replace with…）' };
+  if (typeof ledger.goal !== 'string' || !ledger.goal.trim()
+      || /^\s*(example\b|replace with)/i.test(ledger.goal)) {
+    return { ok: false, reason: 'loop-ledger.json 的 goal 为空、无效或仍是出厂占位' };
   }
   return { ok: true, reason: null };
 }
