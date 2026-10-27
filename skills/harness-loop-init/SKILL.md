@@ -129,10 +129,15 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 
 ```bash
 node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --stage 2 --require
-# 退出码 0 = 7 项机械判据全过
+# 退出码 0 = 7 项机械判据全过；不代表两项人工判据已验证
 ```
 
-加上两项人工确认。
+分别报告两个结果：
+
+- **机械装配**：`--require` 退出 0 才算通过；未通过时报告失败或 NOT RUN 的判据。
+- **真实使用验证**：上面两项均有真实证据并经人工确认才算通过；缺少任一证据时标记 NOT RUN，说明下一次真实任务如何补齐。不要为了让阶段完成而虚构修复或报告。
+
+机械装配通过可用于开始真实任务；完整阶段 2 结论需同时满足机械装配与人工确认。`--require` 是机械检查，不改变其退出码来代替人工判断。
 
 ## 常见错误
 
