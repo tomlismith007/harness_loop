@@ -73,7 +73,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 |---|---|
 | 同一错误重复 | 3 次 |
 | 连续失败 | 5 次 |
-| 总迭代 | 10 次 |
+| 当前 item 的迭代 | 10 次（传 `--item`） |
 
 ### 4. 验证闸门（Verification Gate）
 
@@ -143,12 +143,12 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 |---|---|---|
 | 拒绝列表命中 | **机械** | `gate-check.mjs` 先读 `harness-constraints.md` 的 `## Paths`，缺省回落 `loop-constraints.md` |
 | 文件数超限 | **机械** | `gate-check.mjs` 数 diff 清单 |
-| head-commit 一致 | **机械** | 字符串比对两个 sha |
+| head-commit 一致 | **机械** | 所有改动类型都要求 reviewed/head 相等；CLI 还要求显式 head 等于 Git 实际 HEAD，证据重放结束后再次核对 HEAD 与工作区 |
 | 回退测试结论 | **机械** | 读 `--red-check` 的值；`behavior` 类强制，其余三类要求报告里写理由 |
 | kill switch | **机械** | `gate-check.mjs --state` 读 `STATE.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` |
 | **改动是否与 work item 相关** | **人工** | 脚本不知道 work item 的目标，无法判定"范围蔓延" |
 | **verdict 是否诚实** | **半机械** | 闸门会重放证据里的命令并比对退出码；能抓"报告说 PASS、命令实际失败"，抓不到"命令覆盖不到这次改动" |
-| 证据命令重放 | **机械** | `gate-check.mjs` 在 `--evidence-cwd` 下执行 `- Tests: `<cmd>` → PASS` 里的命令；`--no-replay` 显式跳过并记 NOT RUN |
+| 证据命令重放 | **机械** | `gate-check.mjs` 在 `--evidence-cwd` 下执行报告中的 `Tests: <command> → PASS` 命令；`--no-replay` 或非行为类自动跳过并记 NOT RUN；重放后仍须保持已审 HEAD 与干净工作区 |
 
 ---
 

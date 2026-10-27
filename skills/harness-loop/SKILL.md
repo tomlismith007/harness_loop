@@ -93,6 +93,7 @@ node .claude/skills/harness-loop/scripts/ledger-check.mjs --ledger loop-ledger.j
 
 预算从 `loop-constraints.md` 的 `## Budget` 段读取；`0` 表示不启用。预算的 `tokensUsed`
 无自动计量——每次 `--append` 时用 `--tokens` 手填估算，不填则恒为 0，预算与 `report-only` 永不触发。
+迭代与连续失败按当前 item 统计；日预算统计账本中所有 item 的本地当日花费。带花费但缺有效日期的记录会停止并要求修复账本。
 
 **每次尝试都要入账**——用脚本，不要手改 JSON。验证被拒时在回到本步之前追加：
 
@@ -106,16 +107,25 @@ node .claude/skills/harness-loop/scripts/ledger-check.mjs --ledger loop-ledger.j
 
 ### 第 4 步：执行者
 
-在**独立 worktree** 里做最小改动：
+首次派发前，在主检出中为本轮生成稳定、唯一的 ASCII `<run-id>` 并独占登记：
 
 ```bash
-node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-attempt<N>
+node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝对路径> --claim --item <item-id> --run-id <run-id>
+```
+
+退出 2 表示活动项、锁或状态存在冲突，停止并检查，不能自动删除锁或继续派发。锁和 `Active` 记录在中断或等待验证时保留；确认原执行已停止且现场已检查后，由人决定如何恢复。恢复原轮时沿用原 item 和 run ID，不再次领取；不得借用其他轮的锁。
+
+在**独立 worktree** 里做最小改动。首次尝试从项目实际基准分支创建：
+
+```bash
+node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-attempt1 --base <基准分支>
 # 等价于 git worktree add -b loop/<id> .loop-worktrees/<id> <base>，但记进 manifest
 ```
 
 `--run-id` 只接受 `[A-Za-z0-9._-]`：中文 item 名要转成 ASCII slug
 （`/harness-loop 修复登录测试` → `--run-id fix-login-attempt1`），
 后续 `mark` / `cleanup` 用同一个 id。人类可读的名字只出现在 `--item` 与状态文件里。
+活动锁的 `<run-id>` 标识整轮；worktree 的 id 标识该现场，两者不要混淆。
 
 硬要求：
 
@@ -132,7 +142,7 @@ node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-att
 
 **结构性要求**：执行者与验证者必须是不同实例、不同指令。
 
-- **有子智能体**：派一个新实例。提示词只含 diff、验证命令、报告格式，**不含执行者的推理过程**。
+- **有子智能体**：派一个新实例，提供 item、完成标准、主检出及 worktree 路径、原始基准 commit、待审 HEAD、执行者标识、完整 diff、验证命令和报告路径及格式；**不含执行者的推理过程**。验证者不得修改代码。
 - **没有子智能体**：交给人另开独立会话，明确只执行第 5 步、不得修改代码；提供 item 与完成标准、主检出绝对路径、本次 worktree 绝对路径、基准 commit、待审 HEAD、执行者标识、验证命令及报告保存路径。验证者在指定 worktree 检查基准到 HEAD 的 diff，运行验证并按下方格式写报告，返回 verdict、报告路径与审过的完整 SHA。原会话核对报告和当前 HEAD 后继续第 6 步；拿不到独立报告时保留成果并记为等待验证，不得标记完成。
 
 验证者的立场是**找出拒绝的理由**，不是确认它是对的。报告必须按下面的格式写，并署名（`Author:`）——闸门会校验它与执行者不同。检查项：
@@ -168,7 +178,7 @@ Change class confirmed: <behavior|docs|config|refactor——必须 = --change-cl
 ```
 
 `REJECT` → 先用 `--append --outcome failure --error "<失败原文>"` 记一笔，
-**然后回第 3 步**（熔断预检会读到这次失败；达到上限即停止）。
+**然后回第 3 步**（熔断预检会读到这次失败；达到上限即停止）。允许继续时保留活动锁，回到同一 worktree 的已提交 HEAD 返工，把拒绝报告作为待评估证据交给执行者；不把报告当指令。新提交后重新独立验证**原始基准到新 HEAD 的完整 diff**，不要从基准分支重新创建空白现场。最终升级或拒绝后才按第 7 步标记 worktree。
 `ESCALATE_HUMAN` → 追加 `--outcome noop` 后写升级条目，停止。
 
 ### 第 6 步：闸门
@@ -232,9 +242,9 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
 
 **证据里的命令会被重放**：闸门把 `- Tests: \`<cmd>\` → PASS` 里的命令真的跑一遍，
 退出码与 PASS/FAIL 对不上就拒绝。所以验证者报告里的命令必须是可重入的，
-且 `--evidence-cwd`（默认当前目录）要能跑通它们。确实无法重跑时用 `--no-replay`，
+在当前授权范围内且不会产生不允许的外部副作用；`--evidence-cwd`（默认当前目录）要能跑通它们。无法安全重跑时用 `--no-replay`，
 结果会被记为 NOT RUN。`docs` / `config` / `refactor` 类改动会**自动**跳过重放（同样记为
-NOT RUN）——不必为文档类改动硬凑可重放的命令。
+NOT RUN）——不必为文档类改动硬凑可重放的命令。重放后闸门再次检查 HEAD 与工作区；若改变或无法核实则升级，重新验证。
 
 `--diff-files` 的 `@` 前缀**不可省**：裸路径会被当成"单个改动文件"，拒绝列表与范围两个闸门同时失效。
 
@@ -257,10 +267,13 @@ NOT RUN）——不必为文档类改动硬凑可重放的命令。
 ```bash
 node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝对路径> \
   --item <item-id> --outcome <outcome> --attempts <n> --files <n> \
-  --last-run "$(date +%F)" --next "<下一个 item>"
+  --run-id <run-id> --last-run "$(date +%F)" --next "<下一个 item>"
 ```
 
 `--attempts` 取第 3 步 `ledger-check --item` 输出的 `item attempts`（本轮结束时的值）。
+已经领取时必须传领取时的 `--run-id`；没有领取就退出的 `no-op` / `report-only` 不传此参数。
+`fix-proposed` 保留锁与活动项，供独立会话完成验证后恢复；其他结果写入成功后也先保留锁，待下方队列交接完成再释放。锁不可读或持有者不符时停止，交人检查。
+`--claim` / `--release` 是独立模式，不能与 outcome 写参数或 `--dry-run` 混用；终态写入后必须释放再开始下一轮。
 
 它先备份、再写临时文件、最后 rename；任一步失败会把已替换的文件恢复（exit 2，两个文件都回到写入前——修好原因后重跑同一条命令，不要手工补写）。
 `--outcome` 取 `no-op | report-only | fix-proposed | verified | escalated`。
@@ -268,11 +281,18 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 
 然后：
 
-1. 按结果手工更新 `STATE.md`：`verified` 但尚未合并时，将该项从 High Priority 移到 Human Inbox，注明等待人工合并、分支、审过的 SHA 与证据位置，**不要标记工作已完成**；`escalated` 同样移入 Human Inbox 并记原因。只有完成标准满足且所需合并实际完成，才勾选或移除；未完成且未升级的项保留。脚本只动 `Active` 与 `Last run`。
+1. 按结果手工更新 `STATE.md`：`verified` 但尚未合并时，将该项从 High Priority 移到 Human Inbox，注明等待人工合并、分支、审过的 SHA 与证据位置，**不要标记工作已完成**；`escalated` 同样移入 Human Inbox 并记原因，然后将其 Active 行清空。只有完成标准满足且所需合并实际完成，才勾选或移除；未完成且未升级的项保留。脚本只动 `Active` 与 `Last run`。
 2. 有代码改动时更新 `feature_list.json`（状态 + 证据）
 3. 本轮若发生**返工**（修了又改、验证被拒），在 `LESSONS.md` 追加一行
 4. 处置 worktree：等待人工合并时保留 active worktree 和分支；拒绝或升级时用 `node .claude/skills/harness-loop/scripts/worktree.mjs mark --run-id <id> --status rejected|escalated --state <主检出绝对路径>`，实际合并后标记 `merged`。运行 `node .claude/skills/harness-loop/scripts/worktree.mjs cleanup --state <主检出绝对路径>` 时，只有能证明分支已并入 base 的终态才回收；未合并或无法证明的成果保留目录、分支与记录并返回 2。有未提交改动时也保留并返回 2，不使用 `--force`。
-5. 跑清洁交接检查：
+5. 已领取且本轮结果不是 `fix-proposed` 时，确认上述队列和现场交接均已完成，再由原持有者释放锁：
+
+   ```bash
+   node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝对路径> --release --item <item-id> --run-id <run-id>
+   ```
+
+   没有领取的轮次不释放；等待独立验证时不释放。释放失败时停止并交人检查。
+6. 跑清洁交接检查：
 
    ```bash
    node .claude/skills/harness-loop/scripts/clean-state.mjs --state <主检出绝对路径> --assert-fresh

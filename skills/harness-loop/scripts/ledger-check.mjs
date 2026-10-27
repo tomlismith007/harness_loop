@@ -156,9 +156,10 @@ export function checkLedger(ledger, opts = {}) {
   //
   // 切片后为空时显式报 no-pattern-records，而不是回落到"没有记录所以一切正常"：
   // "这个循环还没跑过"与"账本里根本没有它的记录"必须可区分。
-  const attempts = opts.pattern
+  const patternAttempts = opts.pattern
     ? all.filter((a) => a.pattern === opts.pattern || a.item === opts.pattern)
     : all;
+  const attempts = opts.item ? patternAttempts.filter((a) => a.item === opts.item) : patternAttempts;
 
   // 尝试上限：数**这个 item** 的尝试，来源是账本而不是命令行参数。
   // 此前这条判定在 gate-check 里读 `--attempts`，调用方写 0 就能在账本已有
@@ -186,7 +187,7 @@ export function checkLedger(ledger, opts = {}) {
       };
     }
   }
-  if (opts.pattern && all.length && attempts.length === 0) {
+  if (opts.pattern && all.length && patternAttempts.length === 0) {
     return {
       ...unreadableLedger(`账本有 ${all.length} 条记录，但没有一条属于 pattern '${opts.pattern}'`,
         { maxIterations, stagnationThreshold, noProgressThreshold, tokenBudget }),
@@ -199,7 +200,7 @@ export function checkLedger(ledger, opts = {}) {
   // 但旧实现不看 goal，于是一个刚装配的项目和一个跑过 2 次尝试的项目
   // 在熔断器眼里只差"有没有记录"，示例数据会被当成真实历史。
   const goal = typeof ledger.goal === 'string' ? ledger.goal : '';
-  if (attempts.length && /^\s*(example\b|replace with)/i.test(goal)) {
+  if (all.length && /^\s*(example\b|replace with)/i.test(goal)) {
     return {
       iterations: attempts.length,
       consecutive_failures: 0,
@@ -220,7 +221,20 @@ export function checkLedger(ledger, opts = {}) {
   }
 
   const iterations = attempts.length;
-  const tokensUsed = attempts.reduce((sum, a) => sum + (Number(a.tokensUsed) || 0), 0);
+  let tokensUsed = all.reduce((sum, a) => sum + (Number(a.tokensUsed) || 0), 0);
+  if (tokenBudget !== null && tokenBudget > 0) {
+    const unknown = all.find((a) => (Number(a.tokensUsed) || 0) !== 0 && (!a.at || !Number.isFinite(Date.parse(a.at))));
+    if (unknown) {
+      return unreadableLedger('有 token 用量的记录缺少有效时间，无法计算日预算',
+        { maxIterations, stagnationThreshold, noProgressThreshold, tokenBudget });
+    }
+    const today = new Date().toDateString();
+    tokensUsed = all.reduce((sum, a) => {
+      const date = new Date(a.at);
+      return Number.isFinite(date.getTime()) && date.toDateString() === today
+        ? sum + (Number(a.tokensUsed) || 0) : sum;
+    }, 0);
+  }
 
   // 连续失败。
   //
@@ -254,8 +268,7 @@ export function checkLedger(ledger, opts = {}) {
     consecutive_failures: consecutiveFailures,
     tokens_used: tokensUsed,
     last_error_signature: lastSignature || null,
-    // 本 item 的尝试数。`iterations` 是**整本账**的条数，把它当尝试次数会让
-    // 一个跑过 2 次的 item 看起来已经用完 3 次上限。
+    // 本 item 的尝试上限始终统计整本账，不受 pattern 过滤影响。
     ...(opts.item ? { item_attempts: all.filter((a) => a.item === opts.item).length } : {}),
     thresholds: {
       max_iterations: maxIterations,

@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint } from './lib/common.mjs';
 import { localToday } from './clean-state.mjs';
+import { activeItems } from './gate-check.mjs';
 
 export const OUTCOMES = ['no-op', 'report-only', 'fix-proposed', 'verified', 'escalated'];
 export const BACKUP_DIR = '.harness-loop-backup/state';
@@ -46,9 +47,8 @@ export function setActive(text, item, outcome) {
   // 保留表头与分隔行，替换其余表格行。
   const tableRows = [];
   for (let i = sepIdx + 1; i < lines.length && lines[i].trim().startsWith('|'); i++) tableRows.push(i);
-  const newRow = outcome === 'escalated'
-    ? `| ${item} | — | escalated（等人工） |`
-    : '| — | — | — |';
+  const status = outcome === 'claimed' ? 'active' : outcome === 'fix-proposed' ? '等待独立验证' : outcome === 'escalated' ? 'escalated（等人工）' : null;
+  const newRow = status ? `| ${item} | — | ${status} |` : '| — | — | — |';
   if (tableRows.length) {
     lines.splice(tableRows[0], tableRows.length, newRow);
   } else {
@@ -93,15 +93,23 @@ function atomicWrite(file, content) {
 function main() {
   const args = parseArgs();
   rejectUnknownFlags(args, ['state', 'item', 'outcome', 'attempts', 'files', 'duration',
-    'lastRun', 'next', 'dryRun', 'json', 'help'], 'state-commit');
+    'lastRun', 'next', 'dryRun', 'json', 'help', 'claim', 'release', 'runId'], 'state-commit');
   if (args.help) {
     process.stdout.write(`state-commit — update STATE.md + loop-run-log.md atomically
 
 Usage:
+  node scripts/state-commit.mjs --state <dir> --claim --item <id> --run-id <run-id>
+  node scripts/state-commit.mjs --state <dir> --release --item <id> --run-id <run-id>
   node scripts/state-commit.mjs --state <dir> --item <id> --outcome <outcome> \\
-    [--attempts N] [--files N] [--duration S] [--last-run YYYY-MM-DD] [--next TEXT] [--dry-run]
+    [--run-id <run-id>] [--attempts N] [--files N] [--duration S] [--last-run YYYY-MM-DD] [--next TEXT] [--dry-run]
 
 Outcomes: ${OUTCOMES.join(' | ')}
+
+Claim creates an exclusive persistent active lock. The same item and run ID must
+record a terminal outcome and explicitly release it after the queue handoff;
+fix-proposed retains the lock while awaiting independent verification.
+no-op and report-only may be recorded without a lock only when Active is empty.
+An incomplete lock requires human inspection; do not remove it automatically.
 
 Both files are written to temp files first, then renamed. On failure the already
 replaced files are restored from .harness-loop-backup/state/<timestamp>/.
@@ -113,8 +121,74 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
 
   const root = path.resolve(typeof args.state === 'string' ? args.state : '.');
   if (typeof args.item !== 'string' || !args.item.trim()) fail('--item is required', 1);
+  if (/[|\r\n]/.test(args.item)) fail('--item cannot contain table separators or newlines', 1);
+
+  const outcomeFlags = ['outcome', 'attempts', 'files', 'duration', 'lastRun', 'next'];
+  if (args.claim && args.release) fail('--claim and --release are mutually exclusive', 1);
+  if ((args.claim || args.release) && args.dryRun) fail('--dry-run cannot be combined with --claim or --release', 1);
+  if ((args.claim || args.release) && outcomeFlags.some((flag) => args[flag] !== undefined)) {
+    fail('--claim/--release cannot be combined with outcome-writing flags', 1);
+  }
+
+  const statePath = path.join(root, 'STATE.md');
+  const lockDir = path.join(root, '.harness-loop-active');
+  const ownerFile = path.join(lockDir, 'owner.json');
+  if (!fs.existsSync(statePath)) fail(`STATE.md not found in ${root}`, 1);
+  if (args.claim) {
+    if (typeof args.runId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(args.runId) || args.runId === '.' || args.runId === '..') {
+      fail('--claim requires a safe --run-id', 1);
+    }
+    try { fs.mkdirSync(lockDir); } catch (e) { fail(`cannot claim active item: ${e.message}`, 2); }
+    try {
+      const state = readText(statePath);
+      const active = activeItems(state);
+      if (active.malformed || active.count === null || active.count > 0) {
+        fs.rmdirSync(lockDir);
+        fail('cannot claim: STATE.md Active is missing, malformed, or already occupied', 2);
+      }
+      fs.writeFileSync(ownerFile, JSON.stringify({ item: args.item, runId: args.runId }) + '\n', { flag: 'wx' });
+      atomicWrite(statePath, setActive(state, args.item, 'claimed'));
+    } catch (e) { fail(`claim failed; inspect ${lockDir} before recovery: ${e.message}`, 2); }
+    process.stdout.write(`claimed ${args.item} for ${args.runId}\n`);
+    return;
+  }
+  let locked = false;
+  let owner;
+  if (fs.existsSync(lockDir)) {
+    try {
+      owner = JSON.parse(readText(ownerFile));
+      if (!owner || typeof owner !== 'object' || Array.isArray(owner)
+        || typeof owner.item !== 'string' || !owner.item.trim()
+        || /[|\r\n]/.test(owner.item)
+        || typeof owner.runId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(owner.runId)
+        || owner.runId === '.' || owner.runId === '..'
+        || (owner.outcome !== undefined && !OUTCOMES.includes(owner.outcome))) {
+        throw new Error('invalid owner schema');
+      }
+    } catch { fail(`active lock is unreadable or malformed: ${lockDir}`, 2); }
+    if (owner.item !== args.item || !args.runId || owner.runId !== args.runId) fail('active lock belongs to a different item or run', 2);
+    locked = true;
+  } else if (args.runId !== undefined) {
+    fail('no active claim for --run-id', 2);
+  }
+  if (args.release) {
+    if (!locked || !owner.outcome || owner.outcome === 'fix-proposed') fail('active claim has no recorded terminal outcome', 2);
+    let entries;
+    try { entries = fs.readdirSync(lockDir); }
+    catch (e) { fail(`active lock could not be inspected: ${e.message}`, 2); }
+    if (entries.length !== 1 || entries[0] !== 'owner.json') {
+      fail(`active lock contains additional evidence; inspect before releasing: ${lockDir}`, 2);
+    }
+    try { fs.unlinkSync(ownerFile); fs.rmdirSync(lockDir); }
+    catch (e) { fail(`active lock could not be released: ${e.message}`, 2); }
+    process.stdout.write(`released ${args.item} for ${args.runId}\n`);
+    return;
+  }
   if (!OUTCOMES.includes(args.outcome)) {
     fail(`--outcome must be one of: ${OUTCOMES.join(', ')} (got: ${args.outcome})`, 1);
+  }
+  if (locked && owner.outcome && !args.dryRun) {
+    fail(`active claim already recorded terminal outcome '${owner.outcome}'; release it before another round`, 2);
   }
   const num = (v, flag, fallback) => {
     if (v === undefined) return fallback;
@@ -127,10 +201,17 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
   const duration = num(args.duration, '--duration', 0);
   const lastRun = typeof args.lastRun === 'string' ? args.lastRun : localToday();
   if (!/^\d{4}-\d{2}-\d{2}/.test(lastRun)) fail(`--last-run must be a date (got: ${lastRun})`, 1);
+  if (!locked && !args.dryRun && !['no-op', 'report-only'].includes(args.outcome)) {
+    fail('--outcome requires an active claim except no-op/report-only', 2);
+  }
+  if (!locked && !args.dryRun) {
+    const active = activeItems(readText(statePath));
+    if (active.malformed || active.count === null || active.count > 0) {
+      fail('unclaimed no-op/report-only requires an empty, well-formed Active table', 2);
+    }
+  }
 
-  const statePath = path.join(root, 'STATE.md');
   const logPath = path.join(root, 'loop-run-log.md');
-  if (!fs.existsSync(statePath)) fail(`STATE.md not found in ${root}`, 1);
   if (!fs.existsSync(logPath)) fail(`loop-run-log.md not found in ${root} (stage 2 produces it)`, 1);
 
   let nextState;
@@ -141,7 +222,7 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
   }
   const logText = readText(logPath);
   const nextLog = `${logText}${logText.endsWith('\n') || !logText ? '' : '\n'}${runLogEntry({
-    item: args.item, outcome: args.outcome, attempts, files, duration, next: args.next,
+    item: args.item, runId: args.runId, outcome: args.outcome, attempts, files, duration, next: args.next,
   })}\n`;
 
   if (args.dryRun) {
@@ -182,6 +263,11 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
     }
     const detail = rollbackErrors.length ? `; rollback failed: ${rollbackErrors.join('; ')}` : '; rolled back';
     fail(`state write failed: ${e.message}${detail}`, 2);
+  }
+
+  if (locked && args.outcome !== 'fix-proposed') {
+    try { atomicWrite(ownerFile, JSON.stringify({ ...owner, outcome: args.outcome }) + '\n'); }
+    catch (e) { fail(`state written but active lock could not be finalized: ${e.message}`, 2); }
   }
 
   if (args.json) printJson({ written: [statePath, logPath], backup });

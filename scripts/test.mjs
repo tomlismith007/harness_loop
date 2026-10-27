@@ -15,7 +15,7 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 
 import {
   parseArgs, boolArg, matchesDenylist, loadDenylist, parseDenylistFrom,
@@ -343,8 +343,21 @@ section('4. 熔断器判定');
     iteration: i + 1, item: 'x', action: 'a', outcome: i % 2 === 0 ? 'success' : 'failure', error: 'E' + i, tokensUsed: 10, at: 'x',
   }));
   eq('10 次迭代 → max-iterations', checkLedger({ attempts: many }).verdict, 'max-iterations');
-  eq('超 token 预算', checkLedger({ attempts: mk(2, 'failure', 'E1') }, { tokenBudget: 100 }).verdict, 'token-budget');
+  eq('超 token 预算', checkLedger({ attempts: mk(2, 'failure', 'E1').map((a) => ({ ...a, at: new Date().toISOString() })) }, { tokenBudget: 100 }).verdict, 'token-budget');
   eq('自定义 stagnation=2', checkLedger({ attempts: mk(2, 'failure', 'E1') }, { stagnationThreshold: 2 }).verdict, 'stagnation');
+
+  // 实际 loop 传 --item；已完成的其他 item 不应耗尽新 item 的迭代窗口。
+  const previous = Array.from({ length: 10 }, (_, i) => ({ item: `done-${i}`, outcome: 'success', tokensUsed: 0, at: '2020-01-01T12:00:00Z' }));
+  eq('新 item 不继承其他成功项的迭代上限', checkLedger({ goal: 'real', attempts: previous }, { item: 'new' }).verdict, 'ok');
+  eq('新 item 的迭代数为零', checkLedger({ goal: 'real', attempts: previous }, { item: 'new' }).iterations, 0);
+  const budgetHistory = [
+    { item: 'old', outcome: 'success', tokensUsed: 100, at: '2020-01-01T12:00:00Z' },
+    { item: 'other', outcome: 'success', tokensUsed: 85, at: new Date().toISOString() },
+  ];
+  const todayBudget = checkLedger({ goal: 'real', attempts: budgetHistory }, { item: 'new', tokenBudget: 100 });
+  eq('日预算不统计历史日期但统计其他 item', todayBudget.tokens_used, 85);
+  eq('当日预算达到 85% 降级', todayBudget.verdict, 'report-only');
+  eq('日预算存在无日期花费时停止', checkLedger({ goal: 'real', attempts: [{ item: 'other', outcome: 'success', tokensUsed: 1 }] }, { item: 'new', tokenBudget: 100 }).exit_code, 2);
 }
 
 // CLI 层：拼错的阈值必须 fail-closed（NaN 会让所有比较恒为 false）
@@ -607,13 +620,13 @@ section('5. 闸门判定');
         return p;
       })() }).decision, 'escalate');
 
-    // 轻量档：docs/config/refactor 不要求 sha 绑定、不重放证据命令，
-    // 但跳过的项必须出现在 checks_not_run 里——省略比跳过更糟。
+    // 非行为类仍绑定审查 SHA，但不重放证据命令。
     const quick = checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['README.md'],
       verdict: 'approve', redCheck: 'not-run', changeClass: 'docs',
+      reviewedSha: 'a'.repeat(40), headSha: 'a'.repeat(40),
       evidenceFile: docsReport('本次只修改了文档与注释，没有新增任何测试，因此无需回退验证') });
-    eq('docs 类无需 sha 绑定 → proceed', quick.decision, 'proceed');
-    ok('跳过的 sha 绑定记为 NOT RUN', quick.checks_not_run.includes('Head commit binding'), JSON.stringify(quick.checks_not_run));
+    eq('docs 类绑定 sha → proceed', quick.decision, 'proceed');
+    ok('sha 绑定已执行', !quick.checks_not_run.includes('Head commit binding'), JSON.stringify(quick.checks_not_run));
     ok('跳过的重放记为 NOT RUN', quick.checks_not_run.includes('Evidence replay'), JSON.stringify(quick.checks_not_run));
     // 但"没输出片段"仍然拦：跳过的是重放，不是防伪造。
     const quickNoSnippet = path.join(evTmp, 'quick-no-snippet.md');
@@ -624,7 +637,8 @@ section('5. 闸门判定');
     ].join(String.fromCharCode(10)));
     eq('docs 类仍要求输出片段',
       checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['README.md'], verdict: 'approve',
-        redCheck: 'not-run', changeClass: 'docs', evidenceFile: quickNoSnippet }).gate, 'verification-evidence');
+        redCheck: 'not-run', changeClass: 'docs', reviewedSha: 'a'.repeat(40), headSha: 'a'.repeat(40),
+        evidenceFile: quickNoSnippet }).gate, 'verification-evidence');
     // behavior 类不享受轻量档
     eq('behavior 类仍要求 sha',
       checkGates({ item: 'p', phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve',
@@ -1987,8 +2001,76 @@ section('15c. 状态事务（R-25）');
 
   {
     const d = mk();
+    fs.writeFileSync(path.join(d, 'STATE.md'), readText(path.join(d, 'STATE.md')).replace('| old | 1 | active |', '| — | — | — |'));
+    const before = readText(path.join(d, 'STATE.md'));
+    eq('未领取时不能记录 verified 终态', runSC(['--state', d, '--item', 'first', '--outcome', 'verified']).code, 2);
+    eq('未领取拒绝写入', readText(path.join(d, 'STATE.md')), before);
+    eq('未领取的 report-only 仍可入账', runSC(['--state', d, '--item', 'preflight', '--outcome', 'report-only']).code, 0);
+    eq('派发前可独占登记活动项', runSC(['--state', d, '--claim', '--item', 'first', '--run-id', 'r1']).code, 0);
+    eq('另一轮无法占用活动项', runSC(['--state', d, '--claim', '--item', 'second', '--run-id', 'r2']).code, 2);
+    eq('非 owner 不能提交并释放占用', runSC(['--state', d, '--item', 'first', '--outcome', 'verified', '--run-id', 'r2']).code, 2);
+    eq('错误 item 不能释放占用', runSC(['--state', d, '--release', '--item', 'second', '--run-id', 'r1']).code, 2);
+    eq('错误 run ID 不能释放占用', runSC(['--state', d, '--release', '--item', 'first', '--run-id', 'r2']).code, 2);
+    eq('未记录终态时不能释放占用', runSC(['--state', d, '--release', '--item', 'first', '--run-id', 'r1']).code, 2);
+    eq('等待独立验证可写状态', runSC(['--state', d, '--item', 'first', '--outcome', 'fix-proposed', '--run-id', 'r1']).code, 0);
+    ok('等待验证仍保留活动项', readText(path.join(d, 'STATE.md')).includes('first'));
+    eq('等待验证时仍不能领取别项', runSC(['--state', d, '--claim', '--item', 'second', '--run-id', 'r2']).code, 2);
+    eq('等待独立验证时不能释放占用', runSC(['--state', d, '--release', '--item', 'first', '--run-id', 'r1']).code, 2);
+    eq('owner 可记录已验证状态', runSC(['--state', d, '--item', 'first', '--outcome', 'verified', '--run-id', 'r1']).code, 0);
+    eq('终态不能重复写入', runSC(['--state', d, '--item', 'first', '--outcome', 'verified', '--run-id', 'r1']).code, 2);
+    eq('人工队列交接前仍不能领取别项', runSC(['--state', d, '--claim', '--item', 'second', '--run-id', 'r2']).code, 2);
+    eq('owner 在交接后显式释放占用', runSC(['--state', d, '--release', '--item', 'first', '--run-id', 'r1']).code, 0);
+    eq('释放后新项可领取', runSC(['--state', d, '--claim', '--item', 'second', '--run-id', 'r2']).code, 0);
+    rmrf(d);
+  }
+
+  {
+    const d = mk();
+    fs.writeFileSync(path.join(d, 'STATE.md'), readText(path.join(d, 'STATE.md')).replace('| old | 1 | active |', '| — | — | — |'));
+    const claim = (item, id) => new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [skillScript('state-commit.mjs'), '--state', d, '--claim', '--item', item, '--run-id', id], { stdio: 'ignore' });
+      child.once('error', reject);
+      child.once('exit', resolve);
+    });
+    const results = await Promise.all([claim('first', 'r1'), claim('second', 'r2')]);
+    eq('两个进程竞争只能有一个领取', results.sort((a, b) => a - b).join(','), '0,2');
+    rmrf(d);
+    const stale = mk();
+    fs.writeFileSync(path.join(stale, 'STATE.md'), readText(path.join(stale, 'STATE.md')).replace('| old | 1 | active |', '| — | — | — |'));
+    fs.mkdirSync(path.join(stale, '.harness-loop-active'));
+    eq('中断留下不完整锁时不能自动领取', runSC(['--state', stale, '--claim', '--item', 'new', '--run-id', 'r3']).code, 2);
+    eq('中断留下不完整锁时不能释放', runSC(['--state', stale, '--release', '--item', 'new', '--run-id', 'r3']).code, 2);
+    eq('中断现场不能被 report-only 清空', runSC(['--state', stale, '--item', 'new', '--outcome', 'report-only']).code, 2);
+    rmrf(stale);
+
+    const extra = mk();
+    fs.writeFileSync(path.join(extra, 'STATE.md'), readText(path.join(extra, 'STATE.md')).replace('| old | 1 | active |', '| — | — | — |'));
+    runSC(['--state', extra, '--claim', '--item', 'first', '--run-id', 'r1']);
+    runSC(['--state', extra, '--item', 'first', '--outcome', 'verified', '--run-id', 'r1']);
+    fs.writeFileSync(path.join(extra, '.harness-loop-active', 'unexpected.txt'), 'inspect me');
+    eq('锁目录有额外现场时不能自动释放', runSC(['--state', extra, '--release', '--item', 'first', '--run-id', 'r1']).code, 2);
+    ok('拒绝释放时保留 owner',
+      fs.existsSync(path.join(extra, '.harness-loop-active', 'owner.json')));
+    ok('拒绝释放时保留额外现场',
+      fs.existsSync(path.join(extra, '.harness-loop-active', 'unexpected.txt')));
+    rmrf(extra);
+
+    const modes = mk();
+    eq('claim 与 release 不能同时使用',
+      runSC(['--state', modes, '--claim', '--release', '--item', 'first', '--run-id', 'r1']).code, 1);
+    eq('claim 不接受 dry-run',
+      runSC(['--state', modes, '--claim', '--dry-run', '--item', 'first', '--run-id', 'r1']).code, 1);
+    eq('release 不接受 dry-run',
+      runSC(['--state', modes, '--release', '--dry-run', '--item', 'first', '--run-id', 'r1']).code, 1);
+    rmrf(modes);
+  }
+
+  {
+    const d = mk();
+    fs.writeFileSync(path.join(d, 'STATE.md'), readText(path.join(d, 'STATE.md')).replace('| old | 1 | active |', '| — | — | — |'));
+    eq('写入测试 fixture 可领取', runSC(['--state', d, '--claim', '--item', 't1', '--run-id', 'r1']).code, 0);
     eq('正常写入 → 0', runSC(['--state', d, '--item', 't1', '--outcome', 'verified',
-      '--attempts', '1', '--files', '2', '--last-run', '2026-10-21']).code, 0);
+      '--run-id', 'r1', '--attempts', '1', '--files', '2', '--last-run', '2026-10-21']).code, 0);
     const state = readText(path.join(d, 'STATE.md'));
     const log = readText(path.join(d, 'loop-run-log.md'));
     ok('Last run 被替换', /Last run: 2026-10-21/.test(state), state.split(NL)[2]);
@@ -2001,7 +2083,10 @@ section('15c. 状态事务（R-25）');
 
   {
     const d = mk();
-    const r = runSC(['--state', d, '--item', 't1', '--outcome', 'verified', '--last-run', '2026-10-21'], { STATE_COMMIT_FAIL_AFTER: '1' });
+    fs.writeFileSync(path.join(d, 'STATE.md'), readText(path.join(d, 'STATE.md')).replace('| old | 1 | active |', '| — | — | — |'));
+    eq('回滚测试 fixture 可领取', runSC(['--state', d, '--claim', '--item', 't1', '--run-id', 'r1']).code, 0);
+    const beforeClaim = readText(path.join(d, 'STATE.md'));
+    const r = runSC(['--state', d, '--item', 't1', '--outcome', 'verified', '--run-id', 'r1', '--last-run', '2026-10-21'], { STATE_COMMIT_FAIL_AFTER: '1' });
     eq('第二次写入失败 → 2', r.code, 2);
     ok('失败原因可见', /rolled back/.test(r.out), r.out);
     eq('第一个文件被回滚', readText(path.join(d, 'STATE.md')).includes('Last run: 2026-01-01'), true);
@@ -2013,7 +2098,7 @@ section('15c. 状态事务（R-25）');
     const d = mk();
     fs.writeFileSync(path.join(d, 'STATE.md'), ['# S', '', '## Active', '', '| a | b |', ''].join(NL));
     eq('Active 表结构损坏 → 参数错误 1',
-      runSC(['--state', d, '--item', 't1', '--outcome', 'verified']).code, 1);
+      runSC(['--state', d, '--item', 't1', '--outcome', 'report-only', '--dry-run']).code, 1);
     rmrf(d);
   }
 
@@ -2250,6 +2335,14 @@ section('17. 升级回归（批次 2）');
   // U-03：证据里的命令必须被真的重放，退出码不符即拒。
   {
     const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-replay-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: t });
+    execFileSync('git', ['config', 'user.email', 'test@example.org'], { cwd: t });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: t });
+    fs.writeFileSync(path.join(t, 'seed.txt'), 'seed');
+    execFileSync('git', ['add', 'seed.txt'], { cwd: t });
+    execFileSync('git', ['commit', '-qm', 'seed'], { cwd: t });
+    fs.writeFileSync(path.join(t, '.git', 'info', 'exclude'), '*.md\nsub/\n');
+    const SHA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: t, encoding: 'utf8' }).trim();
     fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
     fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
     const base = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
@@ -2494,7 +2587,7 @@ section('17. 升级回归（批次 2）');
     fs.writeFileSync(path.join(t, 'loop-constraints.md'),
       '## Paths\n\n```\n.env\n```\n\n## Budget\n\n- 日 token 上限：100\n');
     const ledger = (tokens) => JSON.stringify({
-      goal: 'g', attempts: [{ iteration: 1, action: 'a', outcome: 'success', tokensUsed: tokens }],
+      goal: 'g', attempts: [{ iteration: 1, action: 'a', outcome: 'success', tokensUsed: tokens, at: new Date().toISOString() }],
     });
     const runLedger = (tokens) => {
       fs.writeFileSync(path.join(t, 'l.json'), ledger(tokens));
@@ -2519,7 +2612,7 @@ section('17. 升级回归（批次 2）');
     // 迭代上限是硬停止，不能被预算降级盖住。
     const many = JSON.stringify({
       goal: 'g',
-      attempts: Array.from({ length: 10 }, (_, i) => ({ iteration: i + 1, action: 'a', outcome: 'success', tokensUsed: 9 })),
+      attempts: Array.from({ length: 10 }, (_, i) => ({ iteration: i + 1, action: 'a', outcome: 'success', tokensUsed: 9, at: new Date().toISOString() })),
     });
     fs.writeFileSync(path.join(t, 'l.json'), many);
     let capOut = '';
@@ -2966,6 +3059,16 @@ section('20. worktree manifest（U-13）');
     catch { return null; }
   };
 
+  {
+    const { dir, env } = mkRepo();
+    eq('无效基准无法创建 worktree', runWt(['create', '--run-id', 'bad-base', '--base', 'missing-base', '--state', dir], dir).code, 1);
+    ok('创建失败不新增主检出 .gitignore', !fs.existsSync(path.join(dir, '.gitignore')));
+    eq('正常创建 worktree', runWt(['create', '--run-id', 'local-ignore', '--state', dir], dir).code, 0);
+    ok('创建成功也不新增主检出 .gitignore', !fs.existsSync(path.join(dir, '.gitignore')));
+    eq('Git 本地忽略 worktree 目录', gitOut(['check-ignore', '.loop-worktrees/local-ignore/a.txt'], dir, env), '.loop-worktrees/local-ignore/a.txt');
+    rmrf(dir);
+  }
+
   for (const status of ['rejected', 'escalated']) {
     const { dir, env } = mkRepo();
     runWt(['create', '--run-id', status, '--state', dir], dir);
@@ -3290,6 +3393,49 @@ section('22. 单技能独立装配（P1-04）');
   }
 }
 // regression:installation:end
+
+section('23. 验证版本与重放后的工作区');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-review-gate-'));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'test@example.org');
+  git('config', 'user.name', 'Test');
+  fs.writeFileSync(path.join(dir, 'STATE.md'), '# State\n');
+  fs.writeFileSync(path.join(dir, 'tracked.txt'), 'before\n');
+  git('add', 'STATE.md', 'tracked.txt');
+  git('commit', '-qm', 'initial');
+  const sha = git('rev-parse', 'HEAD');
+  const wrong = sha === 'a'.repeat(40) ? 'b'.repeat(40) : 'a'.repeat(40);
+  const file = path.join(dir, 'verifier-report.md');
+  const report = (cls, reviewed, command, reason = '- —') => [
+    '## Verdict: APPROVE', 'Author: reviewer', `Reviewed commit: ${reviewed}`,
+    `Change class confirmed: ${cls}`, '', '### Evidence',
+    `- Tests: \`${command}\` → PASS`, '  ```', '  output', '  ```', '',
+    '### Checks not run', reason, '',
+  ].join('\n');
+  fs.writeFileSync(file, report('docs', sha, 'node -e "process.exit(0)"', '- Red check — 本次只修改了文档与注释，没有新增测试，因此无需回退验证'));
+  const doc = checkGates({ item: 'p', phase: 'gate', verdict: 'approve', changeClass: 'docs',
+    redCheck: 'not-run', reviewedSha: sha, headSha: wrong, implementer: 'impl', evidenceFile: file, noReplay: true });
+  eq('文档改动的 HEAD 变化也拒绝', doc.gate, 'head-commit');
+  const run = (reviewed, head, extra = []) => {
+    try {
+      const out = execFileSync(process.execPath, [skillScript('gate-check.mjs'), '--item', 'p', '--phase', 'gate',
+        '--verdict', 'approve', '--red-check', 'pass', '--reviewed-sha', reviewed, '--head-sha', head,
+        '--diff-files', 'a.ts', '--implementer', 'impl', '--state', dir, '--evidence-file', file, '--json', ...extra],
+      { cwd: dir, encoding: 'utf8' });
+      return { code: 0, out };
+    } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
+  };
+  fs.writeFileSync(file, report('behavior', sha, 'node -e "require(\'fs\').writeFileSync(\'tracked.txt\',\'changed\')"'));
+  const replay = run(sha, sha);
+  eq('重放修改已跟踪文件后不得放行', replay.code, 2);
+  eq('重放确实执行并修改文件', readText(path.join(dir, 'tracked.txt')), 'changed');
+  git('checkout', '--', 'tracked.txt');
+  fs.writeFileSync(file, report('behavior', wrong, 'node -e "process.exit(0)"'));
+  eq('显式 head 不能冒充 Git 中的实际 HEAD', run(wrong, wrong, ['--no-replay']).code, 2);
+  rmrf(dir);
+}
 // ---------------------------------------------------------------- 汇总
 
 // 断言数不进文档。

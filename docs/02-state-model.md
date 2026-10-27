@@ -22,6 +22,9 @@
 `LESSONS.md` 只在返工时写。
 
 `## Active` 表同时只能有一行非占位数据——`gate-check` 会读它，多于一行直接升级（WIP=1）。
+真正防止并发覆盖的是 `state-commit.mjs --claim` 创建的 `.harness-loop-active/owner.json`：只有同一
+item 与 run ID 能写终态，终态仍保留锁，直到队列交接完成再由原持有者 `--release`。锁不完整或持有者
+不符时停止交人检查，不能自动删除。
 
 ---
 
@@ -188,10 +191,12 @@
 
 | 触发类型 | 默认阈值 | 含义 |
 |---|---|---|
-| `stagnation` | 3 × 同一错误 | 错误签名相同出现 3 次 |
-| `no-progress` | 5 次连续失败 | 连续失败无成功 |
-| `token-budget` | 显式传入 `--token-budget`，或从 `loop-constraints.md` 的 `## Budget` 读取 | 超预算；≥80% 降级为 `report-only` |
-| `max-iterations` | 10 | 总迭代数上限 |
+| `stagnation` | 3 × 同一错误 | 传 `--item` 时，同一错误签名在该 item 出现 3 次 |
+| `no-progress` | 5 次连续失败 | 传 `--item` 时，该 item 连续失败 5 次 |
+| `token-budget` | 显式传入 `--token-budget`，或从 `loop-constraints.md` 的 `## Budget` 读取 | 统计所有 item 的本地当天花费；≥80% 降级为 `report-only`，超限停止 |
+| `max-iterations` | 10 | 传 `--item` 时，该 item 的迭代数上限 |
+
+启用日预算后，有非零花费但缺有效 `at` 的记录会让检查 fail closed；跨日历史保留，但不再计入当天预算。
 
 **错误签名归一化**：抹掉 ISO 时间戳、十六进制地址、路径（折叠为 basename）、行列号、位置/时长类数字。退出码、HTTP 状态码、断言期望值等裸数字**保留**——否则根因不同的失败会被误判为同一错误。细节见 `docs/05-failure-modes.md` 第六节。
 
@@ -212,7 +217,7 @@
 |---|---|
 | `Last run` | 头部时间戳，用于检测状态腐化与循环活动 |
 | `## High Priority` | 循环正在处理，或正在等人 |
-| `## Active` | 当前 work item 表（含 `acting_on` 锁） |
+| `## Active` | 当前 work item 与状态；独占锁在 `.harness-loop-active/owner.json`，由 `state-commit` 管理 |
 | `## Watch List` | 监控中，暂不行动 |
 | `## Human Inbox` | 模糊/跨循环条目，归集给人 |
 | `## Recent Noise` | 本轮看过但不值得行动的 |

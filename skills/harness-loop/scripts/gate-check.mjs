@@ -313,11 +313,8 @@ export function checkGates(input, opts = {}) {
   // 5. TOCTOU：合并必须绑定审查过的 commit
   // 审查期间若有人又 push，head 变了，合并必须失败——否则未审查的代码会进 main。
   // 缺 sha 也要拦：这条是唯一绝不能跳的闸，"参数不全就绕过"等于没有闸。
-  // 非行为类改动（docs/config/refactor）不要求 sha 绑定：它们的风险面是
-  // "文档说错了"，不是"审查后代码又变了"。跳过必须显式记进 checks_not_run，
-  // 否则"没做"会消失——那正是 NOT RUN 规则要防的省略。
-  const skipSha = phase === 'gate' && changeClass !== 'behavior';
-  if (phase === 'gate' && !skipSha) {
+  // 所有改动都必须绑定验证者审过的提交；类型只影响回退测试。
+  if (phase === 'gate') {
     if (!reviewedSha || !headSha) {
       return {
         ...base,
@@ -709,7 +706,6 @@ export function checkGates(input, opts = {}) {
   // 是 loop-constraints.md 的三态约定，输出是它的下游。
   const allNotRun = [...new Set([
     ...evidenceNotRun,
-    ...(skipSha ? ['Head commit binding'] : []),
     ...notRun,
   ])];
   return {
@@ -738,8 +734,7 @@ export function checkGates(input, opts = {}) {
  * 让脚本读 git，至少把"当前 HEAD 是什么"从断言变成事实。
  * 不在 git 仓库里就返回 null，由 head-commit 闸门升级（要求显式传参）。
  */
-function resolveHeadSha(args) {
-  if (typeof args.headSha === 'string') return args.headSha;
+function resolveHeadSha() {
   // 必须清掉继承来的 GIT_DIR / GIT_WORK_TREE。pre-commit hook 里跑时它们指向
   // 外层仓库，于是临时目录里的 `git rev-parse HEAD` 会解析到外层 HEAD，
   // "不在 git 仓库里"这一分支永远走不到。
@@ -939,9 +934,14 @@ Exit codes:
   }
   // gate 阶段拿不到 head 是调用环境的问题，不是"验证失败"：报参数错误，
   // 别让它伪装成一次正常升级。checkGates 自身仍把缺 sha 当 escalate。
-  const resolvedHead = resolveHeadSha(args);
+  const actualHead = resolveHeadSha();
+  const resolvedHead = actualHead || (typeof args.headSha === 'string' ? args.headSha : null);
   if (args.phase === 'gate' && !resolvedHead) {
     fail('--phase gate needs --head-sha, or a git repository to read HEAD from', 1);
+  }
+  if (args.phase === 'gate' && actualHead && typeof args.headSha === 'string' && args.headSha !== actualHead) {
+    printJson({ decision: 'escalate', gate: 'head-commit', reason: 'supplied --head-sha differs from actual HEAD', exit_code: 2 });
+    process.exit(2);
   }
 
   // 脏工作区只在 gate 阶段判：fix 阶段是派发前的预检，那时改动本来就还没提交。
@@ -988,7 +988,7 @@ Exit codes:
     stateText: activeFile ? activeFile.text : null,
     dirtyFiles: dirty,
     reviewedSha: typeof args.reviewedSha === 'string' ? args.reviewedSha : null,
-    headSha: resolveHeadSha(args),
+    headSha: resolvedHead,
     redCheck: enumArg(args.redCheck, RED_CHECKS, '--red-check') ?? 'not-run',
     changeClass: enumArg(args.changeClass, CHANGE_CLASSES, '--change-class') ?? 'behavior',
     implementer: typeof args.implementer === 'string' ? args.implementer : null,
@@ -1000,7 +1000,20 @@ Exit codes:
       : [],
   };
 
-  const result = checkGates(input, cfg);
+  let result = checkGates(input, cfg);
+  // 证据命令可能改变工作区或 HEAD；只检查重放之前的状态不能证明最终状态。
+  if (result.decision === 'proceed' && args.phase === 'gate' && input.changeClass === 'behavior' && !input.noReplay) {
+    const afterHead = resolveHeadSha();
+    const afterDirty = dirtyFiles(process.cwd());
+    const unexpected = afterDirty?.filter((f) => !LOOP_ARTIFACTS.includes(f));
+    if (!afterHead || !actualHead || afterHead !== actualHead || !afterDirty || unexpected.length) {
+      result = { ...result, decision: 'escalate', gate: afterHead !== actualHead ? 'head-commit' : 'dirty-tree',
+        reason: 'cannot verify clean reviewed HEAD after evidence replay, or replay changed it',
+        allowed_actions: ['inspect the evidence command and re-verify the reviewed commit'],
+        forbidden_actions: ['request merge on this gate result'],
+        next: 'inspect the replay effects and re-run independent verification before requesting a merge', exit_code: 2 };
+    }
+  }
 
   printJson(result);
   process.exit(result.exit_code);

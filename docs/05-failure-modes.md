@@ -189,8 +189,8 @@
 ```
 1. stagnation     — 同一错误签名出现 N 次（默认 3）
 2. no-progress    — 连续失败 M 次（默认 5）
-3. token-budget   — 超预算
-4. max-iterations — 总迭代上限（默认 10）
+3. token-budget   — 所有 item 的本地当天花费超预算
+4. max-iterations — 当前 item 的迭代上限（默认 10，传 `--item`）
 ```
 
 ### 错误签名归一化

@@ -136,7 +136,7 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 | `clean-state.mjs` | 结束前检查：init.sh 无占位、无调试残留、Last run 是今天 | 0 干净；2 有未清理项 |
 | `worktree.mjs` | 一次尝试一个 worktree：`create` / `mark` / `cleanup` / `list`；未合并提交与未提交改动都保留 | 0 成功；2 有条目未清理 |
 | `state-write.mjs` | 写入待办或按精确来源移除；第三方文本强制清洗 | 0 写入；1 参数或目标错误；2 自检失败 |
-| `state-commit.mjs` | 原子更新 `STATE.md` + `loop-run-log.md`（tmp → rename，失败回滚） | 0 写入；2 已回滚 |
+| `state-commit.mjs` | 独占领取 / 显式释放活动项，并原子更新 `STATE.md` + `loop-run-log.md`（tmp → rename，失败回滚） | 0 成功；1 参数或模式冲突；2 锁冲突、未授权写入或已回滚 |
 
 ### 根目录的维护者工具
 

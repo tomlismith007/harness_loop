@@ -83,13 +83,14 @@ function create(root, runId, base) {
     fail(`run id "${runId}" already has an active worktree at ${existing.path}`, 1);
   }
 
-  // 未忽略的 worktree 目录会让 `git status` 永远有噪音，也会被误提交。
-  // 缺就补一行——比让人每次手动处理更可靠，且是幂等的。
-  const ignore = path.join(root, '.gitignore');
+  // 运行设施是本地状态，不应改主检出的受版本控制文件。
+  // Git 的本地 exclude 同样适用于新建的 worktree，并保留已有规则。
+  const ignore = path.resolve(root, git(['rev-parse', '--git-path', 'info/exclude'], root));
   const ignoreText = fs.existsSync(ignore) ? fs.readFileSync(ignore, 'utf8') : '';
-  if (!new RegExp(`^${MANIFEST_DIR.replace('.', '\\.')}/?$`, 'm').test(ignoreText)) {
-    fs.writeFileSync(ignore, `${ignoreText}${ignoreText.endsWith('\n') || !ignoreText ? '' : '\n'}${MANIFEST_DIR}/\n`, 'utf8');
-    process.stdout.write(`added ${MANIFEST_DIR}/ to .gitignore\n`);
+  if (!/^\/?\.loop-worktrees\/?\s*$/m.test(ignoreText)) {
+    fs.mkdirSync(path.dirname(ignore), { recursive: true });
+    fs.writeFileSync(ignore, `${ignoreText}${ignoreText.endsWith('\n') || !ignoreText ? '' : '\n'}/${MANIFEST_DIR}/\n`, 'utf8');
+    process.stdout.write(`added /${MANIFEST_DIR}/ to Git local exclude\n`);
   }
 
   const rel = `${MANIFEST_DIR}/${runId}`;
