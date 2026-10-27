@@ -105,3 +105,32 @@
 - 当前技能资源必需、兄弟技能可选；新增 optionalMissing 结果标记，CLI 对未安装资源显示独立提示。同步装配脚本副本、阶段 1 正文及 README 安装说明。
 - 两种单技能隔离安装回归：旧代码 `Passed: 34 / Failed: 4`，修复后 `Passed: 38 / Failed: 0`。均验证地基文件、真实安装清单、占位 feature 拒绝、本地化后 require 成功和自身资源损坏拒绝。
 - 原始输出：`installation-red.log`、`installation-green.log`。P1-03 的提交全套测试为 `Passed: 825 / Failed: 0`。
+
+## 最终验收记录
+
+先提交规格 `0da09d7`，再逐项提交实现：
+
+| 编号 | 实现提交 | 结果 |
+|---|---|---|
+| P1-01 | `4fc36bc` | 重复清理保留未合并成果，实际合并后可回收 |
+| P1-02 | `013a1dd` | 主检出状态与默认策略绑定，两个交付副本一致 |
+| P1-03 | `0a74dc1` | 实际发现写入可直接进入后续闸门 |
+| P1-04 | `57fd37c` | 两个装配技能均能单独完成阶段 1，自身资源损坏仍拒绝 |
+
+- PASS：P1-04 提交的完整测试，以及结束前 `bash init.sh`，均为 `Passed: 864   Failed: 0`，退出 0。套件包含相对 import 自包含、同名脚本副本逐字节一致、技能命令目标存在检查。
+- PASS：四个技能运行 skill-creator 的 `quick_validate.py`，均返回 `Skill is valid!`；Windows 使用 `python -X utf8` 读取 UTF-8 技能文件。
+- PASS：`git diff --check`；所有实现已分别提交，无推送、无合并。
+- 原始验证日志：`C:/Users/tom/AppData/Local/Temp/harness-p1-fix-004270c51a264c988665dd50c3ce9c6c/`，包含 baseline / final init、四组红绿结果、技能校验及各提交的完整测试输出。
+
+### 独立实例的消费方前测
+
+证据目录：`C:/Users/tom/AppData/Local/Temp/harness-forward-afc11c71aa9f4dc98d169604fdf7e597/`，完整报告 `RESULTS.md`，逐命令参数、退出码及原始输出在 `commands.jsonl`。
+
+- PASS：只安装 harness-init，阶段 1 装配成功；占位 feature 被拒绝；本地化后启动与阶段 1 校验成功。
+- PASS：按需补装 loop-init / loop，未安装 GitHub 发现技能，阶段 2 机械判据通过。
+- PASS：真实临时 Git 项目完成 sum-empty 修复、实际回退测试、报告夹具闸门检查、模拟人工合并和交接清理；最终 init / 阶段校验 / clean-state 均退出 0，Git 干净，worktree 清单为空。
+- NOT RUN：真实独立验证者审批、真实人工合并（使用明确标注的模拟夹具）；真实 GitHub / 外部服务、Linux/macOS、线上完整多实例 loop。
+
+### 范围外观察（未修改）
+
+独立前测重现了已记录的 P2：init-only 成功报告仍打印该技能不能运行的阶段 2 入口。另外发现 gate 对较长围栏输出可能误报缺少片段；保留完整原报告和拒绝输出，改用技能要求的真实输出片段后，同一提交通过。两项均不属于本轮四项 P1，未扩展修复。
