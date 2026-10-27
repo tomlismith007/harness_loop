@@ -115,7 +115,7 @@ const SKILL_DEST_DIRS = [path.join('.claude', 'skills'), path.join('.agents', 's
  *   pack 仓库       <PACK_ROOT>/skills/<name>
  *   装好的技能      <宿主>/skills/<name>——此时 PACK_ROOT 就是某一个技能目录，
  *                   兄弟技能在它的上一层。
- * 从技能目录跑装配器是 SKILL.md 的首选路径，所以兄弟查找不是可选优化。
+ * 兄弟查找让完整包能一次装齐；只安装当前技能时，不要求其他技能存在。
  */
 function skillSourceDir(name) {
   const inPack = path.join(SKILLS_DIR, name);
@@ -141,15 +141,16 @@ function skillSourceDir(name) {
  */
 export function copySkillDir(name, target, force, results) {
   const src = skillSourceDir(name);
-  // 静默 return 会让「装配器不在 pack 布局里」报成功却一个技能都没装：
-  // 清单写 skills: []，用户以为好了。必须报错，由调用方汇总成非零退出。
+  // 当前技能必须完整；其他阶段与发现技能可单独安装，缺少时明确跳过。
   if (!src) {
+    const optionalMissing = name !== path.basename(PACK_ROOT);
     results.push({
-      status: 'error',
-      path: path.join(SKILLS_DIR, name),
-      reason: `找不到技能 ${name}。装配器需要同目录下的兄弟技能——`
-        + `只装了部分技能时，用 npx skills add <repo> --skill '*' 装齐；`
-        + `或在 pack 仓库里运行`,
+      status: optionalMissing ? 'skipped' : 'error',
+      optionalMissing,
+      path: path.join(path.dirname(PACK_ROOT), name),
+      reason: optionalMissing
+        ? `可选技能 ${name} 未安装；需要时用 npx skills add <repo> --skill ${name} 安装`
+        : `当前技能 ${name} 缺少 SKILL.md，请重新安装该技能`,
     });
     return;
   }

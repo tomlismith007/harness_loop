@@ -1579,8 +1579,7 @@ section('14. 两阶段驱动器');
     rmrf(one);
   }
 
-  // 回退测试：缺模板 / 缺技能目录时，旧实现退出 0 并打印 "SKIPPED (exists)"，
-  // 用户得到的是一个残缺项目。两条都必须非零退出。
+  // 缺本技能资源仍须报错；缺可选兄弟技能允许独立初始化，清单只记实际产物。
   {
     // (a) 从**已安装的技能目录**跑装配器：PACK_ROOT 落在技能里，兄弟技能在上一层。
     //     这是 SKILL.md 的首选路径（npx skills add 装全部 4 个）。
@@ -1606,8 +1605,7 @@ section('14. 两阶段驱动器');
         .skills.join(',') === 'harness-init,harness-loop,harness-loop-init,harness-loop-issue');
     rmrf(lone);
 
-    // (a2) 只装了部分技能：必须**报错**，不能报成功。
-    //      旧实现在这里退出 0 并写 skills: []——一个假的成功。
+    // (a2) P1-04：只装 harness-init 也能完成地基装配，不伪造其他技能已安装。
     const partial = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-partial-skill-'));
     fs.writeFileSync(path.join(partial, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'echo ok' } }));
     fs.mkdirSync(path.join(partial, '.claude', 'skills'), { recursive: true });
@@ -1620,8 +1618,11 @@ section('14. 两阶段驱动器');
             partial, '--upgrade', '--stage', '1'], { encoding: 'utf8' }) };
       } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
     })();
-    ok('只装了部分技能时装配器非零退出', rp.code !== 0);
-    ok('只装了部分技能时错误信息指出怎么修', /--skill '\*'/.test(rp.out));
+    eq('P1-04 只装 harness-init 时装配器退出 0', rp.code, 0);
+    for (const dot of ['.claude', '.agents']) {
+      const mf = JSON.parse(readText(path.join(partial, dot, 'skills', '.harness-loop-install.json')));
+      eq(`P1-04 ${dot} 清单只记录 harness-init`, mf.skills.join(','), 'harness-init');
+    }
     rmrf(partial);
 
     // (a3) 源即目标 + --force：从已安装的技能目录装配、target 就是该宿主时，
@@ -3199,6 +3200,49 @@ section('21. 主检出策略路由（P1-02）');
   rmrf(dir);
 }
 // regression:policy:end
+// regression:installation:start
+section('22. 单技能独立装配（P1-04）');
+{
+  for (const owner of ['harness-init', 'harness-loop-init']) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-single-init-'));
+    const source = path.join(dir, '.agents', 'skills', owner);
+    fs.cpSync(path.join(SKILLS_DIR, owner), source, { recursive: true });
+    const run = (args) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(source, 'scripts', 'harness-stage.mjs'), dir, ...args],
+          { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+      } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    };
+    const upgrade = ['--upgrade', '--stage', '1', '--commands', 'node --version'];
+    const result = run(upgrade);
+    eq(`P1-04 仅安装 ${owner} 时阶段 1 装配成功`, result.code, 0);
+    ok(`P1-04 ${owner} 明确说明跳过未安装兄弟技能`, /SKIPPED \(not installed\)/.test(result.out), result.out);
+    for (const f of [...STAGE1_FILES.map(([, out]) => out), 'init.sh']) {
+      ok(`P1-04 ${owner} 独立生成 ${f}`, fs.existsSync(path.join(dir, f)));
+    }
+    for (const dot of ['.claude', '.agents']) {
+      const mf = JSON.parse(readText(path.join(dir, dot, 'skills', '.harness-loop-install.json')));
+      eq(`P1-04 ${owner} ${dot} 清单只含真实安装技能`, mf.skills.join(','), owner);
+      ok(`P1-04 ${owner} ${dot} 自带装配脚本可用`, fs.existsSync(path.join(dir, dot, 'skills', owner, 'scripts', 'harness-stage.mjs')));
+    }
+    ok(`P1-04 ${owner} 不写阶段 2 账本`, !fs.existsSync(path.join(dir, 'loop-ledger.json')));
+    eq(`P1-04 ${owner} 占位 feature 仍被拒绝`, run(['--stage', '1', '--require']).code, 2);
+    writeRealFeatures(path.join(dir, 'feature_list.json'));
+    const required = run(['--stage', '1', '--require', '--json']);
+    eq(`P1-04 ${owner} 本地化后阶段 1 require 成功`, required.code, 0);
+    const report = JSON.parse(required.out);
+    ok(`P1-04 ${owner} 阶段 1 全部机械判据通过`, report.stages[0].checks.every((c) => c.ok === true));
+    fs.rmSync(path.join(source, 'templates', 'STATE.md'));
+    const missingTemplate = run([...upgrade, '--force']);
+    eq(`P1-04 ${owner} 缺本技能模板仍然失败`, missingTemplate.code, 1);
+    fs.copyFileSync(path.join(SKILLS_DIR, owner, 'templates', 'STATE.md'), path.join(source, 'templates', 'STATE.md'));
+    fs.rmSync(path.join(source, 'SKILL.md'));
+    eq(`P1-04 ${owner} 缺自身 SKILL.md 仍然失败`, run(upgrade).code, 1);
+    rmrf(dir);
+  }
+}
+// regression:installation:end
 // ---------------------------------------------------------------- 汇总
 
 // 断言数不进文档。

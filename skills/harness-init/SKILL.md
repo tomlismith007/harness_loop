@@ -63,8 +63,10 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --
 | `LESSONS.md` | 错题本 | 一般不用改 |
 | `verifier-report.md` | 验证者报告的格式模板（闸门按它校验 Author / sha / 输出片段） | 一般不用改 |
 
-同时把 4 个技能（`harness-init`、`harness-loop-init`、`harness-loop`、`harness-loop-issue`）
-装到 `.claude/skills/` 与 `.agents/skills/`。运行时脚本随技能目录安装，**不再复制到项目根**；
+同时把当前技能及源中已存在的兄弟技能装到 `.claude/skills/` 与 `.agents/skills/`。
+完整包布局可一次复制全部 4 个技能；只安装本技能也能独立完成阶段 1，缺少的兄弟技能明确显示
+`SKIPPED (not installed)`，需要阶段 2 或 GitHub 发现时再按需安装。当前技能自己的资源缺失仍会报错。
+运行时脚本随技能目录安装，**不再复制到项目根**；
 所有技能命令走 `.claude/skills/<name>/scripts/...`。
 已存在的文件与技能目录一律跳过（`SKIPPED (exists)`），不覆盖；要用出厂模板重置须显式加
 `--force`（先删再复制，整体替换）。

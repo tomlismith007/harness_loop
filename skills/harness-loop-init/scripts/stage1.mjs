@@ -217,7 +217,7 @@ export const STAGE1_FILES = [
   ['verifier-report.md', 'verifier-report.md'],
 ];
 
-/** 阶段 1 的技能：装齐四个，loop 技能在阶段 2 才被检查。 */
+/** 安装候选：复制当前技能及可找到的兄弟技能；loop 技能在阶段 2 才被检查。 */
 const STAGE1_SKILLS = ['harness-init', 'harness-loop-init', 'harness-loop', 'harness-loop-issue'];
 
 /**

@@ -76,6 +76,8 @@ node <clone>/skills/harness-init/scripts/harness-stage.mjs . --upgrade --stage 1
 ```
 
 装配技能（`harness-init` / `harness-loop-init`）自带 `scripts/` 与 `templates/`，所以装配器不需要再从别处找 pack。
+单独安装 `harness-init` 就能完成阶段 1。装配器复制当前技能和已有兄弟技能，缺少的兄弟技能按需安装；
+从完整包运行仍会复制全部四个技能。`harness-loop-issue` 保持可选。
 
 也可以从本仓库直接跑装配器（不复制进消费方）：
 

@@ -62,6 +62,7 @@
 
 - 装配器始终使用当前技能自带资源。缺少当前技能自身的 SKILL.md / 模板仍是错误。
 - 四个已知技能中，当前可找到的完整技能继续复制到两个宿主路径；未安装的兄弟技能明确记为 skipped 并说明按需安装，不当作初始化失败。
+- CLI 对未安装兄弟技能显示 `SKIPPED (not installed)`，与已有文件的 `SKIPPED (exists)` 区分；两份 harness-stage 的结果渲染同步修改。
 - 完整包布局继续安装四个技能；不自动联网安装、不为单技能捆绑其他技能的资源。
 - 两份 stage-core 保持一致；更新阶段 1 正文，说明完整包与单技能布局的差别，发现技能仍为可选。
 - 安装清单继续仅列磁盘实际存在的技能，保留 force / 源即目标 / 非空用户目录保护。
@@ -98,3 +99,9 @@
 - untrusted 分支调用现有包装函数；self-test 改为检查真实 buildLine 输出。未修改形状闸门或本地条目的输出。
 - 同一组发现写入回归：旧代码 `Passed: 26 / Failed: 5`，修复后 `Passed: 31 / Failed: 0`。真实 STATE 模板与 gate CLI 串联覆盖普通条目、换行 / 零宽字符 / 反引号 / 长文本，保留裸第三方条目拒绝测试。
 - 原始输出：`untrusted-red.log`、`untrusted-green.log`。P1-02 的提交全套测试为 `Passed: 812 / Failed: 0`。
+
+### P1-04
+
+- 当前技能资源必需、兄弟技能可选；新增 optionalMissing 结果标记，CLI 对未安装资源显示独立提示。同步装配脚本副本、阶段 1 正文及 README 安装说明。
+- 两种单技能隔离安装回归：旧代码 `Passed: 34 / Failed: 4`，修复后 `Passed: 38 / Failed: 0`。均验证地基文件、真实安装清单、占位 feature 拒绝、本地化后 require 成功和自身资源损坏拒绝。
+- 原始输出：`installation-red.log`、`installation-green.log`。P1-03 的提交全套测试为 `Passed: 825 / Failed: 0`。

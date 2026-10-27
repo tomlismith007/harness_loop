@@ -190,7 +190,8 @@ Exit codes:
     process.stdout.write(`  written: ${written}, skipped: ${results.length - written - errors.length}, errors: ${errors.length}\n\n`);
     const MARK = { written: 'WRITTEN', skipped: 'SKIPPED (exists)', error: 'ERROR' };
     for (const r of results) {
-      const line = `  ${MARK[r.status] || r.status}  ${path.relative(root, r.path).split(path.sep).join('/')}`;
+      const mark = r.optionalMissing ? 'SKIPPED (not installed)' : (MARK[r.status] || r.status);
+      const line = `  ${mark}  ${path.relative(root, r.path).split(path.sep).join('/')}`;
       process.stdout.write(`${line}${r.reason ? `  — ${r.reason}` : ''}\n`);
     }
     // error 不能被渲染成 SKIPPED：缺模板 / 缺技能目录时退出 0 等于报了一个假的成功。
