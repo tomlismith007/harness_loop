@@ -60,7 +60,7 @@ gh pr checks <number>   # 仅对 CI 红的 PR 查看检查结果
 
 | 类型 | 判定 | 处理 |
 |---|---|---|
-| **flake** | 间歇性；无代码改动重试通过 | 记录到 Watch，**不进入待办** |
+| **flake** | 间歇性；无代码改动重试通过 | 在最终报告的 Watch 中列出，**不写 STATE.md 待办** |
 | **regression** | 新失败与近期提交相关 | 可操作 |
 | **env** | runner、registry、secrets、配额、网络 | **升级给人，绝不用代码"修复"** |
 | **config** | workflow、依赖安装、缓存配置 | 通常需要人工判断 |
@@ -91,7 +91,7 @@ node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --secti
   --remove-origin "issue#456"
 ```
 
-脚本会：去不可见字符、折叠空白、截断 160 字符、包成 code span、行尾写
+脚本会：去不可见字符、折叠空白；第三方条目清洗后超过 160 字符则拒绝写入。缩短摘要并保留完整完成标准后重试。合格条目包成 code span、行尾写
 `<!-- src:untrusted origin=... -->`。`gate-check` 的 `untrusted-shape` 闸门会拒绝
 带标记却没有包成 code span 的条目。
 

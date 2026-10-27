@@ -176,6 +176,7 @@ export function runVerifierDrills(opts = {}) {
     '', '### Evidence',
     '- Tests: `node scripts/test.mjs` → PASS',
     ...(extra.snippet === false ? [] : ['  ```', '  Passed: 10  Failed: 0', '  ```']),
+    '- Red check: PASS — 回退后测试失败',
     '', '### Checks not run', '- —',
   ];
   const cases = [

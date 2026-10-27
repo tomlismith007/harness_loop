@@ -477,6 +477,14 @@ section('5. 闸门判定');
   // 直接调 checkGates 时用 noReplay，避免让格式测试去跑 `npm test`。
   const GATE = { phase: 'gate', attempts: 1, diffFiles: ['a.ts'], verdict: 'approve', redCheck: 'pass', reviewedSha: 'a'.repeat(40), headSha: 'a'.repeat(40), evidenceFile: EV, noReplay: true };
 
+  const missingRedReport = readText(EV).replace(/- Red check: `npm run red` → PASS\n  ```\n  before fix: 1 failing\n  ```/, '- Red check: NOT RUN — 未执行').replace('- —', '- Red check — 未执行');
+  const missingRedPath = path.join(evTmp, 'missing-red.md');
+  fs.writeFileSync(missingRedPath, missingRedReport);
+  eq('行为改动报告回退测试 NOT RUN 不能由参数 pass 覆盖',
+    checkGates({ item: 'p', ...GATE, evidenceFile: missingRedPath }).decision, 'escalate');
+  fs.writeFileSync(missingRedPath, missingRedReport.replace('- Red check: NOT RUN — 未执行\n', '').replace('- Red check — 未执行', '- —'));
+  eq('行为改动报告缺少回退测试不能通过',
+    checkGates({ item: 'p', ...GATE, evidenceFile: missingRedPath }).decision, 'escalate');
   eq('干净通过', checkGates({ item: 'p', ...GATE }).decision, 'proceed');
   eq('pause → exit', checkGates({ item: 'p', pause: true }).decision, 'exit');
   eq('pause 退出码 3', checkGates({ item: 'p', pause: true }).exit_code, 3);
@@ -733,7 +741,7 @@ section('5. 闸门判定');
           '## Verdict: APPROVE', '', 'Author: v', 'Reviewed commit: ' + 'a'.repeat(40),
           'Change class confirmed: behavior', '',
           '### Evidence',
-          '- Tests: `npm test` -> PASS', '  ```', '  ok', '  ```', '', '### Checks not run', '- —',
+          '- Tests: `npm test` -> PASS', '  ```', '  ok', '  ```', '- Red check: PASS — 回退后失败', '', '### Checks not run', '- —',
         ]),
       }).decision, 'proceed');
     const derived = checkGates({
@@ -743,7 +751,7 @@ section('5. 闸门判定');
         'Change class confirmed: behavior', '',
         '### Evidence',
         '- Tests: `npm test` → PASS', '  ```', '  ok', '  ```',
-        '- Real-use validation: `staging` → NOT RUN',
+        '- Red check: PASS — 回退后失败', '- Real-use validation: `staging` → NOT RUN',
         '', '### Checks not run', '- Real-use validation — 环境不可用',
       ]),
     });
@@ -1919,6 +1927,9 @@ section('15b. 不可信输入（R-11）');
         { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
     } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }; }
   };
+  const beforeLongItem = readText(path.join(t, 'STATE.md'));
+  eq('超长第三方条目拒绝截断', runSW(['--section', 'High Priority', '--item', '#1 ' + 'x'.repeat(160) + ' 完成标准：测试通过', '--source', 'untrusted', '--origin', 'issue#1']).code, 1);
+  eq('拒绝超长条目不修改状态', readText(path.join(t, 'STATE.md')), beforeLongItem);
   eq('缺 --origin 的 untrusted 写入被拒',
     runSW(['--section', 'High Priority', '--item', 'x', '--source', 'untrusted']).code, 1);
   eq('正常写入退出 0',
@@ -1987,7 +1998,7 @@ section('15b. 不可信输入（R-11）');
   // 模板本身必须真的带括号标题：判据与模板漂移会让这条闸门重新失效。
   ok('STATE 模板的 High Priority 节名带括号说明',
     /^## High Priority \(/m.test(readText(path.join(TEMPLATE_DIR, 'STATE.md'))));
-  for (const item of ['GH-10 修复登录（完成标准：测试通过）', evil + ' `code` ' + 'x'.repeat(200)]) {
+  for (const item of ['GH-10 修复登录（完成标准：测试通过）', evil + ' `code` ' + 'x'.repeat(100)]) {
     fs.writeFileSync(path.join(t, 'STATE.md'), readText(path.join(TEMPLATE_DIR, 'STATE.md')));
     eq('P1-03 第三方条目写入真实模板成功',
       runSW(['--item', item, '--source', 'untrusted', '--origin', 'issue#10']).code, 0);
@@ -2125,6 +2136,18 @@ section('15c. 状态事务（R-25）');
     ok('失败原因可见', /rolled back/.test(r.out), r.out);
     eq('第一个文件被回滚', readText(path.join(d, 'STATE.md')).includes('Last run: 2026-01-01'), true);
     eq('第二个文件未被追加', readText(path.join(d, 'loop-run-log.md')).includes('"t1"'), false);
+    rmrf(d);
+  }
+
+  {
+    const d = mk();
+    fs.writeFileSync(path.join(d, 'STATE.md'), readText(path.join(d, 'STATE.md')).replace('| old | 1 | active |', '| — | — | — |'));
+    eq('锁终态回滚测试 fixture 可领取', runSC(['--state', d, '--claim', '--item', 't1', '--run-id', 'r1']).code, 0);
+    const files = ['STATE.md', 'loop-run-log.md', '.harness-loop-active/owner.json'];
+    const before = files.map(f => readText(path.join(d, f)));
+    const r = runSC(['--state', d, '--item', 't1', '--outcome', 'verified', '--run-id', 'r1'], { STATE_COMMIT_FAIL_AFTER: '2' });
+    eq('锁终态写入失败退出 2', r.code, 2);
+    for (let i = 0; i < files.length; i++) eq(`锁终态失败后回滚 ${files[i]}`, readText(path.join(d, files[i])), before[i]);
     rmrf(d);
   }
 
@@ -2385,7 +2408,7 @@ section('17. 升级回归（批次 2）');
     // 一个必失败的命令被读成 PASS，自检在 Windows 上假绿。
     const OK = 'node -e "process.exit(0)"';
     const NO = 'node -e "process.exit(1)"';
-    const report = (cmd, status) => `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`${cmd}\` → ${status}\n  \`\`\`\n  sample output\n  \`\`\`\n\n### Checks not run\n- —\n`;
+    const report = (cmd, status) => `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`${cmd}\` → ${status}\n  \`\`\`\n  sample output\n  \`\`\`\n- Red check: PASS — 回退后测试失败\n\n### Checks not run\n- —\n`;
 
     fs.writeFileSync(path.join(t, 'ok.md'), report(OK, 'PASS'));
     eq('U-03 命令重放一致 → 0',
@@ -2448,7 +2471,7 @@ section('17. 升级回归（批次 2）');
     fs.writeFileSync(path.join(t, 'STATE.md'), '—\n');
     fs.writeFileSync(path.join(t, 'loop-constraints.md'), '## Paths\n\n```\n.env\n```\n');
     fs.writeFileSync(path.join(t, 'ev.md'),
-      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${SHA}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n- Red check: PASS — 回退后测试失败\n\n### Checks not run\n- —\n`);
     const base = ['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
       '--diff-files', 'a.ts', '--implementer', 'impl-1', '--state', t, '--evidence-file', 'ev.md'];
     eq('U-04 非法 reviewed-sha → 参数错误 1',
@@ -2474,7 +2497,7 @@ section('17. 升级回归（批次 2）');
     // 报告必须指名它审过的 commit，且必须等于 --reviewed-sha——先有 head 再写报告。
     // 文件名用文档约定的 verifier-report.md：dirty-tree 只豁免这两个本轮临时产物。
     fs.writeFileSync(path.join(repo, 'verifier-report.md'),
-      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n- Red check: PASS — 回退后测试失败\n\n### Checks not run\n- —\n`);
     eq('U-04 head-sha 缺省时自取 git HEAD',
       runGateIn(['--item', 'p', '--phase', 'gate', '--verdict', 'approve', '--red-check', 'pass',
         '--reviewed-sha', head, '--diff-files', 'a.ts', '--implementer', 'impl-1', '--state', repo,
@@ -2498,7 +2521,7 @@ section('17. 升级回归（批次 2）');
     execFileSync('git', ['commit', '-qm', 'evil'], { cwd: repo, env: gitEnv });
     const head2 = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8', env: gitEnv }).trim();
     fs.writeFileSync(path.join(repo, 'verifier-report.md'),
-      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head2}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n\n### Checks not run\n- —\n`);
+      `## Verdict: APPROVE\n\nAuthor: v\nReviewed commit: ${head2}\nChange class confirmed: behavior\n\n### Evidence\n- Tests: \`node -e "process.exit(0)"\` → PASS\n  \`\`\`\n  ok\n  \`\`\`\n- Red check: PASS — 回退后测试失败\n\n### Checks not run\n- —\n`);
     fs.writeFileSync(path.join(repo, 'changed-files.txt'), 'a.ts\n');
     eq('U-04b 临时产物不触发 dirty-tree',
       runGateIn(gateArgs.map((a) => (a === head ? head2 : a)), repo).code, 0);
@@ -3456,7 +3479,8 @@ section('23. 验证版本与重放后的工作区');
   const report = (cls, reviewed, command, reason = '- —') => [
     '## Verdict: APPROVE', 'Author: reviewer', `Reviewed commit: ${reviewed}`,
     `Change class confirmed: ${cls}`, '', '### Evidence',
-    `- Tests: \`${command}\` → PASS`, '  ```', '  output', '  ```', '',
+    `- Tests: \`${command}\` → PASS`, '  ```', '  output', '  ```',
+    ...(cls === 'behavior' ? ['- Red check: PASS — 回退后测试失败'] : []), '',
     '### Checks not run', reason, '',
   ].join('\n');
   fs.writeFileSync(file, report('docs', sha, 'node -e "process.exit(0)"', '- Red check — 本次只修改了文档与注释，没有新增测试，因此无需回退验证'));

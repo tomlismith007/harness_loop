@@ -598,6 +598,16 @@ export function checkGates(input, opts = {}) {
         next: 'the report is the authoritative verdict; pass --verdict matching it',
       };
     }
+    // 行为改动必须由验证报告确认回退测试，不能只信调用者的参数。
+    const redChecks = checks.filter((c) => c.name === 'Red check');
+    if (changeClass === 'behavior' && (redChecks.length !== 1 || redChecks[0].status !== 'PASS')) {
+      return {
+        ...base, decision: 'escalate', gate: 'verification-evidence',
+        reason: 'behavior change requires exactly one Red check: PASS in the verifier report',
+        allowed_actions: ['run the red check and update the verifier report'], exit_code: 2,
+        next: 'the verifier report must confirm the red check passed',
+      };
+    }
     // 证据里声明的 NOT RUN 必须进入输出，而不是只回显 --not-run 入参。
     evidenceNotRun = checks.filter((c) => c.status === 'NOT RUN').map((c) => c.name);
 

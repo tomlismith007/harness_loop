@@ -25,6 +25,8 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target>
 
 技能装在 `.agents/skills/` 或用户级 `~/.claude/skills/` 时，把前缀换成对应目录。
 
+报告及装配命令会实际执行目标仓库的 `init.sh`（若存在）以检查阶段 1。运行前先检查其内容、工作目录及副作用，确认执行在当前授权范围内；无法确认时停止并说明。
+
 阶段 1 必须 COMPLETE。没到就别进阶段 2——没有状态文件，验证者无法判断改动范围。
 阶段 1 未达成时装配器会拒绝跳级；按它给的提示先跑 `--stage 1`（本技能自带阶段 1 的模板）。
 

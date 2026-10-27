@@ -241,6 +241,7 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
     fs.mkdirSync(backup, { recursive: true });
     fs.copyFileSync(statePath, path.join(backup, 'STATE.md'));
     fs.copyFileSync(logPath, path.join(backup, 'loop-run-log.md'));
+    if (locked && args.outcome !== 'fix-proposed') fs.copyFileSync(ownerFile, path.join(backup, 'owner.json'));
   } catch (e) {
     // 备份失败时还没动任何文件——干净退出，不进入半写状态。
     fail(`cannot back up state files before writing: ${e.message}`, 2);
@@ -248,13 +249,18 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
 
   const done = [];
   try {
-    atomicWrite(statePath, nextState);
     done.push(statePath);
+    atomicWrite(statePath, nextState);
     // 测试钩子：让第二次写入失败，用来断言回滚真的把第一个文件恢复了。
     // 只认显式的环境变量，正常路径永不设置它。
     if (process.env.STATE_COMMIT_FAIL_AFTER === '1') throw new Error('injected failure after first write');
-    atomicWrite(logPath, nextLog);
     done.push(logPath);
+    atomicWrite(logPath, nextLog);
+    if (locked && args.outcome !== 'fix-proposed') {
+      if (process.env.STATE_COMMIT_FAIL_AFTER === '2') throw new Error('injected failure before lock finalization');
+      done.push(ownerFile);
+      atomicWrite(ownerFile, JSON.stringify({ ...owner, outcome: args.outcome }) + '\n');
+    }
   } catch (e) {
     // 回滚已替换的文件。回滚本身失败时如实报告——不要假装成功。
     const rollbackErrors = [];
@@ -265,10 +271,6 @@ Exit codes: 0 written / dry-run ok · 1 bad arguments · 2 write failed (rolled 
     fail(`state write failed: ${e.message}${detail}`, 2);
   }
 
-  if (locked && args.outcome !== 'fix-proposed') {
-    try { atomicWrite(ownerFile, JSON.stringify({ ...owner, outcome: args.outcome }) + '\n'); }
-    catch (e) { fail(`state written but active lock could not be finalized: ${e.message}`, 2); }
-  }
 
   if (args.json) printJson({ written: [statePath, logPath], backup });
   else {

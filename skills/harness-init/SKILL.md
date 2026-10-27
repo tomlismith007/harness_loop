@@ -31,6 +31,8 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target>
 
 无前缀的 `node harness-stage.mjs` 在任何布局下都不成立，不要照抄。
 
+上述报告命令会实际执行目标仓库的 `init.sh`（若存在）。运行前先检查其内容、工作目录及副作用，确认执行在当前授权范围内；无法确认时停止并说明。
+
 看报告里阶段 1 的判据，确认缺什么。**不要凭印象判断缺什么。**
 
 ## 判据（7 项，全机械判定）

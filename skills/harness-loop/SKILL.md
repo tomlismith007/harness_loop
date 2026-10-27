@@ -103,7 +103,7 @@ node .claude/skills/harness-loop/scripts/ledger-check.mjs --ledger loop-ledger.j
 ```
 
 `--outcome` 取 `success | failure | noop`；`failure` 必须带 `--error`（熔断器靠错误签名判停滞）。
-验证通过时同样用 `--append` 记一笔（`--outcome success --action "<做了什么>"`）。账本不可读时 `--append` 退出 2——先修账本，不要重试。
+只有第 6 步闸门 `proceed` 后才用 `--append --outcome success --action "<做了什么>"` 记成功；验证通过只是中间结果。闸门拒绝或升级时按原因记录 `failure`（有错误原文）或 `noop`，每次尝试只记一次。账本不可读时 `--append` 退出 2——先修账本，不要重试。
 
 ### 第 4 步：执行者
 
@@ -230,7 +230,7 @@ BASE_SHA=$(cat "<主检出绝对路径>/.loop-worktrees/<slug>-attempt1.base-sha
 node .claude/skills/harness-loop/scripts/gate-check.mjs \
   --item <item-id> \
   --phase gate \
-  --attempts <本轮尝试入账后 ledger-check --item 输出的 item attempts> \
+  --attempts <ledger-check --item 输出的现有 item attempts + 当前尝试 1> \
   --change-class <behavior|docs|config|refactor> \
   --diff-files @changed-files.txt \
   --verdict <approve|reject|escalate-human|none> \
@@ -251,7 +251,7 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
 **证据里的命令会被重放**：闸门把 `- Tests: \`<cmd>\` → PASS` 里的命令真的跑一遍，
 只重放标为 PASS 的命令，NOT RUN 的命令不会执行；至少需要一条带命令的 PASS 证据。
 退出码与 PASS 对不上就拒绝。所以验证者报告里的命令必须是可重入的，
-在当前授权范围内且不会产生不允许的外部副作用；`--evidence-cwd`（默认当前目录）要能跑通它们。无法安全重跑时用 `--no-replay`，
+在运行闸门前逐条检查报告中的命令及其工作目录，确认处于当前授权范围内且不会产生不允许的外部副作用；`--evidence-cwd`（默认当前目录）要能跑通它们。无法安全重跑时用 `--no-replay`，
 结果会被记为 NOT RUN。`docs` / `config` / `refactor` 类改动会**自动**跳过重放（同样记为
 NOT RUN）——不必为文档类改动硬凑可重放的命令。重放后闸门再次检查 HEAD 与工作区；若改变或无法核实则升级，重新验证。
 
@@ -266,7 +266,7 @@ NOT RUN）——不必为文档类改动硬凑可重放的命令。重放后闸�
 
 `--reviewed-sha` 与 `--head-sha` 不一致 → 审查后 head 动过，必须重新验证。
 
-`decision` 为 `proceed` 才继续；`escalate` → 写升级条目；`exit` → 立即停止。
+`decision` 为 `proceed` 后追加本次 `success` 再继续；`escalate` → 按上述规则入账并写升级条目；`exit` → 立即停止。先前验证被拒时已入账的尝试不得重复记账。
 提交前删除 `changed-files.txt`（它是本轮临时产物，不入库）；基准记录在交接结束后删除。
 
 ### 第 7 步：写状态
@@ -284,7 +284,7 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 `fix-proposed` 保留锁与活动项，供独立会话完成验证后恢复；其他结果写入成功后也先保留锁，待下方队列交接完成再释放。锁不可读或持有者不符时停止，交人检查。
 `--claim` / `--release` 是独立模式，不能与 outcome 写参数或 `--dry-run` 混用；终态写入后必须释放再开始下一轮。
 
-它先备份、再写临时文件、最后 rename；任一步失败会把已替换的文件恢复（exit 2，两个文件都回到写入前——修好原因后重跑同一条命令，不要手工补写）。
+它先备份、再写临时文件、最后 rename；可捕获的写入失败会尝试回滚状态、日志与终态锁（exit 2）。只有输出 `rolled back` 才可修好原因后重跑；若显示 `rollback failed` 或进程中断，保留现场并由人检查备份和锁。跨文件写入不能保证断电时原子性。
 `--outcome` 取 `no-op | report-only | fix-proposed | verified | escalated`。
 `--dry-run` 只打印将写入的内容。表结构损坏时它**报错而不是猜**（exit 1）。
 
