@@ -3108,6 +3108,71 @@ section('20. worktree manifest（U-13）');
 }
 
 // regression:worktree:end
+// regression:policy:start
+section('21. 主检出策略路由（P1-02）');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-policy-'));
+  const env = { ...process.env };
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[k];
+  const git = (args, cwd = dir) => execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const policy = (paths, limit) => `## Paths\n\n\`\`\`\n${paths.join('\n')}\n\`\`\`\n\n## Code\n- 超过 ${limit} 个文件就升级\n`;
+  git(['init', '-q', '-b', 'main']);
+  git(['config', 'user.email', 't@example.com']);
+  git(['config', 'user.name', 't']);
+  fs.writeFileSync(path.join(dir, '.gitignore'), '.loop-worktrees/\n');
+  fs.writeFileSync(path.join(dir, 'STATE.md'), readText(path.join(TEMPLATE_DIR, 'STATE.md')));
+  fs.writeFileSync(path.join(dir, 'harness-constraints.md'), policy(['.env'], 5));
+  git(['add', '-A']);
+  git(['commit', '-qm', 'initial policy']);
+  const wt = path.join(dir, '.loop-worktrees', 'policy');
+  git(['worktree', 'add', '-b', 'policy', wt, 'main']);
+  fs.writeFileSync(path.join(dir, 'harness-constraints.md'), policy(['.env', 'protected-now/**'], 1));
+  fs.mkdirSync(path.join(wt, 'protected-now'));
+  fs.writeFileSync(path.join(wt, 'protected-now', 'data.txt'), 'changed\n');
+  git(['add', 'protected-now/data.txt'], wt);
+  git(['commit', '-qm', 'change protected path'], wt);
+  const sha = git(['rev-parse', 'HEAD'], wt);
+  fs.writeFileSync(path.join(wt, 'verifier-report.md'), [
+    '## Verdict: APPROVE', 'Author: verifier', `Reviewed commit: ${sha}`,
+    'Change class confirmed: behavior', '', '### Evidence', '- Tests: `node --version` → PASS',
+    '  ```', `  ${process.version}`, '  ```', '- Red check: PASS — policy routing fixture',
+    '', '### Checks not run', '- —', '',
+  ].join('\n'));
+  for (const owner of ['harness-loop', 'harness-loop-init']) {
+    const run = (args) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath,
+          [path.join(SKILLS_DIR, owner, 'scripts', 'gate-check.mjs'), '--item', 'policy', ...args],
+          { cwd: wt, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+      } catch (e) { return { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    };
+    const fix = ['--phase', 'fix', '--diff-files', 'protected-now/data.txt'];
+    for (const state of [dir, path.join(dir, 'STATE.md')]) {
+      const r = run([...fix, '--state', state]);
+      eq(`P1-02 ${owner} state=${path.basename(state)} 默认使用主检出拒绝列表`, r.code, 2);
+      ok(`P1-02 ${owner} 命中 denylist`, /"gate":\s*"denylist"/.test(r.out), r.out);
+    }
+    const scope = run(['--phase', 'fix', '--state', dir, '--diff-files', 'src/a.ts,src/b.ts']);
+    eq(`P1-02 ${owner} 主检出的范围阈值生效`, scope.code, 2);
+    ok(`P1-02 ${owner} 命中 scope`, /"gate":\s*"scope"/.test(scope.out), scope.out);
+    eq(`P1-02 ${owner} 显式策略目录可覆盖默认值`, run([...fix, '--state', dir, '--constraints-root', wt]).code, 0);
+    eq(`P1-02 ${owner} 不传 state 时使用当前目录`, run(fix).code, 0);
+    for (const args of [
+      [...fix, '--state'], [...fix, '--state', dir, '--constraints-root'],
+      [...fix, '--state', dir, '--constraints-root', path.join(dir, 'missing')],
+      [...fix, '--state', dir, '--constraints-root', path.join(dir, 'STATE.md')],
+    ]) {
+      eq(`P1-02 ${owner} 无效策略/状态参数被拒绝 ${args.at(-1)}`, run(args).code, 1);
+    }
+    const gate = run(['--phase', 'gate', '--state', dir, '--diff-files', 'protected-now/data.txt',
+      '--verdict', 'approve', '--implementer', 'implementer', '--reviewed-sha', sha,
+      '--red-check', 'pass', '--evidence-file', 'verifier-report.md']);
+    eq(`P1-02 ${owner} 正式 gate 使用主检出策略`, gate.code, 2);
+    ok(`P1-02 ${owner} 正式 gate 命中 denylist`, /"gate":\s*"denylist"/.test(gate.out), gate.out);
+  }
+  rmrf(dir);
+}
+// regression:policy:end
 // ---------------------------------------------------------------- 汇总
 
 // 断言数不进文档。

@@ -190,6 +190,8 @@ git diff --name-only main...HEAD > changed-files.txt   # 基分支按项目实�
 
 `--state` 与后续写状态命令都指向**主检出**的绝对路径——worktree 里的 `STATE.md`
 是旧副本，kill switch 与 WIP 判定都看不到主检出的最新值。
+拒绝列表与文件数阈值默认也从 `--state` 所在目录读取；传单个状态文件时取其父目录。
+只有需要明确分开状态与策略位置时，才用 `--constraints-root <目录>` 覆盖。
 **这不是说在主检出运行**：本步命令仍在 worktree 内执行（见本步开头）。
 
 `--verdict` 必须在本步之前取得：`none` 在 gate 阶段一律 escalate（`awaiting-verification`）；且默认

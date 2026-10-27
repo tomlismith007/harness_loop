@@ -86,3 +86,9 @@
 - 合并祖先关系检查移到任何删除之前；未合并和分支删除失败时保留 merged 状态，同步技能正文与 CLI 帮助。
 - 同一组真实 Git 回归：旧代码 `Passed: 39 / Failed: 14`，修复后 `Passed: 55 / Failed: 0`。覆盖重复清理、实际合并后回收、base 无法解析、worktree 已移除、分支锁恢复及原有清理保护。
 - 原始输出：本轮临时证据目录中的 `worktree-red.log`、`worktree-green.log`；完整套件由本项提交的 pre-commit hook 执行。
+
+### P1-02
+
+- 两份 gate CLI 的默认策略目录绑定 state（文件则取父目录），同时校验路径参数；显式覆盖保留，Git 与证据执行目录不变。
+- 同一组真实主检出 / worktree 回归：旧代码 `Passed: 4 / Failed: 24`，修复后 `Passed: 28 / Failed: 0`。两份脚本均覆盖拒绝列表、范围阈值、state 文件、显式覆盖、错误参数和正式 gate。
+- 原始输出：`policy-red.log`、`policy-green.log`。P1-01 的提交全套测试为 `Passed: 784 / Failed: 0`。

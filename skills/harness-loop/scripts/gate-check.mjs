@@ -800,8 +800,8 @@ Options:
   --attempts <n>         Attempts so far (default: 0)
   --diff-files <list>    A changed path, or @path to a file with one path per line
   --verdict <v>          approve | reject | escalate-human | none (default: none)
-  --state <dir>          Read loop-pause-all from STATE.md / loop-constraints.md there
-                         (default: cwd). The kill switch is a real gate, not a doc.
+  --state <dir|file>     Read state and default policy from this directory, or the
+                         parent of this state file (default: cwd).
   --pause                Set if loop-pause-all is active
   --cleanup              Treat as a cleanup change (higher file limit)
   --reviewed-sha <sha>   Commit SHA that was reviewed (40/64 hex; required at --phase gate)
@@ -822,8 +822,8 @@ Options:
                          command in each evidence line (the <cmd> after the check name).
   --evidence-cwd <dir>   Directory the evidence commands run in (default: cwd)
   --no-replay            Skip re-running evidence commands; the result is listed as NOT RUN
-  --constraints-root <d> Directory holding loop-constraints.md (default: cwd). The denylist is
-                         read from it so repo-specific paths are actually enforced.
+  --constraints-root <d> Override the policy directory (default: --state directory,
+                         or its parent for a state file). Denylist and limits use it.
   --not-run <list>       Comma-separated checks that were NOT run (listed, never omitted)
   --dirty-files <list>   Override the uncommitted-change list. Omitted -> read from
                          git status --porcelain. Non-empty at --phase gate -> escalate
@@ -925,7 +925,12 @@ Exit codes:
       + '(the gate cannot check independence without knowing who implemented)', 1);
   }
 
-  const statePath = typeof args.state === 'string' ? args.state : process.cwd();
+  for (const [key, flag] of [['state', '--state'], ['constraintsRoot', '--constraints-root']]) {
+    if (args[key] !== undefined && (typeof args[key] !== 'string' || !args[key].trim())) {
+      fail(`${flag} requires a directory path${key === 'state' ? ' or state file' : ''}`, 1);
+    }
+  }
+  const statePath = path.resolve(args.state ?? process.cwd());
   const state = stateFiles(statePath);
   // 读不到状态文件 ≠ 没有暂停。fail-closed：让调用方修正参数，而不是让闸门放行。
   if (!state.readable) {
@@ -950,7 +955,11 @@ Exit codes:
 
   // 阈值来自约束文件；缺失的项回落到 DEFAULTS，并在输出里标出来源。
   // 只读 denylist 不读阈值，等于把"可配置的策略"做成了"写死的常量"。
-  const constraintsRoot = typeof args.constraintsRoot === 'string' ? args.constraintsRoot : process.cwd();
+  const constraintsRoot = path.resolve(args.constraintsRoot
+    ?? (fs.statSync(statePath).isFile() ? path.dirname(statePath) : statePath));
+  let policyDirectory = false;
+  try { policyDirectory = fs.statSync(constraintsRoot).isDirectory(); } catch { /* 参数检查 */ }
+  if (!policyDirectory) fail(`--constraints-root ${constraintsRoot}: expected an existing directory`, 1);
   const limits = loadLimits(constraintsRoot);
   const cfg = {
     maxAttempts: limits.maxAttempts ?? DEFAULT_BREAKER.maxAttempts,
