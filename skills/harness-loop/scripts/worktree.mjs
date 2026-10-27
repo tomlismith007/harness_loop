@@ -8,7 +8,7 @@
  *   - 有未提交改动时 `--force` 会静默销毁。
  *
  * 做法：把 worktree 生命周期记进 `.loop-worktrees/manifest.json`，
- * cleanup 只碰 rejected / escalated 与已合并的 merged，且**不带 --force**——
+ * cleanup 只碰已并入 base 的 rejected / escalated / merged，且**不带 --force**——
  * git 会拒绝删除有未提交改动的 worktree，这里把这个拒绝如实报告出来。
  *
  * 用法：
@@ -28,7 +28,7 @@ import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint 
 export const MANIFEST_DIR = '.loop-worktrees';
 export const MANIFEST_FILE = `${MANIFEST_DIR}/manifest.json`;
 export const STATUSES = ['active', 'rejected', 'escalated', 'merged'];
-/** merged 在任何删除之前确认已并入 base；未合并的记录保留原状态供重试。 */
+/** 所有终态在删除前都须确认已并入 base；未合并的记录保留原状态供重试。 */
 export const CLEANUP_STATUSES = ['rejected', 'escalated', 'merged'];
 
 /** 清掉继承的 GIT_*：pre-commit hook 里跑时会指向外层仓库。 */
@@ -130,9 +130,8 @@ function cleanup(root) {
 
   for (const entry of manifest.worktrees) {
     if (!CLEANUP_STATUSES.includes(entry.status)) continue;
-    // 先保护成果，再删除目录。保留 merged 状态：改标 escalated 会使下次 cleanup
-    // 绕过合并检查，最终强制删除尚待人工合并的分支。
-    if (entry.status === 'merged') {
+    // 所有终态都可能含未合并的提交，必须在删除目录或分支之前保护它们。
+    {
       const base = entry.baseBranch || entry.base || 'HEAD';
       let mergedIntoBase = false;
       try {
@@ -142,7 +141,7 @@ function cleanup(root) {
         }
       } catch { /* 无法证明已合并时保留目录与分支 */ }
       if (!mergedIntoBase) {
-        skipped.push({ entry, reason: `marked merged but ${entry.branch} is not merged into ${base} — refusing to delete it` });
+        skipped.push({ entry, reason: `marked ${entry.status} but ${entry.branch} is not merged into ${base} — refusing to delete it` });
         continue;
       }
     }
@@ -221,8 +220,8 @@ Usage:
   node scripts/worktree.mjs cleanup [--state <dir>]
   node scripts/worktree.mjs list [--json]
 
-cleanup removes rejected / escalated and confirmed-merged worktrees, never with --force.
-Unmerged entries keep their worktree, branch and merged status for the next check.
+cleanup removes terminal worktrees only when their branch is merged into its base, never with --force.
+Unmerged entries keep their worktree, branch and status for the next check.
 A worktree with uncommitted changes is reported, not destroyed.
 Exit codes: 0 ok · 1 bad arguments · 2 something was skipped during cleanup
 `);

@@ -2941,6 +2941,28 @@ section('20. worktree manifest（U-13）');
     catch { return null; }
   };
 
+  for (const status of ['rejected', 'escalated']) {
+    const { dir, env } = mkRepo();
+    runWt(['create', '--run-id', status, '--state', dir], dir);
+    const wt = path.join(dir, '.loop-worktrees', status);
+    fs.writeFileSync(path.join(wt, 'candidate.txt'), 'unmerged candidate\n');
+    execFileSync('git', ['add', 'candidate.txt'], { cwd: wt, env });
+    execFileSync('git', ['commit', '-qm', 'candidate'], { cwd: wt, env });
+    const sha = gitOut(['rev-parse', 'HEAD'], wt, env);
+    runWt(['mark', '--run-id', status, '--status', status, '--state', dir], dir);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      eq(`未合并 ${status} 第 ${attempt} 次清理被阻止`, runWt(['cleanup', '--state', dir], dir).code, 2);
+      ok(`未合并 ${status} 第 ${attempt} 次保留目录`, fs.existsSync(wt));
+      ok(`未合并 ${status} 第 ${attempt} 次保留分支`,
+        gitOut(['branch', '--list', `loop/${status}`], dir, env).includes(`loop/${status}`));
+      ok(`未合并 ${status} 第 ${attempt} 次保留记录`,
+        (readManifestSafe(dir)?.worktrees || []).some((w) => w.id === status && w.status === status));
+      ok(`未合并 ${status} 第 ${attempt} 次提交可由分支访问`,
+        gitOut(['branch', '--contains', sha], dir, env).includes(`loop/${status}`));
+    }
+    rmrf(dir);
+  }
+
   {
     const { dir, env } = mkRepo();
     const r = runWt(['create', '--run-id', 't1', '--state', dir], dir);

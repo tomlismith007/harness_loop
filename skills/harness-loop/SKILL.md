@@ -119,10 +119,10 @@ node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-att
 
 硬要求：
 
-- 一次只改与这一项相关的文件；超过 5 个文件 → 停止并升级
+- 一次只改与这一项相关的文件；超过项目约束的文件数上限 → 停止并升级（未配置时默认 5）
 - 触及拒绝列表路径 → 停止，不做任何编辑
 - 不重构无关代码，不"顺便"改
-- **必须提交**：改动完成后 `git add -A && git commit`，分支 `loop/<slug>`。第 6 步的改动清单来自已提交的 diff；不提交 = 清单为空 = 拒绝列表与范围两道闸同时失效
+- **必须提交**：先检查 `git status`，只暂存本次允许范围内的文件并提交到 `loop/<slug>`；发现不属于本项的改动时保留并停止处理。第 6 步的改动清单来自已提交的 diff；不提交 = 清单为空 = 拒绝列表与范围两道闸同时失效
 - **不得标记自己的 work item 为完成**
 
 用子智能体执行时，提示词里只给：目标、完成标准、允许改动的范围、拒绝列表。
@@ -133,7 +133,7 @@ node .claude/skills/harness-loop/scripts/worktree.mjs create --run-id <slug>-att
 **结构性要求**：执行者与验证者必须是不同实例、不同指令。
 
 - **有子智能体**：派一个新实例。提示词只含 diff、验证命令、报告格式，**不含执行者的推理过程**。
-- **没有子智能体**：要求人另开会话运行 `/harness-loop <item>`，并在指令中写明"只执行第 5 步独立验证，不得修改代码"。未经验证的改动不得标记完成。
+- **没有子智能体**：交给人另开独立会话，明确只执行第 5 步、不得修改代码；提供 item 与完成标准、主检出绝对路径、本次 worktree 绝对路径、基准 commit、待审 HEAD、执行者标识、验证命令及报告保存路径。验证者在指定 worktree 检查基准到 HEAD 的 diff，运行验证并按下方格式写报告，返回 verdict、报告路径与审过的完整 SHA。原会话核对报告和当前 HEAD 后继续第 6 步；拿不到独立报告时保留成果并记为等待验证，不得标记完成。
 
 验证者的立场是**找出拒绝的理由**，不是确认它是对的。报告必须按下面的格式写，并署名（`Author:`）——闸门会校验它与执行者不同。检查项：
 
@@ -268,14 +268,10 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 
 然后：
 
-1. 手工更新 `STATE.md` 的 High Priority（勾选/移除）——脚本只动 `Active` 与 `Last run`
+1. 按结果手工更新 `STATE.md`：`verified` 但尚未合并时，将该项从 High Priority 移到 Human Inbox，注明等待人工合并、分支、审过的 SHA 与证据位置，**不要标记工作已完成**；`escalated` 同样移入 Human Inbox 并记原因。只有完成标准满足且所需合并实际完成，才勾选或移除；未完成且未升级的项保留。脚本只动 `Active` 与 `Last run`。
 2. 有代码改动时更新 `feature_list.json`（状态 + 证据）
 3. 本轮若发生**返工**（修了又改、验证被拒），在 `LESSONS.md` 追加一行
-4. 处置 worktree：先 `node .claude/skills/harness-loop/scripts/worktree.mjs mark --run-id <id>
-   --status merged|rejected|escalated`，**然后总是** `node .claude/skills/harness-loop/scripts/worktree.mjs cleanup`。
-   已合并进 base 的 merged 与全部 rejected / escalated 会被回收；人工尚未合并的 merged 会被安全跳过
-   （保留 merged 状态、worktree 与分支并提示原因），重复 cleanup 仍会检查是否已合并。cleanup 不带 `--force`：有未提交改动时
-   它会报告而不是销毁（exit 2）。
+4. 处置 worktree：等待人工合并时保留 active worktree 和分支；拒绝或升级时用 `node .claude/skills/harness-loop/scripts/worktree.mjs mark --run-id <id> --status rejected|escalated --state <主检出绝对路径>`，实际合并后标记 `merged`。运行 `node .claude/skills/harness-loop/scripts/worktree.mjs cleanup --state <主检出绝对路径>` 时，只有能证明分支已并入 base 的终态才回收；未合并或无法证明的成果保留目录、分支与记录并返回 2。有未提交改动时也保留并返回 2，不使用 `--force`。
 5. 跑清洁交接检查：
 
    ```bash
@@ -304,7 +300,7 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 - 一次运行只处理**一个** work item。多个 → 多次运行。
 - 执行者**不得**标记自己的 work item 为完成。
 - 触及拒绝列表 → 立即 `escalated`，**不执行任何编辑**。
-- 账本里同一 item 的尝试 ≥ 3 → 强制 `escalated`，覆盖其他所有规则（`ledger-check --item`）。
+- 同一 item 达到配置的尝试上限 → `escalated`（未配置时默认 3；由 `ledger-check --item` 判定）。
 - 升级条目统一写在 `STATE.md` 的 `## Human Inbox`：一行记 item、命中的闸门或熔断原因、证据位置；需要完整交代时用 `ledger-check --escalation` 生成升级文档。
 - 合并永远由人工执行。
 - 每轮结束必须写状态。不写状态的运行等于没跑。

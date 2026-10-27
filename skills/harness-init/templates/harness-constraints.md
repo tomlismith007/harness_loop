@@ -76,7 +76,7 @@ templates/**
 ## Worktrees
 
 - 无人值守的代码改动必须在独立 git worktree 中进行。
-- 一个修复一个 worktree；验证者 REJECT 或升级后丢弃，不留残留分支。
+- 一个修复一个 worktree；REJECT 或升级后保留未合并的提交和现场，供人工处理。只清理已并入基准分支且无未提交改动的 worktree。
 
 ## Data
 
