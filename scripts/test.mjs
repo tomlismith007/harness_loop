@@ -2881,6 +2881,7 @@ section('19. 清洁交接（U-12）');
   }
 }
 
+// regression:worktree:start
 // ---------------------------------------------------------------- 20. worktree manifest（U-13）
 
 section('20. worktree manifest（U-13）');
@@ -2974,7 +2975,7 @@ section('20. worktree manifest（U-13）');
   }
 
   {
-    // 未合并却被标成 merged：拒绝删除，并把状态改成 escalated 交给人。
+    // P1-01：未合并成果在重复 cleanup 后仍须保留，实际合并后才能回收。
     const { dir, env } = mkRepo();
     runWt(['create', '--run-id', 'm2', '--state', dir], dir);
     const wt = path.join(dir, '.loop-worktrees', 'm2');
@@ -2984,10 +2985,68 @@ section('20. worktree manifest（U-13）');
     // 找不到 scripts/test.mjs 而崩掉。这里少一个 env 就是一次真实提交事故。
     execFileSync('git', ['add', '-A'], { cwd: wt, env });
     execFileSync('git', ['commit', '-qm', 'unmerged'], { cwd: wt, env });
+    const sha = gitOut(['rev-parse', 'HEAD'], wt, env);
     runWt(['mark', '--run-id', 'm2', '--status', 'merged', '--state', dir], dir);
-    runWt(['cleanup', '--state', dir], dir);
-    const m = readManifestSafe(dir) || { worktrees: [] };
-    ok('U-13 未合并的 merged 分支不被删除', m.worktrees.some((w) => w.id === 'm2' && w.status === 'escalated'));
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      eq(`P1-01 未合并第 ${attempt} 次 cleanup → 2`, runWt(['cleanup', '--state', dir], dir).code, 2);
+      const m = readManifestSafe(dir) || { worktrees: [] };
+      ok(`P1-01 第 ${attempt} 次保留 merged 状态`, m.worktrees.some((w) => w.id === 'm2' && w.status === 'merged'));
+      ok(`P1-01 第 ${attempt} 次保留 worktree`, fs.existsSync(wt));
+      ok(`P1-01 第 ${attempt} 次保留提交所在分支`,
+        gitOut(['branch', '--contains', sha], dir, env).includes('loop/m2'));
+    }
+    if (gitOut(['branch', '--list', 'loop/m2'], dir, env).includes('loop/m2')) {
+      execFileSync('git', ['merge', '--ff-only', 'loop/m2'], { cwd: dir, env });
+      eq('P1-01 实际合并后 cleanup → 0', runWt(['cleanup', '--state', dir], dir).code, 0);
+      ok('P1-01 实际合并后分支已回收', !gitOut(['branch', '--list', 'loop/m2'], dir, env).includes('loop/m2'));
+      ok('P1-01 实际合并后 worktree 已回收', !fs.existsSync(wt));
+    } else {
+      ok('P1-01 人工合并入口仍可用', false, '待合并分支已被 cleanup 删除');
+    }
+    rmrf(dir);
+  }
+
+  {
+    const { dir, env } = mkRepo();
+    runWt(['create', '--run-id', 'missing-base', '--state', dir], dir);
+    runWt(['mark', '--run-id', 'missing-base', '--status', 'merged', '--state', dir], dir);
+    const m = readManifestSafe(dir);
+    m.worktrees[0].baseBranch = 'nonexistent-base';
+    fs.writeFileSync(path.join(dir, '.loop-worktrees', 'manifest.json'), JSON.stringify(m));
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      eq(`P1-01 base 不可解析第 ${attempt} 次仍阻断`, runWt(['cleanup', '--state', dir], dir).code, 2);
+      ok(`P1-01 base 不可解析第 ${attempt} 次保留目录`, fs.existsSync(path.join(dir, '.loop-worktrees', 'missing-base')));
+      ok(`P1-01 base 不可解析第 ${attempt} 次保留分支`, gitOut(['branch', '--list', 'loop/missing-base'], dir, env).includes('loop/missing-base'));
+    }
+    rmrf(dir);
+  }
+
+  {
+    const { dir, env } = mkRepo();
+    runWt(['create', '--run-id', 'gone', '--state', dir], dir);
+    const wt = path.join(dir, '.loop-worktrees', 'gone');
+    fs.writeFileSync(path.join(wt, 'extra.txt'), 'unmerged work\n');
+    execFileSync('git', ['add', 'extra.txt'], { cwd: wt, env });
+    execFileSync('git', ['commit', '-qm', 'unmerged'], { cwd: wt, env });
+    runWt(['mark', '--run-id', 'gone', '--status', 'merged', '--state', dir], dir);
+    execFileSync('git', ['worktree', 'remove', wt], { cwd: dir, env });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      eq(`P1-01 worktree 已不存在第 ${attempt} 次仍阻断`, runWt(['cleanup', '--state', dir], dir).code, 2);
+      ok(`P1-01 worktree 已不存在第 ${attempt} 次保留分支`, gitOut(['branch', '--list', 'loop/gone'], dir, env).includes('loop/gone'));
+    }
+    rmrf(dir);
+  }
+
+  {
+    const { dir } = mkRepo();
+    runWt(['create', '--run-id', 'merged-locked', '--state', dir], dir);
+    runWt(['mark', '--run-id', 'merged-locked', '--status', 'merged', '--state', dir], dir);
+    const lockFile = path.join(dir, '.git', 'refs', 'heads', 'loop', 'merged-locked.lock');
+    fs.writeFileSync(lockFile, '');
+    eq('P1-01 merged 分支删除失败 → 2', runWt(['cleanup', '--state', dir], dir).code, 2);
+    ok('P1-01 删除失败仍保留 merged 防护', readManifestSafe(dir)?.worktrees.some((w) => w.id === 'merged-locked' && w.status === 'merged'));
+    fs.rmSync(lockFile);
+    eq('P1-01 merged 分支解锁后可回收', runWt(['cleanup', '--state', dir], dir).code, 0);
     rmrf(dir);
   }
 
@@ -3048,6 +3107,7 @@ section('20. worktree manifest（U-13）');
   }
 }
 
+// regression:worktree:end
 // ---------------------------------------------------------------- 汇总
 
 // 断言数不进文档。

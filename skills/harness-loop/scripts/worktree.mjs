@@ -8,7 +8,7 @@
  *   - 有未提交改动时 `--force` 会静默销毁。
  *
  * 做法：把 worktree 生命周期记进 `.loop-worktrees/manifest.json`，
- * cleanup 只碰终态（rejected / escalated），且**不带 --force**——
+ * cleanup 只碰 rejected / escalated 与已合并的 merged，且**不带 --force**——
  * git 会拒绝删除有未提交改动的 worktree，这里把这个拒绝如实报告出来。
  *
  * 用法：
@@ -28,9 +28,7 @@ import { parseArgs, readText, printJson, fail, rejectUnknownFlags, isEntryPoint 
 export const MANIFEST_DIR = '.loop-worktrees';
 export const MANIFEST_FILE = `${MANIFEST_DIR}/manifest.json`;
 export const STATUSES = ['active', 'rejected', 'escalated', 'merged'];
-/** cleanup 默认只扫终态；active 与 merged 不动。 */
-// merged 也是终态：验证通过的 worktree 不回收，每轮成功都留一棵完整副本。
-// 删分支前会检查它确实已合并进 base，避免 -D 丢掉未合并的提交。
+/** merged 在任何删除之前确认已并入 base；未合并的记录保留原状态供重试。 */
 export const CLEANUP_STATUSES = ['rejected', 'escalated', 'merged'];
 
 /** 清掉继承的 GIT_*：pre-commit hook 里跑时会指向外层仓库。 */
@@ -132,6 +130,22 @@ function cleanup(root) {
 
   for (const entry of manifest.worktrees) {
     if (!CLEANUP_STATUSES.includes(entry.status)) continue;
+    // 先保护成果，再删除目录。保留 merged 状态：改标 escalated 会使下次 cleanup
+    // 绕过合并检查，最终强制删除尚待人工合并的分支。
+    if (entry.status === 'merged') {
+      const base = entry.baseBranch || entry.base || 'HEAD';
+      let mergedIntoBase = false;
+      try {
+        if (entry.branch) {
+          git(['merge-base', '--is-ancestor', entry.branch, base], root);
+          mergedIntoBase = true;
+        }
+      } catch { /* 无法证明已合并时保留目录与分支 */ }
+      if (!mergedIntoBase) {
+        skipped.push({ entry, reason: `marked merged but ${entry.branch} is not merged into ${base} — refusing to delete it` });
+        continue;
+      }
+    }
     let removeError = null;
     try {
       // 不带 --force：有未提交改动时 git 会拒绝，这里如实报告而不是销毁。
@@ -147,21 +161,6 @@ function cleanup(root) {
         continue;
       }
     }
-    // merged 的分支只能删"已合并进 base"的：`-D` 会丢掉未合并的提交。
-    // 状态是 merged 而分支没合并进 base，说明 mark 用错了——停下来问人。
-    if (entry.status === 'merged' && entry.branch) {
-      const base = entry.baseBranch || entry.base || "HEAD";
-      let mergedIntoBase = false;
-      try {
-        mergedIntoBase = git(['branch', '--merged', base], root)
-          .split(String.fromCharCode(10)).map((l) => l.replace(/^\*\s*/, '').trim()).includes(entry.branch);
-      } catch { mergedIntoBase = false; }
-      if (!mergedIntoBase) {
-        entry.status = 'escalated';
-        skipped.push({ entry, reason: `marked merged but ${entry.branch} is not merged into ${base} — refusing to delete it` });
-        continue;
-      }
-    }
     // worktree 删掉了，但分支可能删不掉（被锁、被别处检出）。这时不能把条目
     // 从 manifest 里抹掉：分支还在，同一个 run-id 之后会永远 create 失败，
     // 而 manifest 说"已经清理过"——那是最难查的一类残留。
@@ -174,7 +173,7 @@ function cleanup(root) {
       if (!/not found|no such branch/i.test(msg)) branchError = msg;
     }
     if (branchError) {
-      entry.status = 'escalated';
+      if (entry.status !== 'merged') entry.status = 'escalated';
       entry.branchError = branchError;
       skipped.push({ entry, reason: `worktree removed but branch ${entry.branch} remains: ${branchError}` });
       continue;
@@ -222,8 +221,9 @@ Usage:
   node scripts/worktree.mjs cleanup [--state <dir>]
   node scripts/worktree.mjs list [--json]
 
-cleanup removes only rejected / escalated worktrees, never with --force:
-a worktree with uncommitted changes is reported, not destroyed.
+cleanup removes rejected / escalated and confirmed-merged worktrees, never with --force.
+Unmerged entries keep their worktree, branch and merged status for the next check.
+A worktree with uncommitted changes is reported, not destroyed.
 Exit codes: 0 ok · 1 bad arguments · 2 something was skipped during cleanup
 `);
     return;

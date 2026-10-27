@@ -272,7 +272,7 @@ node .claude/skills/harness-loop/scripts/state-commit.mjs --state <主检出绝�
 4. 处置 worktree：先 `node .claude/skills/harness-loop/scripts/worktree.mjs mark --run-id <id>
    --status merged|rejected|escalated`，**然后总是** `node .claude/skills/harness-loop/scripts/worktree.mjs cleanup`。
    已合并进 base 的 merged 与全部 rejected / escalated 会被回收；人工尚未合并的 merged 会被安全跳过
-   （改标 escalated 并提示原因），留待下轮或人工处理。cleanup 不带 `--force`：有未提交改动时
+   （保留 merged 状态、worktree 与分支并提示原因），重复 cleanup 仍会检查是否已合并。cleanup 不带 `--force`：有未提交改动时
    它会报告而不是销毁（exit 2）。
 5. 跑清洁交接检查：
 

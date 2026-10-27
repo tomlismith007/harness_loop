@@ -81,4 +81,8 @@
 
 ## 实施记录
 
-本节在验证后记录实际修改、红绿结果和提交标识。
+### P1-01
+
+- 合并祖先关系检查移到任何删除之前；未合并和分支删除失败时保留 merged 状态，同步技能正文与 CLI 帮助。
+- 同一组真实 Git 回归：旧代码 `Passed: 39 / Failed: 14`，修复后 `Passed: 55 / Failed: 0`。覆盖重复清理、实际合并后回收、base 无法解析、worktree 已移除、分支锁恢复及原有清理保护。
+- 原始输出：本轮临时证据目录中的 `worktree-red.log`、`worktree-green.log`；完整套件由本项提交的 pre-commit hook 执行。
