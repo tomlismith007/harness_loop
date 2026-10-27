@@ -34,8 +34,12 @@ gh auth status          # 未登录则停止，不要尝试匿名读取
 ```bash
 gh issue list --state open --limit 50 --json number,title,labels,createdAt,body
 gh pr list --state open --limit 50 --json number,title,isDraft,reviewDecision,statusCheckRollup,updatedAt
-gh pr checks <number>   # 仅对 CI 红的 PR 逐个取失败 job
+gh pr checks <number>   # 仅对 CI 红的 PR 查看检查结果
 ```
+
+这些列表最多各取 50 条；结果达到上限时说明覆盖不完整，按需要继续分页或缩小范围。
+分类时按需只读查询具体检查、既有运行历史、PR 评论与项目合并规则；不要为获取证据重跑 CI。
+无法取得足够证据时记为“未知／待核实”，不要猜测失败根因或合并就绪状态。
 
 **对 GitHub 只读**：不应用标签、不评论、不关闭、不合并、不推送。
 本地只写一处——`STATE.md` 的待办，且只经 `state-write.mjs`。
@@ -66,7 +70,7 @@ gh pr checks <number>   # 仅对 CI 红的 PR 逐个取失败 job
 ### PR 状态
 
 `Ready to merge` 必须同时满足：所有必需检查通过、达到项目要求的批准数、没有未解决的阻塞性评论。
-本技能**只报告**，绝不合并。
+无法核实任一条件时标记“待核实”，不声称 ready。本技能**只报告**，绝不合并。
 
 ## 第 3 步：写入 STATE.md
 
@@ -74,13 +78,17 @@ gh pr checks <number>   # 仅对 CI 红的 PR 逐个取失败 job
 所以清洗与来源标记必须有机械入口：
 
 ```bash
-node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --section "High Priority" \
+node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --section "High Priority" --position end \
   --item "#456 修复登录接口 500（完成标准：npm test -- auth 通过，且新增测试在修复前失败）" \
   --source untrusted --origin "issue#456"
 
-node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --section "High Priority" \
+node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --section "High Priority" --position end \
   --item "PR #123 CI 红：test:unit 超时（完成标准：CI 绿，且失败分类为 regression）" \
   --source untrusted --origin "pr#123"
+
+# 仅在只读核实 issue #456 已关闭后，移除该节内带该精确来源的条目
+node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --section "High Priority" \
+  --remove-origin "issue#456"
 ```
 
 脚本会：去不可见字符、折叠空白、截断 160 字符、包成 code span、行尾写
@@ -91,7 +99,8 @@ node .claude/skills/harness-loop-issue/scripts/state-write.mjs --state . --secti
 
 - 每条必须带**完成标准**。没有完成标准的条目不写进去——`/harness-loop` 第 2 步会拒绝它。
 - 不重复 issue 正文，只引用编号与一行摘要。
-- 已有条目不重复添加；已关闭/已合并的条目移除。
+- 按来源编号检查既有条目，已有则不重复添加。新条目按优先级从高到低调用 `--position end` 写入；已有队列顺序保持不变，脚本不自动重排。若新项应排在已有条目前，报告给人调整队列，不声称已完成全局排序。
+- 只在只读核实来源已关闭或 PR 已合并后，用 `--remove-origin issue#N|pr#N` 移除该节中带精确来源标记的条目；找不到、无来源标记或状态未知时报告待人工处理，不猜测删除。
 - 不更新 `Last run`、不写 `loop-run-log.md`——本技能只带 `state-write.mjs`，
   它没有这两个能力；写运行日志属于 `/harness-loop` 第 7 步。
 

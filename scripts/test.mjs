@@ -1882,6 +1882,31 @@ section('15b. 不可信输入（R-11）');
   ok('新条目排在既有条目之前', written.indexOf('GH-9') < written.indexOf('existing'), written);
   eq('不存在的 section → 1',
     runSW(['--section', 'Nope', '--item', 'x']).code, 1);
+  fs.writeFileSync(path.join(t, 'STATE.md'), [
+    '# Loop State', '', '## High Priority', '', '- [ ] existing',
+    '- [ ] `similar` <!-- src:untrusted origin=issue#10 -->', '',
+    '## Watch', '', '- [ ] `other section` <!-- src:untrusted origin=issue#1 -->', '',
+  ].join(NL));
+  for (const [id, item] of [['1', 'P1 high'], ['2', 'P2 low'], ['1', 'duplicate']]) {
+    eq(`来源 ${id} 有序追加成功`, runSW(['--section', 'High Priority', '--position', 'end',
+      '--item', item, '--source', 'untrusted', '--origin', `issue#${id}`]).code, 0);
+  }
+  const ordered = readText(path.join(t, 'STATE.md'));
+  ok('末尾追加保留既有顺序及新待办顺序',
+    ordered.indexOf('existing') < ordered.indexOf('P1 high') && ordered.indexOf('P1 high') < ordered.indexOf('P2 low'), ordered);
+  eq('精确来源删除成功', runSW(['--section', 'High Priority', '--remove-origin', 'issue#1']).code, 0);
+  const removed = readText(path.join(t, 'STATE.md'));
+  ok('只移除指定节的相同来源（含重复项）', !removed.includes('P1 high') && !removed.includes('duplicate') &&
+    removed.includes('issue#10') && removed.includes('other section') && removed.includes('P2 low'), removed);
+  eq('不存在的来源不误删', runSW(['--section', 'High Priority', '--remove-origin', 'issue#1']).code, 1);
+  eq('不存在来源时文件不变', readText(path.join(t, 'STATE.md')), removed);
+  eq('不合法来源不误删', runSW(['--section', 'High Priority', '--remove-origin', 'issue#1.*']).code, 1);
+  eq('不合法来源时文件不变', readText(path.join(t, 'STATE.md')), removed);
+  fs.writeFileSync(path.join(t, 'STATE.md'), ['# Loop State', '', '## High Priority', '', '## Watch', ''].join(NL));
+  eq('空节可有序追加', runSW(['--section', 'High Priority', '--position', 'end',
+    '--item', 'first', '--source', 'untrusted', '--origin', 'pr#1']).code, 0);
+  ok('空节写入位于正确章节', readText(path.join(t, 'STATE.md')).indexOf('first') <
+    readText(path.join(t, 'STATE.md')).indexOf('## Watch'));
   // 模板的节名带括号说明：`## High Priority (loop is acting...)`。
   // 要求逐字相等会让按 README 写的 --section 永远找不到节。
   fs.writeFileSync(path.join(t, 'STATE.md'),

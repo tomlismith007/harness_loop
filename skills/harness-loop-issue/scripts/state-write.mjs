@@ -23,8 +23,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs, readText, fail, rejectUnknownFlags, untrusted, sanitizeUntrusted, isEntryPoint } from './lib/common.mjs';
 
-/** 把一行待办插到指定 `## <section>` 节的第一条列表项之前（没有则追加到节末）。 */
-export function appendItem(text, section, line) {
+/** 定位指定章节的正文，支持模板中的标题说明。 */
+function sectionBounds(text, section) {
   // 节名按前缀匹配：模板里是 `## High Priority (loop is acting or waiting on human)`，
   // 要求逐字相等会让 --section "High Priority" 永远找不到节。
   const heading = new RegExp(`^##\\s+${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|\\(|$)`, 'm');
@@ -33,18 +33,41 @@ export function appendItem(text, section, line) {
   const start = m.index + m[0].length;
   const rest = text.slice(start);
   const nextHeading = rest.search(/^##\s/m);
-  const body = nextHeading === -1 ? rest : rest.slice(0, nextHeading);
-  const tail = nextHeading === -1 ? '' : rest.slice(nextHeading);
+  return { start, end: nextHeading === -1 ? text.length : start + nextHeading };
+}
+
+/** 默认插到第一项前；position=end 时按调用顺序追加。 */
+export function appendItem(text, section, line, position = 'start') {
+  const bounds = sectionBounds(text, section);
+  if (!bounds) return null;
+  const body = text.slice(bounds.start, bounds.end);
 
   const lines = body.split('\n');
   const firstItem = lines.findIndex((l) => /^\s*-\s/.test(l));
   if (firstItem === -1) {
     const insertAt = lines.length - 1;
     lines.splice(insertAt, 0, '', line);
+  } else if (position === 'end') {
+    let lastItem = firstItem;
+    for (let i = firstItem + 1; i < lines.length; i++) {
+      if (/^\s*-\s/.test(lines[i])) lastItem = i;
+    }
+    lines.splice(lastItem + 1, 0, line);
   } else {
     lines.splice(firstItem, 0, line);
   }
-  return text.slice(0, start) + lines.join('\n') + tail;
+  return text.slice(0, bounds.start) + lines.join('\n') + text.slice(bounds.end);
+}
+
+/** 只删除指定章节内来源完全匹配的已标记待办。 */
+export function removeOrigin(text, section, origin) {
+  const bounds = sectionBounds(text, section);
+  if (!bounds) return null;
+  const marker = `<!-- src:untrusted origin=${origin} -->`;
+  const lines = text.slice(bounds.start, bounds.end).split('\n');
+  const kept = lines.filter((line) => !(/^\s*-\s+\[[ xX]\]\s/.test(line) && line.trimEnd().endsWith(marker)));
+  if (kept.length === lines.length) return text;
+  return text.slice(0, bounds.start) + kept.join('\n') + text.slice(bounds.end);
 }
 
 function buildLine(args) {
@@ -89,13 +112,14 @@ function selfTest() {
 
 function main() {
   const args = parseArgs();
-  rejectUnknownFlags(args, ['state', 'section', 'item', 'source', 'origin', 'selfTest', 'help'], 'state-write');
+  rejectUnknownFlags(args, ['state', 'section', 'item', 'source', 'origin', 'position', 'removeOrigin', 'selfTest', 'help'], 'state-write');
   if (args.help) {
     process.stdout.write(`state-write — append a STATE.md item, sanitizing untrusted text
 
 Usage:
   node scripts/state-write.mjs --state <dir> --section "High Priority" --item "<text>" \\
-    [--source untrusted --origin "issue#123"]
+    [--source untrusted --origin "issue#123"] [--position end]
+  node scripts/state-write.mjs --state <dir> --section "High Priority" --remove-origin "issue#123"
   node scripts/state-write.mjs --self-test
 
 Exit codes: 0 written / self-test passed · 1 bad arguments · 2 self-test failed
@@ -107,14 +131,29 @@ Exit codes: 0 written / self-test passed · 1 bad arguments · 2 self-test faile
   const root = path.resolve(typeof args.state === 'string' ? args.state : '.');
   const file = path.join(root, 'STATE.md');
   if (!fs.existsSync(file)) fail(`STATE.md not found in ${root}`, 1);
+  const section = typeof args.section === 'string' ? args.section : 'High Priority';
+  const text = readText(file);
+  if (args.removeOrigin !== undefined) {
+    if (typeof args.removeOrigin !== 'string' || !/^(?:issue|pr)#[1-9]\d*$/.test(args.removeOrigin)) {
+      fail('--remove-origin must be issue#N or pr#N', 1);
+    }
+    if (args.item !== undefined || args.origin !== undefined || args.source !== undefined || args.position !== undefined) {
+      fail('--remove-origin cannot be combined with item, source, origin or position', 1);
+    }
+    const next = removeOrigin(text, section, args.removeOrigin);
+    if (next === null) fail(`section "## ${section}" not found in ${file}`, 1);
+    if (next === text) fail(`no matching origin ${args.removeOrigin} in section "## ${section}"`, 1);
+    fs.writeFileSync(file, next, 'utf8');
+    process.stdout.write(`removed ${args.removeOrigin} from ${section}\n`);
+    return;
+  }
   if (typeof args.item !== 'string') fail('--item is required', 1);
   if (args.source !== undefined && !['untrusted', 'local'].includes(args.source)) {
     fail('--source must be untrusted or local', 1);
   }
-  const section = typeof args.section === 'string' ? args.section : 'High Priority';
+  if (args.position !== undefined && !['start', 'end'].includes(args.position)) fail('--position must be start or end', 1);
   const line = buildLine(args);
-  const text = readText(file);
-  const next = appendItem(text, section, line);
+  const next = appendItem(text, section, line, args.position || 'start');
   if (next === null) fail(`section "## ${section}" not found in ${file}`, 1);
   fs.writeFileSync(file, next, 'utf8');
   process.stdout.write(`appended to ${section}: ${line}\n`);
