@@ -1843,6 +1843,7 @@ section('15. 超时杀整棵树');
   ok('不存在的命令被识别为 spawn 失败', missing.spawnFailed === true, JSON.stringify(missing));
 }
 
+// regression:untrusted:start
 section('15b. 不可信输入（R-11）');
 {
   const NL = String.fromCharCode(10);
@@ -1875,6 +1876,8 @@ section('15b. 不可信输入（R-11）');
     runSW(['--section', 'High Priority', '--item', 'GH-9 崩溃', '--source', 'untrusted', '--origin', 'issue#9']).code, 0);
   const written = readText(path.join(t, 'STATE.md'));
   ok('写入行带来源标记', /src:untrusted origin=issue#9/.test(written), written);
+  eq('P1-03 实际写入的普通第三方条目可通过形状闸门',
+    checkGates({ item: 'GH-9', phase: 'fix', stateText: written }).decision, 'proceed');
   ok('新条目排在既有条目之前', written.indexOf('GH-9') < written.indexOf('existing'), written);
   eq('不存在的 section → 1',
     runSW(['--section', 'Nope', '--item', 'x']).code, 1);
@@ -1910,8 +1913,31 @@ section('15b. 不可信输入（R-11）');
   // 模板本身必须真的带括号标题：判据与模板漂移会让这条闸门重新失效。
   ok('STATE 模板的 High Priority 节名带括号说明',
     /^## High Priority \(/m.test(readText(path.join(TEMPLATE_DIR, 'STATE.md'))));
+  for (const item of ['GH-10 修复登录（完成标准：测试通过）', evil + ' `code` ' + 'x'.repeat(200)]) {
+    fs.writeFileSync(path.join(t, 'STATE.md'), readText(path.join(TEMPLATE_DIR, 'STATE.md')));
+    eq('P1-03 第三方条目写入真实模板成功',
+      runSW(['--item', item, '--source', 'untrusted', '--origin', 'issue#10']).code, 0);
+    const actual = readText(path.join(t, 'STATE.md'));
+    const line = actual.split(NL).find((l) => l.includes('src:untrusted')) || '';
+    const body = line.replace(/^- \[ \] /, '').replace(/ <!--.*$/, '');
+    ok('P1-03 实际写入正文完整包成 code span', /^`[^`]+`$/.test(body), line);
+    ok('P1-03 实际写入满足单行清洗与长度限制',
+      !/[\p{Cc}\p{Cf}]/u.test(body) && body.length <= MAX_UNTRUSTED_LENGTH + 2, line);
+    let gate;
+    try {
+      gate = { code: 0, out: execFileSync(process.execPath,
+        [skillScript('gate-check.mjs'), '--item', 'GH-10', '--phase', 'fix', '--state', t, '--diff-files', 'src/app.ts'],
+        { cwd: t, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) };
+    } catch (e) { gate = { code: e.status, out: `${e.stdout || ''}${e.stderr || ''}` }; }
+    eq('P1-03 真实发现写入 → gate CLI 放行', gate.code, 0);
+    ok('P1-03 gate 决策为 proceed', /"decision":\s*"proceed"/.test(gate.out), gate.out);
+  }
+  fs.writeFileSync(path.join(t, 'STATE.md'), readText(path.join(TEMPLATE_DIR, 'STATE.md')));
+  eq('P1-03 本地条目仍可写入', runSW(['--item', 'local `code`', '--source', 'local']).code, 0);
+  ok('P1-03 本地正文保持原样且无第三方标记', readText(path.join(t, 'STATE.md')).includes('- [ ] local `code`\n'));
   rmrf(t);
 }
+// regression:untrusted:end
 
 section('15c. 状态事务（R-25）');
 {

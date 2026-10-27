@@ -92,3 +92,9 @@
 - 两份 gate CLI 的默认策略目录绑定 state（文件则取父目录），同时校验路径参数；显式覆盖保留，Git 与证据执行目录不变。
 - 同一组真实主检出 / worktree 回归：旧代码 `Passed: 4 / Failed: 24`，修复后 `Passed: 28 / Failed: 0`。两份脚本均覆盖拒绝列表、范围阈值、state 文件、显式覆盖、错误参数和正式 gate。
 - 原始输出：`policy-red.log`、`policy-green.log`。P1-01 的提交全套测试为 `Passed: 784 / Failed: 0`。
+
+### P1-03
+
+- untrusted 分支调用现有包装函数；self-test 改为检查真实 buildLine 输出。未修改形状闸门或本地条目的输出。
+- 同一组发现写入回归：旧代码 `Passed: 26 / Failed: 5`，修复后 `Passed: 31 / Failed: 0`。真实 STATE 模板与 gate CLI 串联覆盖普通条目、换行 / 零宽字符 / 反引号 / 长文本，保留裸第三方条目拒绝测试。
+- 原始输出：`untrusted-red.log`、`untrusted-green.log`。P1-02 的提交全套测试为 `Passed: 812 / Failed: 0`。
