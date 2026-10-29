@@ -74,21 +74,16 @@ item 与 run ID 能写终态，终态仍保留锁，直到队列交接完成再�
 {
   "project": "my-project",
   "last_updated": "2026-10-13",
-  "rules": {
-    "single_active_feature": true,
-    "passing_requires_evidence": true,
-    "do_not_skip_verification": true
-  },
+  "note": "本文件只记录完成状态与证据；工作队列见 STATE.md 的 ## High Priority。",
   "status_legend": {
     "not_started": "工作未开始",
-    "in_progress": "当前唯一活动任务",
+    "in_progress": "当前活动任务的记录；选活见 STATE.md 的 High Priority",
     "blocked": "有记录的阻塞未解决",
     "passing": "要求的验证已通过且证据已记录"
   },
   "features": [
     {
       "id": "chat-001",
-      "priority": 1,
       "area": "chat",
       "title": "创建新会话",
       "user_visible_behavior": "用户打开应用，点击 New Chat，侧栏出现新会话，主面板显示空会话态",
@@ -106,12 +101,13 @@ item 与 run ID 能写终态，终态仍保留锁，直到队列交接完成再�
 }
 ```
 
+本文件只记录完成状态与证据，**不承担工作队列**。选活看 `STATE.md` 的 `## High Priority`；`features` 数组的顺序与条目都不表示优先级，也没有 `priority` 字段。
+
 ### 字段约束
 
 | 字段 | 必填 | 约束 |
 |---|---|---|
 | `id` | ✅ | 唯一，格式 `<area>-<序号>` |
-| `priority` | ✅ | 整数，**越小越优先** |
 | `area` | ✅ | 功能域 |
 | `title` | ✅ | 短名 |
 | `user_visible_behavior` | ✅ | 一句话，从用户视角描述可观察行为 |
@@ -122,7 +118,7 @@ item 与 run ID 能写终态，终态仍保留锁，直到队列交接完成再�
 
 ### 状态规则（不可协商）
 
-1. **任何时刻只能有一个 feature 处于 `in_progress`。** 这是 WIP=1，默认安全配置。
+1. **任何时刻只能有一个 feature 处于 `in_progress`。** 这是 WIP=1，默认安全配置；它只是记录，选活看 `STATE.md` 的 `## High Priority`。
 2. **`passing` 需要验证通过且证据已记录。** 只有代码写完不算。
 3. **绝不删除 feature 条目。** 阻塞时置为 `blocked` 并附原因。
 4. **绝不为了让状态好看而改写 verification 步骤。** 那等同于篡改评分标准。

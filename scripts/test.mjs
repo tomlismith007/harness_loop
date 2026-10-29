@@ -982,6 +982,12 @@ section('8. init.sh 生成');
   ok('含 set -euo pipefail', /set -euo pipefail/.test(script));
   ok('含自我识别标记', /LOOP_HARNESS_ACTIVE_INIT/.test(script));
   ok('含传入命令', /npm test/.test(script));
+  // 选活的唯一来源是 STATE.md 的 High Priority；init.sh 的下一步提示不能再教 agent
+  // 从 feature_list.json 选工作，否则启动路径与 AGENTS.md 互相矛盾。
+  ok('init.sh 指向 STATE.md 的工作队列', /STATE\.md/.test(script) && /High Priority/.test(script));
+  ok('init.sh 不再让 agent 从 feature_list 选活',
+    !/Select ONE unfinished feature/.test(script)
+    && !/Read feature_list\.json to see feature status/.test(script));
 }
 
 // ---------------------------------------------------------------- 9. 模板
@@ -1005,9 +1011,14 @@ section('9. 模板完整性');
   const fl = JSON.parse(fs.readFileSync(path.join(TEMPLATE_DIR, 'feature_list.json'), 'utf8'));
   ok('feature_list 有 features 数组', Array.isArray(fl.features));
   ok('feature_list 每条含必需字段', fl.features.every((f) =>
-    f.id && f.priority !== undefined && f.title && f.user_visible_behavior && f.status && Array.isArray(f.verification)));
+    f.id && f.title && f.user_visible_behavior && f.status && Array.isArray(f.verification)));
   ok('feature_list 状态值合法', fl.features.every((f) =>
     ['not_started', 'in_progress', 'blocked', 'passing'].includes(f.status)));
+  // feature_list 只记录完成状态与证据；选活见 STATE.md。rules/priority 会把它变成第二队列。
+  ok('feature_list 顶层 note 声明记录语义', /工作队列见 `STATE\.md`/.test(fl.note || ''));
+  ok('feature_list 不再带 rules', fl.rules === undefined);
+  ok('feature_list 不再带 priority', fl.features.every((f) => f.priority === undefined));
+  ok('status_legend 的 in_progress 指向 STATE 选活', /STATE\.md/.test(fl.status_legend?.in_progress || ''));
 
   const agentsTpl = fs.readFileSync(path.join(TEMPLATE_DIR, 'AGENTS.md'), 'utf8');
   ok('AGENTS 模板含占位符', /\{\{[A-Z_]+\}\}/.test(agentsTpl));
@@ -1015,9 +1026,11 @@ section('9. 模板完整性');
   // 而 /harness-loop 第 2 步让 agent 从 STATE.md 的 High Priority 选——
   // 两条规则同时注入，agent 必选其一，选错就绕过整个 loop。
   ok('AGENTS 模板把 STATE.md 声明为工作队列',
-    /读 `STATE\.md` 的 `## High Priority`/.test(agentsTpl) && /唯一\*\*的工作队列/.test(agentsTpl));
+    /读 `STATE\.md`：`## High Priority`/.test(agentsTpl) && /唯一\*\*的工作队列/.test(agentsTpl));
   ok('AGENTS 模板不再让 agent 从 feature_list 选工作',
     !/读 `feature_list\.json`，选/.test(agentsTpl));
+  ok('AGENTS 工件表把 feature_list 标为记录而非队列',
+    /\| `feature_list\.json` \|[^\n]*不承担队列/.test(agentsTpl));
   // 阶段 1 不生成 loop-constraints.md，模板不能把它列为阶段 1 必需工件。
   ok('AGENTS 模板的阶段 1 工件表指向 harness-constraints.md',
     /\| `harness-constraints\.md` \|/.test(agentsTpl));

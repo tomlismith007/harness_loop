@@ -1,21 +1,16 @@
 {
   "project": "{{PROJECT_NAME}}",
   "last_updated": "{{DATE}}",
-  "rules": {
-    "single_active_feature": true,
-    "passing_requires_evidence": true,
-    "do_not_skip_verification": true
-  },
+  "note": "本文件只记录完成状态与证据，不用于选择下一个任务；工作队列见 `STATE.md` 的 `## High Priority`。",
   "status_legend": {
     "not_started": "工作未开始",
-    "in_progress": "当前唯一活动任务",
+    "in_progress": "当前活动任务的记录；选活见 STATE.md 的 High Priority",
     "blocked": "有记录的阻塞未解决",
     "passing": "要求的验证已通过且证据已记录"
   },
   "features": [
     {
       "id": "setup-001",
-      "priority": 1,
       "area": "setup",
       "title": "项目初始化",
       "user_visible_behavior": "开发者克隆仓库后能运行 ./init.sh 并看到验证通过",
@@ -30,7 +25,6 @@
     },
     {
       "id": "core-001",
-      "priority": 2,
       "area": "core",
       "title": "第一个用户可见功能",
       "user_visible_behavior": "描述用户能观察到什么行为",
@@ -45,7 +39,6 @@
     },
     {
       "id": "verify-001",
-      "priority": 3,
       "area": "verify",
       "title": "验证覆盖",
       "user_visible_behavior": "核心路径有端到端测试，且测试能捕获回归",

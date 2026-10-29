@@ -381,10 +381,11 @@ export function initScriptFromCommands(commands) {
   lines.push('echo "=== Verification Complete ==="');
   lines.push('echo');
   lines.push('echo "=== Next steps ==="');
-  lines.push('echo "1. Read feature_list.json to see feature status"');
-  lines.push('echo "2. Select ONE unfinished feature"');
-  lines.push('echo "3. Implement only that feature"');
-  lines.push('echo "4. Re-run verification before claiming completion"');
+  lines.push('echo "1. Read STATE.md and take the first unchecked item under ## High Priority"');
+  lines.push('echo "2. That item is the only work item for this session"');
+  lines.push('echo "3. feature_list.json records completion and evidence; it is not the queue"');
+  lines.push('echo "4. Implement only that item"');
+  lines.push('echo "5. Re-run verification before claiming completion"');
   lines.push('');
   return lines.join('\n');
 }

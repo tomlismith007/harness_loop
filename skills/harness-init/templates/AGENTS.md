@@ -11,11 +11,10 @@
 1. `pwd` 确认工作目录是仓库根。
 2. 完整读本文件。
 3. 读项目文档（README 或等价物）。
-4. 读 `STATE.md` 拿当前活动与人类收件箱。
-5. 读 `STATE.md` 的 `## High Priority`，取第一条未勾选的 `- [ ]`——那是**唯一**的工作队列。
-   `feature_list.json` 只回答"这项做完没有、证据是什么"，不是队列。
-6. 跑 `./init.sh` 验证环境健康。
-7. `git log --oneline -5` 看最近提交。
+4. 读 `STATE.md`：`## High Priority` 第一条未勾选的 `- [ ]` 是**唯一**的工作队列；同时看 `## Active` 与 `## Human Inbox`。
+   `feature_list.json` 只记录完成状态与证据，不是队列。
+5. 跑 `./init.sh` 验证环境健康。
+6. `git log --oneline -5` 看最近提交。
 
 **若基线验证失败，先修基线。不要在坏状态上叠新工作。**
 
@@ -33,7 +32,7 @@
 | 文件 | 作用 |
 |---|---|
 | `STATE.md` | **工作队列**（High Priority）+ 收件箱 + 当前活动 |
-| `feature_list.json` | 完成状态与证据，唯一真相源 |
+| `feature_list.json` | 完成状态与证据记录（**不承担队列**；队列见 `STATE.md`） |
 | `init.sh` | 标准启动与验证路径 |
 | `harness-constraints.md` | 拒绝列表与闸门（阶段 2 另加 `loop-constraints.md`） |
 | `LESSONS.md` | 错题本：返工记录，经验转正为规则 |
