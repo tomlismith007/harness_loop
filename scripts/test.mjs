@@ -15,12 +15,12 @@ import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 
 import {
   parseArgs, boolArg, matchesDenylist, loadDenylist, parseDenylistFrom,
   structuredText, textHas, structuredHas, detectProject, verificationCommands,
-  initScriptFromCommands, loadLimits, untrusted, sanitizeUntrusted, MAX_UNTRUSTED_LENGTH,
+  initScriptFromCommands, loadLimits, parseLimitsFrom, untrusted, sanitizeUntrusted, MAX_UNTRUSTED_LENGTH,
   PACK_ROOT, SKILLS_DIR, readText,
   runWithTreeKill, hasGnuTimeout, samePath,
 } from './lib/common.mjs';
@@ -185,7 +185,8 @@ section('2. 拒绝列表匹配');
   // 拒绝列表的真相源是约束文件，不是脚本里的常量。
   eq('无约束文件时回落到常量', matchesDenylist('auth/x.ts', loadDenylist('/nonexistent-dir-xyz')) !== null, true);
 
-  // harness / loop 拆文件：harness-constraints.md 优先，loop-constraints.md 兼容回落。
+  // harness / loop 拆文件：拒绝列表 harness 优先；阈值按 key 决定（scope 仍 harness，
+  // attempts 移到 loop 后由 loop 优先）。旧布局的 attempts 仍在 ## Code，必须能回退。
   {
     const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-split-'));
     const NL = String.fromCharCode(10);
@@ -202,6 +203,38 @@ section('2. 拒绝列表匹配');
     fs.rmSync(path.join(t, 'harness-constraints.md'));
     eq('只有 loop 文件时回落', matchesDenylist('payments/x.ts', loadDenylist(t)), 'payments/**');
     eq('只有 loop 文件时阈值回落', loadLimits(t).maxFilesPerFix, 9);
+    rmrf(t);
+  }
+
+  // 尝试上限的新位置是 loop-constraints.md 的 ## Attempts & Ledger；旧位置 ## Code 回退。
+  eq('Attempts & Ledger 段解析 maxAttempts',
+    parseLimitsFrom(['## Attempts & Ledger', '', '- 每个 work item 最多 4 次修复尝试；之后升级。', '']
+      .join(String.fromCharCode(10))).maxAttempts, 4);
+  eq('同一文件内 Attempts & Ledger 优先于 Code',
+    parseLimitsFrom(['## Code', '- 每个 work item 最多 7 次修复尝试；之后升级。',
+      '## Attempts & Ledger', '- 每个 work item 最多 4 次修复尝试；之后升级。', '']
+      .join(String.fromCharCode(10))).maxAttempts, 4);
+  {
+    const t = fs.mkdtempSync(path.join(os.tmpdir(), 'lh-attempts-'));
+    const NL = String.fromCharCode(10);
+    fs.writeFileSync(path.join(t, 'harness-constraints.md'),
+      ['## Code', '- 每个 work item 最多 3 次修复尝试；之后升级。', ''].join(NL));
+    fs.writeFileSync(path.join(t, 'loop-constraints.md'),
+      ['## Attempts & Ledger', '- 每个 work item 最多 5 次修复尝试；之后升级。', ''].join(NL));
+    const url = pathToFileURL(path.join(PACK_ROOT, 'scripts', 'lib', 'common.mjs')).href;
+    const runLimits = (dir) => {
+      const code = `import(${JSON.stringify(url)}).then((m) => process.stdout.write(JSON.stringify(m.loadLimits(${JSON.stringify(dir)})))).catch((e) => { console.error(e); process.exit(1); });`;
+      return spawnSync(process.execPath, ['-e', code], { encoding: 'utf8' });
+    };
+    const both = runLimits(t);
+    ok('attempts 子进程读取成功', both.status === 0, both.stderr);
+    eq('attempts 两文件都在时 loop 优先', JSON.parse(both.stdout || '{}').maxAttempts, 5);
+    ok('attempts 冲突有 stderr 提示', /defined in both/.test(both.stderr), both.stderr);
+
+    fs.rmSync(path.join(t, 'loop-constraints.md'));
+    const old = runLimits(t);
+    eq('旧布局 attempts 回退 harness', JSON.parse(old.stdout || '{}').maxAttempts, 3);
+    ok('旧布局 attempts 有弃用提示', /deprecated/.test(old.stderr), old.stderr);
     rmrf(t);
   }
 
@@ -825,6 +858,13 @@ section('5. 闸门判定');
     fs.writeFileSync(path.join(st, 'loop-constraints.md'), '  loop-pause-all  \n');
     eq('loop-constraints.md 的标记也生效', isPaused(st).paused, true);
 
+    // 旧布局把标记写在 harness-constraints.md；迁移后仍须能刹车。
+    fs.writeFileSync(path.join(st, 'STATE.md'), '—\n');
+    fs.writeFileSync(path.join(st, 'loop-constraints.md'), '—\n');
+    fs.writeFileSync(path.join(st, 'harness-constraints.md'), 'loop-pause-all\n');
+    eq('旧位置 harness-constraints.md 的标记仍生效', isPaused(st).paused, true);
+    fs.rmSync(path.join(st, 'harness-constraints.md'));
+
     // kill switch 的两个方向都是真的：文档里教人怎么暂停会误触发，
     // 行尾一个零宽字符会绕过刹车。
     const pauseCases = [
@@ -1063,6 +1103,20 @@ section('9. 模板完整性');
     && !/绝不重构无关代码/.test(harnessTpl));
   ok('harness 约束用指针指向 AGENTS 工作规则',
     /见 `AGENTS\.md` 的「工作规则」/.test(harnessTpl));
+
+  // 阶段 1 不再带账本/尝试上限/kill switch/worktree；这些整段只在阶段 2 的 loop 模板。
+  const loopTpl = readText(path.join(LOOP_TEMPLATE_DIR, 'loop-constraints.md'));
+  ok('harness 约束不再包含 loop 运行机制',
+    !/## Worktrees/.test(harnessTpl)
+    && !/loop-pause-all/.test(harnessTpl)
+    && !/loop-ledger\.json/.test(harnessTpl)
+    && !/最多 3 次/.test(harnessTpl));
+  ok('loop 约束包含账本/尝试上限/kill switch/worktrees',
+    /## Attempts & Ledger/.test(loopTpl)
+    && /## Kill Switch/.test(loopTpl)
+    && /## Worktrees/.test(loopTpl)
+    && /loop-ledger\.json/.test(loopTpl)
+    && /最多 3 次/.test(loopTpl));
 
   // 出厂 feature 必须自带占位标记，否则会绕过阶段 1 判据。
   ok('feature 模板每条都带占位标记', fl.features.every((f) => /^\s*占位/.test(f.notes || '')));

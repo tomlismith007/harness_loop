@@ -105,7 +105,10 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 **不要跳级。** 阶段 1 让文件存在，阶段 2 让机制**起作用**。`--upgrade` 有跳级保护，前一阶段未达成时拒绝写入。
 
 **两层可以分开用**：阶段 1 的产物不依赖任何 loop 机制——`gate-check.mjs` 在只有
-`harness-constraints.md` 的仓库里照样拦拒绝列表、读 kill switch。想要 loop 再加阶段 2。
+`harness-constraints.md` 的仓库里照样拦拒绝列表、执行 5 文件 scope 上限。想要 loop 再加阶段 2。
+
+**旧布局兼容**：旧项目的 `harness-constraints.md` 仍可保留账本/尝试上限/kill switch/worktrees；
+脚本会回退读取并在 stderr 提示。迁移方法见 `skills/harness-loop-init/SKILL.md` 的「从旧布局升级」。
 
 ---
 
@@ -164,14 +167,14 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 | 3 | `dirty-tree` | gate 阶段工作区有未提交改动（`changed-files.txt` / `verifier-report.md` 豁免） | escalate |
 | 4 | `denylist` | 改动命中拒绝列表（含 `.secrets/` 等隐藏目录） | escalate |
 | 5 | `untrusted-shape` | `STATE.md` 里带 `src:untrusted` 的条目没有包成 code span | escalate |
-| 6 | `scope` | 文件数超过 `loop-constraints.md` 的阈值（默认 5，cleanup 10） | escalate |
+| 6 | `scope` | 文件数超过 `harness-constraints.md` 的 scope 阈值（默认 5；cleanup 10 在 `loop-constraints.md`） | escalate |
 | 7 | `head-commit` | gate 阶段 sha 缺失或不一致 | escalate |
 | 8 | `red-check` | 回退测试 `fail`；`behavior` 类改动的 `not-run` | escalate |
 | 9 | `verification-evidence` | `approve` 无证据、证据自相矛盾、缺 `Checks not run`、缺 `Author`/`Reviewed commit`、PASS 无输出片段 | escalate |
 | 10 | `verification` | 验证者 `reject` / `escalate-human` | escalate |
 | 11 | `awaiting-verification` | gate 阶段没有 verdict | escalate（与"验失败"区分） |
 
-「该不该继续试」不在这里判：尝试次数是账本的事实，由 `ledger-check.mjs --item <id>` 的 `attempt-limit` 判定（默认 3，可用 `--max-attempts` 或约束文件的「最多 N 次」覆盖）。
+「该不该继续试」不在这里判：尝试次数是账本的事实，由 `ledger-check.mjs --item <id>` 的 `attempt-limit` 判定（默认 3，可用 `--max-attempts` 或 `loop-constraints.md ## Attempts & Ledger` 的「最多 N 次」覆盖；旧布局回退 `harness-constraints.md ## Code`）。
 
 ---
 
@@ -182,8 +185,8 @@ node skills/harness-init/scripts/harness-stage.mjs /path/to/repo --stage 1 --req
 而实际被注入生效的是 AGENTS.md。测试断言两边的条数一致。
 
 **注意区分两类约束**：这里列的是**开发这个技能仓库**的规则。技能发给用户后，
-用户项目里生效的是 `skills/harness-init/templates/harness-constraints.md` 与 `skills/harness-loop-init/templates/loop-constraints.md`
-里的那套（独立验证、3 次上限、拒绝列表、回退测试、NOT RUN、真机验证、机械判定）。
+用户项目里生效的是 `harness-constraints.md`（拒绝列表、scope 上限、push/merge、数据安全）
+与 `loop-constraints.md`（独立验证、账本/3 次上限、kill switch、worktrees、回退测试、NOT RUN、预算、教训）。
 
 1. 技能目录是产物，源在根目录
 2. 技能必须自包含

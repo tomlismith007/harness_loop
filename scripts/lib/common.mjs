@@ -472,11 +472,14 @@ export function loadBudget(root = '.') {
 }
 
 /**
- * 约束文件的读取顺序。
+ * 约束文件的读取顺序（拒绝列表专用）。
  *
  * harness 与 loop 是两层：阶段 1 只有 harness-constraints.md（拒绝列表、
- * 代码规则、沟通），阶段 2 追加 loop-constraints.md（验证、预算、教训）。
+ * 代码规则、沟通），阶段 2 追加 loop-constraints.md（验证、账本、预算、教训）。
  * 拆开后"只用 harness 不用 loop"才成立。
+ *
+ * 拒绝列表是阶段 1 规则，所以这里保持 harness 优先。阈值不共用这个顺序：
+ * loadLimits 按 key 决定（scope 仍 harness 优先，attempts 新位置 loop 优先）。
  *
  * 兼容：拆之前的仓库只有 loop-constraints.md，两个读取函数都回落它。
  */
@@ -508,8 +511,10 @@ export function loadDenylist(root = '.') {
 }
 
 /**
- * 从约束文件读阈值：`## Code` 的「超过 N 个文件」与「最多 N 次」，
- * `## Cleanup` 的「N 个文件」（可选）。
+ * 从约束文件读阈值：
+ *   `## Code` 的「超过 N 个文件」
+ *   `## Cleanup` 的「N 个文件」
+ *   `## Attempts & Ledger` 的「最多 N 次」（旧布局在 `## Code`，保留回退）
  *
  * 阈值是策略，和拒绝列表放在同一个文件。此前 maxFilesPerFix: 5 是脚本里的常量，
  * 改约束文件对闸门毫无影响——文档说"5 是约束"，实现说"5 是常量"。
@@ -519,6 +524,7 @@ export function parseLimitsFrom(text) {
   const section = (name) => ((text || '').split(new RegExp(`^##\\s*${name}\\s*$`, 'm'))[1] ?? '').split(/^##\s/m)[0];
   const code = section('Code');
   const cleanup = section('Cleanup');
+  const attempts = `${section('Attempts & Ledger')}\n${code}`;
   const num = (body, re) => {
     const m = body.match(re);
     if (!m) return null;
@@ -528,20 +534,53 @@ export function parseLimitsFrom(text) {
   return {
     maxFilesPerFix: num(code, /超过\s*(\d+)\s*个文件/),
     maxFilesPerCleanup: num(cleanup, /(\d+)\s*个文件/),
-    maxAttempts: num(code, /最多\s*(\d+)\s*次/),
+    maxAttempts: num(attempts, /最多\s*(\d+)\s*次/),
   };
 }
 
-/** 读项目的约束阈值；缺失项为 null。两个文件合并，先出现的非 null 值优先。 */
+const warned = new Set();
+function warnOnce(message) {
+  if (warned.has(message)) return;
+  warned.add(message);
+  process.stderr.write(`[harness-loop] ${message}\n`);
+}
+
+/**
+ * 读项目的约束阈值；缺失项为 null。
+ *
+ * 优先级按 key 决定，而不是整文件：
+ *   maxFilesPerFix     harness → loop   （scope 是阶段 1 规则）
+ *   maxFilesPerCleanup loop → harness   （清理是 loop 规则）
+ *   maxAttempts        loop → harness   （阶段 2 移到 ## Attempts & Ledger）
+ *
+ * 兼容：旧项目把 maxAttempts 留在 harness-constraints.md，仍可读，但会在 stderr
+ * 打一行弃用提示；两个文件都定义且值不同时，loop 胜出并提示冲突。
+ */
 export function loadLimits(root = '.') {
-  const out = { maxFilesPerFix: null, maxFilesPerCleanup: null, maxAttempts: null };
-  for (const p of constraintsFiles(root)) {
-    const v = parseLimitsFrom(readText(p));
-    for (const k of Object.keys(out)) {
-      if (out[k] === null && v[k] !== null) out[k] = v[k];
-    }
+  const harnessPath = path.join(root, HARNESS_CONSTRAINTS);
+  const loopPath = path.join(root, LOOP_CONSTRAINTS);
+  const h = exists(harnessPath) ? parseLimitsFrom(readText(harnessPath)) : null;
+  const l = exists(loopPath) ? parseLimitsFrom(readText(loopPath)) : null;
+
+  const pick = (key, order) => {
+    for (const v of order) if (v && v[key] !== null) return v;
+    return null;
+  };
+
+  // shortcut: harness-constraints fallback for maxAttempts, remove in 2.0.0
+  const attempts = pick('maxAttempts', [l, h]);
+  if (attempts && attempts === h) {
+    warnOnce('maxAttempts read from harness-constraints.md (deprecated; move to loop-constraints.md §Attempts & Ledger; fallback removed in 2.0.0)');
   }
-  return out;
+  if (h && l && h.maxAttempts !== null && l.maxAttempts !== null && h.maxAttempts !== l.maxAttempts) {
+    warnOnce(`maxAttempts defined in both constraint files (harness=${h.maxAttempts}, loop=${l.maxAttempts}); using loop-constraints.md`);
+  }
+
+  return {
+    maxFilesPerFix: pick('maxFilesPerFix', [h, l])?.maxFilesPerFix ?? null,
+    maxFilesPerCleanup: pick('maxFilesPerCleanup', [l, h])?.maxFilesPerCleanup ?? null,
+    maxAttempts: attempts?.maxAttempts ?? null,
+  };
 }
 
 /** 判断路径是否命中拒绝列表 */

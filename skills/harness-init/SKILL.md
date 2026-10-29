@@ -58,10 +58,10 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --upgrade --
 | 文件 | 作用 | 必须改什么 |
 |---|---|---|
 | `AGENTS.md` | 入口：启动路径、工作规则、完成定义 | 项目名与验证命令 |
-| `feature_list.json` | 功能清单 + 证据 | 3 条占位 feature 换成真实功能 |
+| `feature_list.json` | 完成状态与证据记录（队列在 `STATE.md`） | 3 条占位 feature 换成真实功能 |
 | `STATE.md` | 活状态：收件箱、当前活动、观察列表 | 一般不用改 |
 | `init.sh` | 标准启动与验证路径 | 把 `npm install && npm test` 换成项目真实命令 |
-| `harness-constraints.md` | 拒绝列表、合并规则、kill switch | 按本仓库实际情况增删路径 |
+| `harness-constraints.md` | 拒绝列表、scope 上限、合并规则、数据安全（loop 机制在阶段 2） | 按本仓库实际情况增删路径 |
 | `LESSONS.md` | 错题本 | 一般不用改 |
 | `verifier-report.md` | 验证者报告的格式模板（闸门按它校验 Author / sha / 输出片段） | 一般不用改 |
 
@@ -105,3 +105,5 @@ node .claude/skills/harness-init/scripts/harness-stage.mjs <target> --stage 1 --
 `--upgrade --stage 2`（缺阶段 2 的模板，装配器会报错退出）。直接调用 `/harness-loop-init`。
 本技能输出的报告里，阶段 2 一栏固定为 NOT RUN——阶段 2 判据未随本技能安装，不是失败；
 按其 evidence 的指引转去 `/harness-loop-init`。
+
+旧布局（loop 规则仍留在 `harness-constraints.md`）的迁移见 `/harness-loop-init` 的「从旧布局升级」。

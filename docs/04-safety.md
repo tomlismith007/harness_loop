@@ -120,6 +120,9 @@ audits/**
 - 对同一事项的第 3 次尝试失败
 - 破坏性数据库模式迁移
 
+阈值来源：10 文件清理上限在 `loop-constraints.md` 的 `## Cleanup`；第 3 次尝试上限在
+`loop-constraints.md` 的 `## Attempts & Ledger`（旧布局回退 `harness-constraints.md` 的 `## Code`）。
+
 ---
 
 ## 机密信息

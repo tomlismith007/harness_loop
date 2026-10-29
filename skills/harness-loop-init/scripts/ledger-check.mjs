@@ -429,7 +429,8 @@ Options:
                          (default 3; override with --max-attempts). The count comes
                          from loop-ledger.json, not from a caller-supplied number.
   --max-attempts <n>     Per-item attempt limit (default: 3, or "最多 N 次" in
-                         loop-constraints.md ## Code)
+                         loop-constraints.md ## Attempts & Ledger; old layouts
+                         fall back to harness-constraints.md ## Code)
   --pattern <id>         Only judge attempts belonging to this loop. A shared ledger
                          would otherwise let one loop's failures trip another's breaker.
   --escalation           Emit an escalation markdown document

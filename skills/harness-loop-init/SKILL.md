@@ -59,7 +59,7 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --upgra
 |---|---|
 | `loop-ledger.json` | 熔断器的运行时状态：每次尝试一行 |
 | `loop-run-log.md` | 只追加的运行历史：每轮一条 JSON |
-| `loop-constraints.md` | loop 规则（验证 / 预算 / 教训 / 清理） |
+| `loop-constraints.md` | loop 规则（验证 / 账本与尝试上限 / kill switch / worktrees / 预算 / 教训 / 清理） |
 | `docs/04-safety.md` | 拒绝列表的文档副本；判据 6 与 `harness-constraints.md` 逐条比对。已存在则**不覆盖**，只在输出里报告漂移 |
 
 完整产物 = **4 个文件 + 1 份演练记录**（有文件被跳过时相应减少）。
@@ -140,6 +140,16 @@ node .claude/skills/harness-loop-init/scripts/harness-stage.mjs <target> --stage
 - **真实使用验证**：上面两项均有真实证据并经人工确认才算通过；缺少任一证据时标记 NOT RUN，说明下一次真实任务如何补齐。不要为了让阶段完成而虚构修复或报告。
 
 机械装配通过可用于开始真实任务；完整阶段 2 结论需同时满足机械装配与人工确认。`--require` 是机械检查，不改变其退出码来代替人工判断。
+
+## 从旧布局升级
+
+旧项目的 `harness-constraints.md` 可能仍含账本指令、尝试上限、kill switch、worktrees。
+不需要改写也能继续运行：`loadLimits` 先读 `loop-constraints.md` 的 `## Attempts & Ledger`，
+找不到再回退 `harness-constraints.md` 的 `## Code`，并向 stderr 打一行弃用提示。
+`gate-check` 继续扫描 `STATE.md` / `harness-constraints.md` / `loop-constraints.md` 三个位置。
+
+想消除提示，手工把上述四段移到 `loop-constraints.md` 的对应章节（`## Attempts & Ledger`、
+`## Kill Switch`、`## Worktrees`）。装配器不会自动改写用户文件。回退读取在 2.0.0 移除。
 
 ## 常见错误
 

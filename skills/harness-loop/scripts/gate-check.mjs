@@ -53,8 +53,9 @@ export const LOOP_ARTIFACTS = ['changed-files.txt', 'verifier-report.md'];
 /**
  * kill switch：只认独占一行的标记。
  *
- * STATE.md 或 loop-constraints.md 里任何对 loop-pause-all 的散文提及都不算生效——
- * 否则一次说明性文字就把循环永久停死。`--state` 指向的目录下读这两个文件。
+ * STATE.md / harness-constraints.md / loop-constraints.md 里任何对 loop-pause-all
+ * 的散文提及都不算生效——否则一次说明性文字就把循环永久停死。
+ * `--state` 指向的目录下读这三个文件。
  */
 /**
  * 执行证据里声明的一条命令，返回真实退出码。

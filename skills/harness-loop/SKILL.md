@@ -48,8 +48,8 @@ kill switch 只认独占一行——散文里提到不算，否则一次说明�
 
 ### 第 1 步：加载约束
 
-读 `harness-constraints.md`（拒绝列表 / 代码规则 / kill switch）与 `loop-constraints.md`
-（验证 / 预算 / 教训；阶段 2 才有，不存在就跳过），输出确认：
+读 `harness-constraints.md`（拒绝列表 / scope 上限 / 沟通 / 数据安全）与 `loop-constraints.md`
+（验证 / 账本与尝试上限 / kill switch / worktrees / 预算 / 教训；阶段 2 才有，不存在就跳过），输出确认：
 
 ```
 Constraints loaded from harness-constraints.md (+ loop-constraints.md): N rules active.
@@ -82,7 +82,8 @@ node .claude/skills/harness-loop/scripts/ledger-check.mjs --ledger loop-ledger.j
 ```
 
 尝试次数读的是**账本**，不是命令行参数——传一个更小的数字不会重置上限。
-阈值默认 3，可用 `--max-attempts` 或约束文件的「最多 N 次」覆盖。
+阈值默认 3，可用 `--max-attempts` 或 `loop-constraints.md` 的 `## Attempts & Ledger` 覆盖；
+旧布局回退 `harness-constraints.md` 的 `## Code`。
 
 | 退出码 / 输出 | 动作 |
 |---|---|

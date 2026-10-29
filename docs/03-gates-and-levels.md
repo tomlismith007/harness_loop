@@ -56,6 +56,8 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 | 改动包含与 work item 无关的文件 | `escalated`（范围蔓延） |
 | 清理类 PR 改动 > 10 个文件 | 人工审批（不自动合并） |
 
+阈值来源：`harness-constraints.md` 的 `## Code`（5）与 `loop-constraints.md` 的 `## Cleanup`（10）。
+
 **为什么**：范围蔓延是 agent 的典型失败模式。表现为改了 12 个文件、800 行代码，却没有一条端到端可用的路径。小 diff 是可靠性的前提。
 
 ### 3. 尝试上限（Attempt Limit）—— 由熔断器判定，不是闸门
@@ -66,6 +68,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 
 **为什么**：三次尝试不成功说明问题不在实现细节，而在理解层面——可能是根因判断错了、需求不清楚、或者是环境问题。继续重试只会烧 token 并污染状态。
 计数必须来自账本：曾经这条判定读的是命令行参数 `--attempts`，传 0 就能在账本已有 5 次失败时继续。
+阈值来源：`loop-constraints.md` 的 `## Attempts & Ledger`；旧布局回退 `harness-constraints.md` 的 `## Code`。
 
 熔断器的三个阈值（见 `docs/05-failure-modes.md` 第六节）：
 
@@ -145,7 +148,7 @@ L1 的唯一目的是**校准 triage 的准确度**。如果 triage 有一半是
 | 文件数超限 | **机械** | `gate-check.mjs` 数 diff 清单 |
 | head-commit 一致 | **机械** | 所有改动类型都要求 reviewed/head 相等；CLI 还要求显式 head 等于 Git 实际 HEAD，证据重放结束后再次核对 HEAD 与工作区 |
 | 回退测试结论 | **机械** | 读 `--red-check` 的值；`behavior` 类强制，其余三类要求报告里写理由 |
-| kill switch | **机械** | `gate-check.mjs --state` 读 `STATE.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` |
+| kill switch | **机械** | `gate-check.mjs --state` 读 `STATE.md` / `harness-constraints.md` / `loop-constraints.md` 里独占一行的 `loop-pause-all` |
 | **改动是否与 work item 相关** | **人工** | 脚本不知道 work item 的目标，无法判定"范围蔓延" |
 | **verdict 是否诚实** | **半机械** | 闸门会重放证据里的命令并比对退出码；能抓"报告说 PASS、命令实际失败"，抓不到"命令覆盖不到这次改动" |
 | 证据命令重放 | **机械** | `gate-check.mjs` 在 `--evidence-cwd` 下执行报告中的 `Tests: <command> → PASS` 命令；`--no-replay` 或非行为类自动跳过并记 NOT RUN；重放后仍须保持已审 HEAD 与干净工作区 |
@@ -177,7 +180,7 @@ node .claude/skills/harness-loop/scripts/gate-check.mjs \
 | `--pause false` | `--pause` 是布尔标志，`false` 会被当成位置参数 → `pause=true` → **永久紧急刹车**。要显式传假用 `--pause=false`，或干脆省略（省略即假） |
 | `--verdict ESCALATE_HUMAN` | 大小写与连字符会被归一化，两种写法都接受（验证者的输出格式是大写下划线） |
 
-kill switch 由 `gate-check.mjs` 自己读取（`--state` 指向的目录下查 `STATE.md` 与 `loop-constraints.md`）：
+kill switch 由 `gate-check.mjs` 自己读取（`--state` 指向的目录下查 `STATE.md`、`harness-constraints.md` 与 `loop-constraints.md`）：
 
 ```bash
 node .claude/skills/harness-loop/scripts/gate-check.mjs --item pr-1 --phase fix --diff-files a.ts --state .

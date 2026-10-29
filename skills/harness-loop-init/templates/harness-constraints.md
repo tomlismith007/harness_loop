@@ -54,28 +54,12 @@ templates/**
   本节只列可被脚本解析的阈值。
 - 单个修复触及超过 5 个文件，或需要设计变更 → 停止并升级。
   <!-- 阈值来源：本行由 gate-check.mjs 的 loadLimits 解析；改数字即改变 scope 闸门的行为 -->
-- 每个 work item 最多 3 次修复尝试；之后升级。
-  <!-- 阈值来源：ledger-check.mjs 的 attempt-limit 从本行读取；计数来自 loop-ledger.json，不是命令行参数 -->
-- 每次尝试追加到 `loop-ledger.json`——用脚本，不要手改 JSON：
-  `node .claude/skills/harness-loop/scripts/ledger-check.mjs --append --item <id> --outcome <success|failure|noop> --action <text> [--error <text>]`
-- 重试前跑 `node .claude/skills/harness-loop/scripts/ledger-check.mjs --item <id>`；退出码 2 即停止并升级。
-
-## Kill Switch
-
-- `loop-pause-all` **独占一行**写在 `STATE.md` 或本文件里 → `/harness-loop` 立即退出。
-- 散文里提到不算；清除标记后人工重启。
-- `gate-check.mjs --state <dir>` 会真的读它并返回退出码 3。
 
 ## Communication
 
 - 做之前先说明将要做什么。
 - 未经批准不关闭 issue 或 PR。
 - 只在需要人工决策时通知，不做状态播报。
-
-## Worktrees
-
-- 无人值守的代码改动必须在独立 git worktree 中进行。
-- 一个修复一个 worktree；REJECT 或升级后保留未合并的提交和现场，供人工处理。只清理已并入基准分支且无未提交改动的 worktree。
 
 ## Data
 
@@ -86,4 +70,6 @@ templates/**
 ---
 
 <!-- 仓库特定规则写在下方。上面的默认集可以收紧，不可以放宽。 -->
+
+> loop 运行规则（账本、尝试上限、kill switch、worktrees）见 `loop-constraints.md`（阶段 2 安装）。
 
