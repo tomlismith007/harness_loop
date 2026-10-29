@@ -1,6 +1,6 @@
 # Spec：收敛 harness-init 的三处重复
 
-- **状态**：DRAFT — 等待批准；批准前不改实现代码
+- **状态**：IMPLEMENTED（2026-10-29）— 三阶段已提交：A `08b53ad`、B `207280b`、C `4a0539f`；`bash init.sh` → 1001 passed / 0 failed。
 - **日期**：2026-10-29
 - **作用域**：`skills/harness-init`、`skills/harness-loop-init`、`skills/harness-loop`、`skills/harness-loop-issue` 的模板与共享脚本，以及相关 docs/tests
 - **依据**：本会话的 grilling 决策（Q1–Q23）+ 静态核查报告（file:line 见各节）
@@ -454,3 +454,23 @@ bash init.sh
 - **旧项目**：不自动改写用户文件；回退逻辑在 2.0.0 才移除，期间保留 `shortcut:` 注释。
 - **行号漂移**：本 spec 的行号是 2026-10-29 工作树快照；实现前用 `grep` 重新定位，不要按行号盲改。
 - **副本同步**：任何共享文件改动漏掉一份副本，`test.mjs:1163` 会红；这是有意的保护，不要放宽断言。
+
+---
+
+## 13. 实施记录
+
+| 阶段 | Commit | Red check（改动前） | Green（改动后） |
+|---|---|---|---|
+| A 单队列 | `08b53ad` | 8 failed：init.sh 队列文案、feature_list note/rules/priority/status_legend、AGENTS 队列措辞与工件表 | `bash init.sh` → 988 passed / 0 failed |
+| B 工作规则去重 | `207280b` | 2 failed：constraints 仍含三句重复、AGENTS 指针缺失 | → 991 passed / 0 failed |
+| C 阶段边界 | `4a0539f` | 7 failed：`## Attempts & Ledger` 解析、loop 优先、冲突/弃用提示、模板边界、同文件内新段优先 | → 1001 passed / 0 failed |
+
+附加证据：
+
+- 阶段 1 冒烟：临时仓库 `--upgrade --stage 1` 退出 0，生成 7 个文件；`--stage 1 --require` 退出 2（占位 feature 未替换）。
+- 阶段 1 模板不再包含 `loop-ledger` / `loop-pause-all` / `## Worktrees` / `最多 3 次`。
+- 5 份 `common.mjs`、2 份 `gate-check.mjs`、2 份 `ledger-check.mjs`、2 份 `harness-constraints.md` 逐字节一致（`test.mjs:1132-1163` 守护）。
+- 四个技能 `VERSION` 统一为 `1.2.0`。
+- 旧布局回退：`maxAttempts` 仍可从 `harness-constraints.md ## Code` 读取，并向 stderr 打弃用提示；2.0.0 移除。
+
+未做（保持原样）：`docs/archive/`、`spec-plan/skill-doc-audit-2026-10-24.md`（历史审计快照，其中的旧路径描述不再更新）。
