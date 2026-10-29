@@ -1031,6 +1031,11 @@ section('9. 模板完整性');
     !/读 `feature_list\.json`，选/.test(agentsTpl));
   ok('AGENTS 工件表把 feature_list 标为记录而非队列',
     /\| `feature_list\.json` \|[^\n]*不承担队列/.test(agentsTpl));
+  // 工作规则的规范文本只在 AGENTS.md；constraints 复述会让两处各自演进。
+  ok('AGENTS 模板仍声明三条工作规则',
+    /一次只做一个 work item/.test(agentsTpl)
+    && /不跑验证不得宣称完成/.test(agentsTpl)
+    && /完成定义/.test(agentsTpl));
   // 阶段 1 不生成 loop-constraints.md，模板不能把它列为阶段 1 必需工件。
   ok('AGENTS 模板的阶段 1 工件表指向 harness-constraints.md',
     /\| `harness-constraints\.md` \|/.test(agentsTpl));
@@ -1049,6 +1054,15 @@ section('9. 模板完整性');
     .concat(readText(path.join(LOOP_TEMPLATE_DIR, 'loop-constraints.md'))).join(String.fromCharCode(10));
   ok('约束模板含可执行入口规则', /可执行入口规则/.test(constraintsTpl));
   ok('约束模板含 Worktrees 章节', /## Worktrees/.test(constraintsTpl));
+
+  // constraints 不再复述 AGENTS 的工作规则，只留可执行细则与指针。
+  const harnessTpl = readText(path.join(TEMPLATE_DIR, 'harness-constraints.md'));
+  ok('harness 约束不再复述 AGENTS 工作规则',
+    !/提议修复前必须跑测试/.test(harnessTpl)
+    && !/绝不禁用测试/.test(harnessTpl)
+    && !/绝不重构无关代码/.test(harnessTpl));
+  ok('harness 约束用指针指向 AGENTS 工作规则',
+    /见 `AGENTS\.md` 的「工作规则」/.test(harnessTpl));
 
   // 出厂 feature 必须自带占位标记，否则会绕过阶段 1 判据。
   ok('feature 模板每条都带占位标记', fl.features.every((f) => /^\s*占位/.test(f.notes || '')));
